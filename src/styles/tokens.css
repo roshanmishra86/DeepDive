@@ -1,0 +1,39 @@
+:root {
+  --accent: #2f5d50;
+  --accent-hover: #264a40;
+  --accent-surface: #eef2f0;
+  --bg-app: #e2ded6;
+  --bg-window: #f7f5f1;
+  --bg-chrome: #efece5;
+  --bg-panel: #f2efe8;
+  --bg-card: #fbfaf7;
+  --border: #e0d9ca;
+  --border-strong: #d8d1c2;
+  --border-subtle: #ece6da;
+  --text: #221f19;
+  --text-muted: #8b8375;
+  --text-faint: #a09889;
+  --warn: #b8862f;
+  --danger: #a84a30;
+  --close: #c8493b;
+  --font-display: "Newsreader Variable", "Newsreader", Georgia, "Times New Roman", serif;
+  --font-ui: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "Cascadia Mono", Consolas, monospace;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  margin: 0;
+  height: 100%;
+}
+
+body {
+  background-color: var(--bg-app);
+  font-family: var(--font-ui);
+  color: var(--text);
+}
