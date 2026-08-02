@@ -8,6 +8,7 @@ import '@fontsource/ibm-plex-mono/400.css'
 import '@fontsource/ibm-plex-mono/500.css'
 import './styles/tokens.css'
 import './index.css'
+import './styles/chrome.css'
 import App from './App.tsx'
 
 createRoot(document.getElementById('root')!).render(

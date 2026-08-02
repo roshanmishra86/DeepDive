@@ -2,9 +2,9 @@ name: Build
 
 on:
   push:
-    branches: [release]
+    branches: [main, release]
   pull_request:
-    branches: [release]
+    branches: [main, release]
   workflow_dispatch:
 
 jobs:
@@ -28,7 +28,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: pnpm
 
       - run: sudo apt-get update && sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libgtk-3-dev
