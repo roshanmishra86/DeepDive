@@ -134,9 +134,9 @@ Status: `[ ]` todo · `[~]` in progress · `[x]` done · `[!]` blocked
 - [x] `src/styles/tokens.css` with the palette above; imported in `main.tsx`
 - [x] Placeholder app icons (`src-tauri/icons/`) generated from a solid `#2f5d50` square
 - [x] `.gitignore` covering `node_modules/`, `dist/`, `src-tauri/target/`, `src-tauri/gen/`
-- [x] `.github/workflows/build.yml` — **on push to `main` and on PR**: matrix (`windows-latest` → NSIS exe, `ubuntu-22.04` → deb + AppImage) via `tauri-apps/tauri-action`; uploads installers as workflow artifacts (30-day retention). This is the primary "push and get a Windows build" path.
-- [x] `.github/workflows/release.yml` — on tag `v*` only: same matrix, publishes a draft GitHub Release with the installers attached
-- [x] `.github/workflows/ci.yml` — on push/PR, fast lane: `tsc --noEmit`, `cargo fmt --check`, `cargo clippy -D warnings`
+- [x] `.github/workflows/build.yml` — **on push/PR to `main` or `release`, plus `workflow_dispatch`**: matrix (`windows-latest` → NSIS exe, `ubuntu-22.04` → deb + AppImage) via `tauri-apps/tauri-action`; uploads installers as workflow artifacts (30-day retention). This is the primary "push and get a Windows build" path.
+- [x] `.github/workflows/release.yml` — on tag `v*` **only**: same matrix, publishes a draft GitHub Release with the installers attached. Deliberately *not* branch-triggered — `tauri-action` publishes whenever `tagName` is set, so a branch push would cut a release named after the branch.
+- [x] `.github/workflows/ci.yml` — on push/PR to `main` or `release`: `pnpm lint`, `pnpm typecheck`, `pnpm test`, `pnpm build`, `cargo fmt --check`, `cargo clippy -D warnings`
 - [x] Rust cache (`Swatinem/rust-cache`) + pnpm store cache in all workflows; `pnpm/action-setup@v4` runs **before** `setup-node`, version resolved from the `packageManager` field
 - [x] `README.md` with dev/build/release instructions
 
@@ -145,6 +145,7 @@ Status: `[ ]` todo · `[~]` in progress · `[x]` done · `[!]` blocked
 - [x] **`package.json` name was `dwscaffold`** (leftover temp scaffold dir) → `deep-work`.
 - [x] **CI pinned pnpm 10 while local is 11.18.0.** Replaced the hardcoded `version:` input in all three workflows with an authoritative `packageManager: "pnpm@11.18.0"` field.
 - [x] **Removed an unrequested `pnpm-workspace.yaml`** containing an unverified `allowBuilds` key. Proven unnecessary: `pnpm install` and `pnpm build` are clean without it, with no ignored-build-script warning. (Note: pnpm silently ignores unknown keys in that file, so "no warning" is never evidence a key is valid.)
+  - **Reopened in Phase 2:** the file was back, again with the invalid `allowBuilds` key. `allowBuilds` is not a pnpm option; the real key is `ignoredBuiltDependencies`. Rewritten to `ignoredBuiltDependencies: [esbuild]`, which actually expresses the intent (skip esbuild's postinstall). Confirms the original warning: an unknown key here is silently a no-op.
 - [x] **clippy was declared passing without being run.** Component installed locally; `cargo clippy --all-targets -- -D warnings` verified clean.
 
 **Phase 1 acceptance — MET (independently verified, not taken on the sub-agent's report):**
@@ -165,13 +166,52 @@ software-rendering noise from the WSL GPU passthrough, not app faults, and do no
 native Linux or Windows. No screenshot was captured — no screenshot tool is installed and
 `sudo` requires a password in this environment.
 
-### Phase 2 — App chrome
-- [ ] Custom title bar: drag region, app dot, date, minimize/maximize/close wired to the window API
-- [ ] Sidebar: nav (Today / This Week / Day Templates / Archive / Sound Library), today's ritual checklist, deep-hours-this-week card
-- [ ] Right rail: pomodoro widget, "Upcoming this week", distraction log
-- [ ] Music bar (66px footer)
-- [ ] Router/view switching + active-nav highlighting
-- [ ] Settings: accent picker, timer style (`ring`/`numeric`/`bar`), repeat badge style (`chip`/`icon`/`none`)
+### Phase 2 — App chrome *(owner: Haiku sub-agents, verified by Sonnet + main session)*
+- [x] Custom title bar: drag region, app dot, date, minimize/maximize/close wired to the window API
+- [x] Sidebar: nav (Today / This Week / Day Templates / Archive / Sound Library), today's ritual checklist, deep-hours-this-week card
+- [x] Right rail: pomodoro widget, "Upcoming this week", distraction log
+- [x] Music bar (66px footer)
+- [x] Router/view switching + active-nav highlighting
+- [x] Settings: accent picker, timer style (`ring`/`numeric`/`bar`), repeat badge style (`chip`/`icon`/`none`)
+- [x] `src/styles/chrome.css` — the full chrome stylesheet (~114 classes) driven entirely by the tokens
+- [x] Placeholder views for Today / Week / Templates / Archive / Library via `ViewPlaceholder`
+- [x] Phosphor icons (`@phosphor-icons/react`) replace all hand-rolled inline SVGs, via per-icon deep imports
+- [x] Vitest test layer (`node` environment, isolation on); 111 unit tests over `lib/` and `stores/`, ~12s. jsdom and `@testing-library/*` stay installed for the component tests that arrive with Phase 4; those files opt in per-file with `// @vitest-environment jsdom`.
+
+#### Notes on what is real vs. placeholder
+Phase 2 is chrome only. These render with hardcoded data and become real in later phases:
+the deep-hours figure and 7-bar histogram (Phase 3), "Upcoming this week" (Phase 5),
+the distraction log (local component state, not persisted), and the ritual checklist
+(in-memory, seeded from the mockup). Window controls are guarded by `isTauri()` and no-op
+under plain `vite dev`. Settings live in the app store until Phase 3 persists them.
+
+#### Defects found in verification and fixed
+- [x] **`.ritual-check` done/not-done states were inverted, and hardcoded the accent.** Incomplete rituals rendered as filled accent circles; completed ones as grey circles with a white tick on grey. The literal `#2f5d50` also meant the checkbox ignored the accent picker. Corrected against the mockup: not-done = unfilled with a `#cfc7b8` border, done = `var(--accent)` fill.
+- [x] **`pnpm build` was broken while `pnpm exec tsc --noEmit` passed.** `tsconfig.app.json` included `src/**`, so the production `tsc -b` type-checked test files and failed on 8 `TS6133` unused bindings. Tests are now excluded from `tsconfig.app.json` and type-checked by a separate `tsconfig.test.json` via `pnpm typecheck`. **`tsc --noEmit` is not a proxy for `pnpm build`** — CI now runs the real build.
+- [x] **`isolate: false` in `vitest.config.ts` was masking nondeterministic test loss.** With isolation on, a forked worker timed out and one test file silently never ran (111 → 97 → 87 tests across three runs). Root cause was jsdom environment startup on the slow `/mnt/c` WSL2 filesystem — `tests 152ms` against `environment 113s`. No current test needs a DOM, so the suite runs on the `node` environment with isolation restored.
+- [x] **Dead Tauri mock in test setup.** `vi.mock('@tauri-apps/api', …)` never applied — the only real import is `@tauri-apps/api/window`, a different specifier. Removed.
+- [x] **Accent-independent hexes.** Swept every literal in `chrome.css`; token-backed ones replaced with `var(--…)`, and a `--on-accent` token added for text on accent backgrounds. The session overlay keeps literals by design (fixed dark theme, no tokens).
+
+#### Known issue, deliberately not fixed in Phase 2
+- [ ] **`--text-muted` (#8b8375) and `--text-faint` (#a09889) fail WCAG AA** for body text: 3.26–3.59:1 and 2.49–2.74:1 respectively against the panel backgrounds, versus the 4.5:1 threshold. These values come straight from the mockup palette, so this is a design-token decision affecting every view including unbuilt ones. Resolve before the Phase 10 QA pass, not piecemeal.
+
+**Phase 2 acceptance — MET (independently verified, not taken on the sub-agents' reports):**
+
+| Check | Result |
+| --- | --- |
+| `pnpm build` | pass — 272 KB JS / 27.8 KB CSS (gzip 81.6 / 5.0) |
+| `pnpm test` | pass — 111 tests, 5 files |
+| `pnpm typecheck` | pass (`tsc -b` + `tsc -p tsconfig.test.json`) |
+| `pnpm lint` | clean, zero warnings |
+| `cargo fmt --all -- --check` | pass |
+| `cargo clippy --all-targets -- -D warnings` | pass |
+| `pnpm install --frozen-lockfile` | pass |
+| All ~114 chrome classes present in the built CSS | pass |
+| Only remaining `#2f5d50` in the bundle is the token definition | pass — 31 `var(--accent)` uses |
+| `pnpm tauri dev` launches on WSLg | pass — 8m23s uptime, 186 MB RSS, 0 panics, Vite HTTP 200 |
+
+Note: WSLg still emits the `libEGL` / `MESA ZINK` / `gdk_seat_get_keyboard` warnings recorded in
+Phase 1. Same software-rendering noise, not app faults.
 
 ### Phase 3 — Persistence layer
 - [ ] SQLite migrations for the schema in §2
