@@ -375,12 +375,104 @@ Same software-rendering noise, not app faults. Also note that a cold `pnpm tauri
 were killed by their own timeouts mid-link before the binary was pre-built with `cargo build`.
 That is environment slowness, not a fault.
 
-### Phase 5 — This Week view
-- [ ] Task list grouped by Eisenhower matrix (4 quadrants)
-- [ ] Alternate grouping by deadline (48h / later this week / no deadline)
-- [ ] Important + Urgent tag toggles persisting to DB
-- [ ] "Plan today" → creates a block from the task
-- [ ] Add / edit / complete / delete task
+### Phase 5 — This Week view *(owner: Haiku sub-agent, fixes by Sonnet, verified by Sonnet + main session)*
+- [x] Task list grouped by Eisenhower matrix (4 quadrants) — `groupByMatrix()` over `quadrantOf()`
+- [x] Alternate grouping by deadline (48h / later this week / no deadline) — plus a 4th bucket, see below
+- [x] Important + Urgent tag toggles persisting to DB — per-row chips writing through `updateTask`
+- [x] "Plan today" → creates a block from the task, linking `day_block.task_id`
+- [x] Add / edit / complete / delete task — `TaskEditor` modal + per-row controls
+- [x] **Beyond the checklist:** the right rail's "Upcoming this week" placeholder is now real data
+
+#### Deliberate deviation — a fourth deadline bucket
+The checklist names three buckets (48h / later this week / no deadline), but `due_at` is an
+arbitrary instant, so a task due in three weeks has no honest home among them. Filing it under
+"Later this week" would be a false label. A fourth bucket, **"Beyond this week"**, is rendered
+only when non-empty. Empty groups are skipped in both groupings.
+
+#### `due_at` is an instant, not a day key
+`day` columns stay local `YYYY-MM-DD` via `toDayKey` (the Phase 3 rule). `task.due_at` is a
+different kind of value — a point in time with a time-of-day — and is stored as a full ISO
+instant. The conversion in both directions lives in **one** place, `composeDueAt()` /
+`decomposeDueAt()` in `lib/week.ts`, which `TaskEditor` and the tests both call. That is
+deliberate: the worst defect in this phase was the serializer and the parser being written
+against two different assumed shapes, and a shared helper makes that divergence unrepresentable.
+
+#### Defects found in verification and fixed
+As in Phase 4, every one of these was found by independent inspection **after** the implementing
+sub-agent reported all five checklist items complete with all four gate commands passing. The
+gates did pass — 371 tests green — and could not see any of this.
+- [x] **The deadline grouping was entirely non-functional.** `TaskEditor` wrote `due_at` as a full
+  ISO instant (`2026-08-06T17:00:00.000Z`) while `deadlineBucket()` and `formatDueLabel()` parsed
+  it with `dueAt.split('-').map(Number)` — which yields `["2026","08","06T17:00:00.000Z"]`, so
+  `Number()` on the third element is `NaN` and the resulting `Date` is `Invalid`. Every comparison
+  against an Invalid Date is `false`, so **every dated task fell through to the last bucket**: the
+  two buckets the checklist actually names could never contain a task. The same parse rendered the
+  literal string **`due NaN undefined`** on screen — visible immediately to anyone who set a due
+  date. Fixed by parsing with `new Date()`, reading local getters, explicitly guarding
+  `Number.isNaN(d.getTime())`, and routing both directions through `composeDueAt`/`decomposeDueAt`.
+- [x] **The root cause was in the tests, not the code.** All **22** `dueAt` fixtures in
+  `week.test.ts` were hand-written day-keys (`'2026-08-05'`) — *the one shape the application never
+  writes*. The suite validated a format that existed only inside the suite. Every date fixture now
+  goes through `composeDueAt()`, the same helper the editor uses, so a fixture cannot drift from
+  production shape again. **Confirmed genuine by reverting the parser and watching the suite go red
+  (8 failed | 372 passed), then restoring it** — per the Phase 3 lesson that an assertion never
+  observed failing is not yet known to be capable of failing.
+- [x] **Local wall-clock time stamped as UTC.** `` `${date}T${time}:00.000Z` `` asserts that a
+  value taken from `<input type="date">`/`<input type="time">` — which are local — is UTC, so every
+  due instant was wrong by the user's offset. Invisible in this environment, which runs at
+  GMT+0000. `composeDueAt` now builds a local `Date` and calls `.toISOString()`.
+- [x] **Three implementations of duration formatting.** `lib/time.ts` already exported
+  `formatDuration`; `lib/week.ts` re-implemented it verbatim; `RightRail` hand-rolled a third that
+  rendered a 30-minute estimate as `≈0h 30m` and a bare `0` for a zero estimate. This is the Phase 4
+  "three different orderings for one list" defect in a new costume. One implementation now, imported.
+- [x] **`App.tsx` never hydrated the today store**, despite it being specified and reported done.
+  `addBlock` returns early while `day` is `null`, so "Plan today" would have created no block and
+  raised no error. It appeared to work only because `view` defaults to `'today'`, so `TodayView`
+  mounted first and hydrated as a side effect — an implicit coupling that any future change to the
+  default view would have broken silently.
+- [x] **Escape was bound per-input, not to the dialog.** `TaskEditor` attached its key handler to
+  five inputs but not to the two checkboxes or any of the three buttons, and the container handled
+  only Tab. Escape did nothing from a checkbox or a button. This is the Phase 4 "modals were not
+  really modal" defect repeating. Escape and Cmd/Ctrl+Enter now live on the dialog container
+  alongside the focus trap.
+- [x] **`let groups: any[]`** in `WeekView`, regressing the Phase 3 untyped-rows fix on the single
+  most important derived value in the view. Replaced with two separately-typed branches, no casts.
+- [x] **`now` was frozen at mount** (`useState(() => new Date())`), so deadline buckets and due
+  labels never re-evaluated while the window stayed open — across midnight, and across the 48h
+  boundary, tasks sat in the wrong bucket indefinitely. Now refreshed on a 60s interval, matching
+  `TodayView`'s `nowMin`.
+- [x] **Controls changed identity between groupings.** `TaskRow` hid the Important/Urgent chips and
+  "Plan today" for drop-quadrant rows, but `isDrop` is only set in the matrix grouping — so the same
+  task showed different controls depending on the active grouping, and an untagged task could not be
+  planned or re-tagged from its row at all. The checklist puts no quadrant carve-out on either
+  feature. All rows now render all controls; the de-emphasised dashed styling stays.
+- [x] **Barrel icon imports** (`from '@phosphor-icons/react'`) in two files, against the Phase 2
+  per-icon deep-import convention. Switched to deep imports. **Note the convention's stated rationale
+  did not reproduce:** rebuilding both ways gave a byte-identical bundle, because rolldown-vite
+  tree-shakes the barrel. The 301.6 → 323.7 KB growth is the Phase 5 code itself, not the import
+  style. The convention is kept for consistency, but "barrel imports bloat the bundle" is not
+  currently true of this toolchain and should not be repeated as a justification without measuring.
+
+#### Known minor, deliberately not fixed
+- [ ] `RightRail` calls `taskMeta()` twice per row (guard + render). Pure and cheap; not worth a
+  round trip. Fold into the Phase 10 polish pass.
+
+**Phase 5 acceptance — MET (independently verified, not taken on the sub-agents' reports):**
+
+| Check | Result |
+| --- | --- |
+| `pnpm lint` | clean, zero warnings |
+| `pnpm typecheck` | pass (`tsc -b` + `tsc -p tsconfig.test.json`) |
+| `pnpm test` ×2 | 380 tests, 19 files — identical both runs, ~21s |
+| `pnpm build` | pass — 323.7 KB JS / 43.2 KB CSS |
+| `cargo fmt --all -- --check` | pass |
+| `cargo clippy --all-targets -- -D warnings` | pass |
+| New hex literals in `chrome.css` or components | zero |
+| Editor-produced `due_at` → correct bucket + label | verified end-to-end by ad-hoc probe: `soon`/`week`/`later` correct, labels render `today, 5:00 PM` / `tomorrow, 5:00 PM` / `Fri` / `overdue`, never `NaN` |
+| Regression test proven able to fail | pass — parser reverted, suite went red (8 failed), fix restored |
+| Optimistic ids negative and decrementing | pass |
+| Store read-backs from real SQLite + hydrate round-trip | pass |
+| Accessible names include the task title | pass — checkbox, both chips, plan, edit, delete |
 
 ### Phase 6 — Day Templates
 - [ ] Template list + detail pane

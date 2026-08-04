@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach } from 'vitest'
 import { createTestDb } from '../test/nodeDriver'
 import type { SqlDriver } from '../db/driver'
 import * as blocksRepo from '../db/repos/blocks'
+import * as tasksRepo from '../db/repos/tasks'
 import * as templatesRepo from '../db/repos/templates'
 import { useTodayStore } from './today'
 
@@ -56,6 +57,36 @@ describe('today store', () => {
     const fromDb = await blocksRepo.listBlocksForDay(driver, day)
     expect(fromDb).toHaveLength(1)
     expect(fromDb[0].title).toBe('Deep work')
+  })
+
+  it('adds a block with taskId and persists it', async () => {
+    const day = '2026-08-04'
+    await useTodayStore.getState().hydrate(driver, day)
+
+    // Create a task first so FK constraint is satisfied
+    const taskId = await tasksRepo.createTask(driver, {
+      title: 'Dummy task',
+      createdAt: new Date().toISOString(),
+    })
+
+    // Add a block with a taskId
+    await useTodayStore.getState().addBlock({
+      title: 'Task-backed block',
+      kind: 'deep',
+      durationMin: 60,
+      startMin: 300,
+      taskId,
+    })
+
+    // Check in-memory state
+    let state = useTodayStore.getState()
+    expect(state.blocks).toHaveLength(1)
+    expect(state.blocks[0].taskId).toBe(taskId)
+
+    // Verify it persisted to the database
+    const fromDb = await blocksRepo.listBlocksForDay(driver, day)
+    expect(fromDb).toHaveLength(1)
+    expect(fromDb[0].taskId).toBe(taskId)
   })
 
   it('adds block with default startMin after the last block', async () => {

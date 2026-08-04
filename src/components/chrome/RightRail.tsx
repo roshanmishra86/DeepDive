@@ -1,23 +1,16 @@
 import { useState } from 'react'
 import { useAppStore } from '../../stores/app'
+import { useTasksStore } from '../../stores/tasks'
 import {
   useTimerStore,
   pomodoroCounterLabel,
 } from '../../stores/timer'
 import { formatClock } from '../../lib/time'
+import { upcomingTasks, taskMeta } from '../../lib/week'
 import { ArrowCounterClockwise } from '@phosphor-icons/react/dist/csr/ArrowCounterClockwise'
 
 const RING_R = 86
 const RING_C = 540.35 // 2π · 86
-
-/** Placeholder week list until Phase 5 backs it with real tasks. */
-const UPCOMING = [
-  { n: '1', color: 'var(--danger)', title: 'Chapter 3 — first draft', meta: '3 h left · today, Fri', muted: false },
-  { n: '2', color: 'var(--danger)', title: 'Data model refactor', meta: '2 h left', muted: false },
-  { n: '3', color: 'var(--warn)', title: 'Design review prep', meta: 'Thu', muted: false },
-  { n: '4', color: 'var(--warn)', title: 'Research reading', meta: null, muted: true },
-  { n: '5', color: 'var(--border-strong)', title: 'Rewrite onboarding emails', meta: null, muted: true },
-]
 
 function PomodoroWidget() {
   const timerStyle = useAppStore((s) => s.timerStyle)
@@ -162,6 +155,10 @@ function DistractionLog() {
 
 export function RightRail() {
   const setView = useAppStore((s) => s.setView)
+  const tasks = useTasksStore((s) => s.tasks)
+
+  const now = new Date()
+  const upcoming = upcomingTasks(tasks, now, 5)
 
   return (
     <aside className="right-rail">
@@ -174,21 +171,29 @@ export function RightRail() {
             All
           </button>
         </div>
-        <div className="rail-upcoming">
-          {UPCOMING.map((u) => (
-            <div key={u.n} className="rail-upcoming-item">
-              <span className="rail-upcoming-n" style={{ color: u.color }}>
-                {u.n}
-              </span>
-              <div>
-                <div className={`rail-upcoming-title${u.muted ? ' rail-upcoming-muted' : ''}`}>
-                  {u.title}
+        {upcoming.length === 0 ? (
+          <div className="rail-upcoming-empty">
+            <div className="rail-upcoming-empty-text">No incomplete tasks</div>
+          </div>
+        ) : (
+          <div className="rail-upcoming">
+            {upcoming.map((item, i) => (
+              <div key={item.task.id} className="rail-upcoming-item">
+                <span className="rail-upcoming-n" style={{ color: item.rankColor }}>
+                  {i + 1}
+                </span>
+                <div>
+                  <div className="rail-upcoming-title">
+                    {item.task.title}
+                  </div>
+                  {taskMeta(item.task, now) && (
+                    <div className="rail-upcoming-meta">{taskMeta(item.task, now)}</div>
+                  )}
                 </div>
-                {u.meta && <div className="rail-upcoming-meta">{u.meta}</div>}
               </div>
-            </div>
-          ))}
-        </div>
+            ))}
+          </div>
+        )}
 
         <DistractionLog />
       </div>

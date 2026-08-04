@@ -23,6 +23,7 @@ interface TodayState {
     durationMin: number
     startMin?: number
     pomodoros?: number
+    taskId?: number | null
   }) => Promise<void>
   editBlock: (id: number, patch: Partial<Omit<DayBlock, 'id' | 'day' | 'sort'>>, ripple?: boolean) => Promise<void>
   removeBlock: (id: number) => Promise<void>
@@ -89,7 +90,7 @@ export const useTodayStore = create<TodayState>()((set, get) => ({
     const newBlock: DayBlock = {
       id: localId,
       day: state.day,
-      taskId: null,
+      taskId: input.taskId ?? null,
       title: input.title,
       kind: input.kind,
       startMin,
@@ -108,6 +109,7 @@ export const useTodayStore = create<TodayState>()((set, get) => ({
         const day = hydratedDay
         const realId = await blocksRepo.createBlock(driver, {
           day,
+          taskId: input.taskId ?? null,
           title: input.title,
           kind: input.kind,
           startMin,
