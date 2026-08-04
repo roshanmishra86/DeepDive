@@ -1,7 +1,10 @@
 import { useEffect } from 'react'
 import { useAppStore } from './stores/app'
+import { useRitualsStore } from './stores/rituals'
 import { useTimerStore } from './stores/timer'
+import { openDatabase } from './db/index'
 import { applyAccent } from './lib/accents'
+import { toDayKey } from './lib/time'
 import { TitleBar } from './components/chrome/TitleBar'
 import { Sidebar } from './components/chrome/Sidebar'
 import { RightRail } from './components/chrome/RightRail'
@@ -27,6 +30,28 @@ function App() {
   const accent = useAppStore((s) => s.accent)
   const settingsOpen = useAppStore((s) => s.settingsOpen)
   const sessionOpen = useAppStore((s) => s.sessionOpen)
+
+  // On mount, open the database and hydrate stores. Render normally while
+  // it resolves; failures are logged but non-fatal.
+  useEffect(() => {
+    let mounted = true
+    ;(async () => {
+      try {
+        const driver = await openDatabase()
+        if (!mounted) return
+        const hydrationDay = toDayKey(new Date())
+        await Promise.all([
+          useAppStore.getState().hydrate(driver),
+          useRitualsStore.getState().hydrate(driver, hydrationDay),
+        ])
+      } catch (err) {
+        console.error('Failed to initialize database:', err)
+      }
+    })()
+    return () => {
+      mounted = false
+    }
+  }, [])
 
   // Reflect the chosen accent into the CSS custom properties.
   useEffect(() => {
