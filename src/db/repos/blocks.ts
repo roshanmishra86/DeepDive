@@ -39,6 +39,11 @@ export async function listBlocksForDay(
   driver: SqlDriver,
   day: string
 ): Promise<DayBlock[]> {
+  // Note: this is the persisted manual-sort order (used by, e.g., the
+  // reorder repo test), not necessarily the app's canonical display order.
+  // The today store re-sorts every result via sortBlocks() (start_min, then
+  // sort as tie-breaker — see src/lib/today.ts) immediately after fetching,
+  // so the timeline, conflict detection, and move controls always agree.
   const rows = await driver.select<BlockRow>(
     'SELECT * FROM day_block WHERE day = ? ORDER BY sort, start_min',
     [day]

@@ -261,13 +261,119 @@ Corrected in this phase — see the Phase 1 defect entry above. `allowBuilds` is
 pnpm 11 key; `ignoredBuiltDependencies` does not exist in pnpm 11 and had been a silent
 no-op since Phase 2.
 
-### Phase 4 — Today view
-- [ ] Proportional timeline (gutter times + `max(34, min*1.6)` block heights)
-- [ ] Block states: completed (struck through), active/in-session, break (dashed), planned
-- [ ] Header summary: planned total, deep total, end time — computed
-- [ ] New block / edit block / delete / reorder
-- [ ] Apply template to today
-- [ ] Complete-block toggle
+### Phase 4 — Today view *(owner: Haiku sub-agent, verified by Sonnet + main session)*
+- [x] Proportional timeline (gutter times + `max(34, min*1.6)` block heights) — gutter and block column render from one `layout()` row list so they cannot drift apart
+- [x] Block states: completed (struck through), active/in-session, break (dashed), planned
+- [x] Header summary: planned total, deep total, end time — computed via `daySummary()`
+- [x] New block / edit block / delete / reorder
+- [x] Apply template to today — behind a confirm step, since it deletes the day's existing blocks
+- [x] Complete-block toggle
+- [x] **Beyond the checklist:** ±5 min nudge per block, per-block ripple toggle, and visible overlap conflicts (see the model note below)
+
+#### The timeline model — gaps are first-class *(corrected mid-phase)*
+The first implementation pass was built on a **contiguity model**: `startMin` derived from a
+single per-day anchor plus the running sum of durations, with a `repack()` after every mutation.
+**That was wrong and was thrown out.** It was over-generalised from the mockup, whose day happens
+to be exactly contiguous (5:30+90=7:00, 7:00+30=7:30, …) — one data point, not a rule. It also
+discarded information the schema already stores, since `day_block.start_min` is an absolute
+per-block value, making the model *further* from the data model than the naive reading. Above all
+it made a buffer impossible to express, which is a real requirement: the user needs to slip a
+5–10 minute gap in when a task demands it or when a block finishes early.
+
+The shipped model instead treats gaps as first-class:
+
+| Concept | Rule |
+| --- | --- |
+| `startMin` | Absolute per block, persisted as-is. Never derived. |
+| Gap before a block | `block.startMin - (prev.startMin + prev.durationMin)` |
+| Positive gap | Buffer — rendered as proportional whitespace (`max(8, gapMin * 1.6)` px) in both the gutter and the block column |
+| Zero gap | Contiguous — what a template naturally produces. A *default*, not a constraint. |
+| Negative gap | Overlap — surfaced as a visible `role="alert"` badge plus a day-level notice. **Never silently auto-corrected.** |
+| Ripple | Editing a start/duration shifts all later blocks by the same delta, preserving their gaps. On by default (the "I ran over / I finished early" case), toggleable per block. |
+| Nudge | ±5 min buttons on every block, honouring the ripple toggle. The primary way a buffer gets inserted. |
+
+`sortBlocks()` (by `startMin`, tie-broken by `sort`) is the **single** canonical ordering. The
+timeline layout, conflict detection, day summary, the store's in-memory array, and the up/down
+reorder controls all call it. Three independent copies of that sort were the root cause of the
+worst defect below.
+
+#### Defects found in verification and fixed
+Every one of these was found by independent inspection **after** the implementing sub-agent
+reported all six checklist items complete and all four gate commands passing. The gates really
+did pass; they simply could not see any of this.
+- [x] **The ±5 min nudge buttons were never rendered.** `nudge()` in `lib/today.ts` and
+  `nudgeBlock()` in `stores/today.ts` were both written and unit-tested, but no component ever
+  called them — pure dead code. This was *the* explicitly requested feature. The sub-agent's own
+  report described it as "±5 min affordance ready in CSS, logic in store", which reads as done and
+  is not. **Logic plus tests plus CSS is not a feature until something renders a button.**
+- [x] **`conflicts()` was dead code too.** Overlaps were computed and tested, never displayed.
+- [x] **Latent id collision.** The store minted optimistic ids from `let nextId = 1000` and then
+  swapped in the real row id by matching `b.id === localId`. SQLite `AUTOINCREMENT` ids are
+  positive and monotonic, so on a busy enough database a real id reaches 1000+ and the match lands
+  on the wrong block. This is the Phase 3 "rituals store invented its own ids" defect wearing a
+  different hat. Now uses negative, decrementing local ids, so collision with a positive SQLite id
+  is structurally impossible rather than merely unlikely.
+- [x] **Three different orderings for one list.** `layout()` sorted by `(startMin, sort)`,
+  `TimelineBlock` took its index from the **unsorted** store array via `findIndex`, and
+  `moveBlock()` computed gap-to-predecessor in whatever array order it was handed. Whenever those
+  diverged the up/down buttons moved the wrong block and gaps were measured against the wrong
+  neighbour. Fixed by making `sortBlocks()` the one canonical order everywhere. A second instance
+  of the same bug class surfaced during the fix: `move()` and `nudgeBlock()` decided *which rows
+  to persist* with `blocks.filter((b, i) => b.startMin !== state.blocks[i].startMin)` — a
+  positional comparison between two arrays that need not share an order. Now matched by id.
+- [x] **`move()` persisted a `sort` sequence it did not apply in memory.** It wrote a fresh
+  `0..n-1` order through `reorderBlocks()` while the in-memory objects kept their stale pre-move
+  `sort` values. Because `sortBlocks()` uses `sort` as its tie-breaker for equal `startMin`, this
+  was a live memory/database divergence: a reload would silently reorder the day out from under
+  the user. **Found only by the hydrate-round-trip test**, which did not exist until it was
+  specifically asked for — every other store test asserted in-memory state alone and passed
+  throughout.
+- [x] **`moveBlock()` could push the whole day later.** Whichever block landed at index 0 kept its
+  own prior `startMin`, so promoting a later block to the front moved the day's start time. Now
+  anchored on the day's original first `startMin`.
+- [x] **Store tests were order-dependent.** `beforeEach` reset the SQLite driver but not the
+  Zustand singleton, so tests silently relied on execution order. Reset added (merge `setState`,
+  not `replace: true`, which would drop the store's actions).
+- [x] **`#fff` literal reintroduced into `chrome.css`** (`.btn-icon.btn-danger:hover`), regressing
+  the Phase 2 token sweep. Now `var(--on-accent)`.
+- [x] **Ten identical accessible names.** Every block rendered `aria-label="Move up"` / `"Edit"` /
+  `"Delete"`, so a screen-reader user heard the same button ten times. All now include the block
+  title, which the completion checkbox had been doing correctly all along.
+- [x] **Modals were not really modal.** `BlockEditor`'s Escape handler was bound to the title
+  `<input>`'s `onKeyDown`, so Escape did nothing from any other field, and Tab walked focus out
+  behind the dialog. `ApplyTemplateMenu` had neither. Both now `role="dialog"` + `aria-modal`,
+  with Escape from anywhere and a real focus trap.
+
+#### Note on test coverage — the recurring lesson
+Store tests initially numbered 15 with only **2** reading rows back out of SQLite; the rest
+asserted in-memory Zustand state alone. Since every defect class this project has hit in Phases 3
+and 4 has been memory/database drift, that is precisely the blind spot that matters here, and the
+`node:sqlite` driver built in Phase 3 exists to cover it. Read-backs are now at 10, plus a
+hydrate-round-trip test. **Adding them immediately exposed the `move()`/`sort` divergence above.**
+The regression test was confirmed genuine by reverting the one-line fix and watching it fail
+(`1 failed | 303 passed`) — per the Phase 3 lesson that an assertion never observed failing is not
+yet known to be capable of failing.
+
+**Phase 4 acceptance — MET (independently verified, not taken on the sub-agents' reports):**
+
+| Check | Result |
+| --- | --- |
+| `pnpm lint` | clean, zero warnings |
+| `pnpm typecheck` | pass (`tsc -b` + `tsc -p tsconfig.test.json`) |
+| `pnpm test` ×3 | 304 tests, 17 files — identical counts all three runs, ~16s |
+| `pnpm build` | pass — 301.6 KB JS / 38.0 KB CSS (gzip 89.9 / 6.5) |
+| `cargo fmt --all -- --check` | pass |
+| `cargo clippy --all-targets -- -D warnings` | pass |
+| New hex literals in `chrome.css` | zero |
+| Block heights vs mockup literals | 5→34, 30→48, 60→96, 90→144 — exact |
+| Regression test proven able to fail | pass — fix reverted, suite went red, fix restored |
+| `pnpm tauri dev` launches on WSLg | pass — app process healthy, 185 MB RSS, Vite HTTP 200, 0 panics, 0 Rust errors |
+
+Note: the WSLg `libEGL` / `MESA ZINK` / `gdk_seat_get_keyboard` warnings from Phases 1–2 persist.
+Same software-rendering noise, not app faults. Also note that a cold `pnpm tauri dev` on this
+`/mnt/c` 9p mount spends several minutes linking a ~297 MB debug binary — two verification runs
+were killed by their own timeouts mid-link before the binary was pre-built with `cargo build`.
+That is environment slowness, not a fault.
 
 ### Phase 5 — This Week view
 - [ ] Task list grouped by Eisenhower matrix (4 quadrants)
