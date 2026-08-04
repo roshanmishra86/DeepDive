@@ -1,0 +1,570 @@
+import { describe, it, expect } from 'vitest'
+import {
+  blockHeight,
+  gapBefore,
+  layout,
+  shiftFrom,
+  nudge,
+  moveBlock,
+  conflicts,
+  daySummary,
+  blockState,
+  blockProgress,
+  sortBlocks,
+} from './today'
+import type { DayBlock } from '../db/types'
+
+describe('blockHeight', () => {
+  it('returns 34px minimum for short blocks', () => {
+    expect(blockHeight(5)).toBe(34)
+    expect(blockHeight(10)).toBe(34)
+  })
+
+  it('scales with duration: 30→48', () => {
+    expect(blockHeight(30)).toBe(48)
+  })
+
+  it('scales with duration: 60→96', () => {
+    expect(blockHeight(60)).toBe(96)
+  })
+
+  it('scales with duration: 90→144', () => {
+    expect(blockHeight(90)).toBe(144)
+  })
+
+  it('handles zero duration', () => {
+    expect(blockHeight(0)).toBe(34)
+  })
+})
+
+describe('gapBefore', () => {
+  const makeBlock = (id: number, startMin: number, durationMin: number): DayBlock => ({
+    id,
+    day: '2026-08-04',
+    taskId: null,
+    title: `Block ${id}`,
+    kind: 'deep',
+    startMin,
+    durationMin,
+    pomodoros: 0,
+    completed: false,
+    sort: 0,
+  })
+
+  it('returns 0 for the first block (no predecessor)', () => {
+    const block = makeBlock(1, 300, 60)
+    expect(gapBefore(block, null)).toBe(0)
+  })
+
+  it('returns 0 for contiguous blocks', () => {
+    const prev = makeBlock(1, 300, 60) // ends at 360
+    const block = makeBlock(2, 360, 60)
+    expect(gapBefore(block, prev)).toBe(0)
+  })
+
+  it('returns positive for a buffer', () => {
+    const prev = makeBlock(1, 300, 60) // ends at 360
+    const block = makeBlock(2, 370, 60) // 10-minute buffer
+    expect(gapBefore(block, prev)).toBe(10)
+  })
+
+  it('returns negative for an overlap', () => {
+    const prev = makeBlock(1, 300, 60) // ends at 360
+    const block = makeBlock(2, 350, 60) // overlaps by 10 minutes
+    expect(gapBefore(block, prev)).toBe(-10)
+  })
+})
+
+describe('layout', () => {
+  const makeBlock = (id: number, startMin: number, durationMin: number): DayBlock => ({
+    id,
+    day: '2026-08-04',
+    taskId: null,
+    title: `Block ${id}`,
+    kind: 'deep',
+    startMin,
+    durationMin,
+    pomodoros: 0,
+    completed: false,
+    sort: 0,
+  })
+
+  it('returns empty array for empty blocks', () => {
+    expect(layout([])).toEqual([])
+  })
+
+  it('renders a single block', () => {
+    const blocks = [makeBlock(1, 300, 60)]
+    const rows = layout(blocks)
+    expect(rows).toHaveLength(1)
+    expect(rows[0]).toEqual({
+      type: 'block',
+      block: blocks[0],
+      height: 96,
+    })
+  })
+
+  it('renders contiguous blocks without gap rows', () => {
+    const blocks = [
+      makeBlock(1, 300, 60), // ends at 360
+      makeBlock(2, 360, 60), // starts at 360
+    ]
+    const rows = layout(blocks)
+    expect(rows).toHaveLength(2)
+    expect(rows[0].type).toBe('block')
+    expect(rows[1].type).toBe('block')
+  })
+
+  it('renders a gap row for a buffer', () => {
+    const blocks = [
+      makeBlock(1, 300, 60), // ends at 360
+      makeBlock(2, 370, 60), // starts at 370, 10-minute gap
+    ]
+    const rows = layout(blocks)
+    expect(rows).toHaveLength(3) // gap + block + block
+    expect(rows[0].type).toBe('block')
+    expect(rows[1]).toEqual({
+      type: 'gap',
+      minutes: 10,
+      height: Math.max(8, 10 * 1.6),
+    })
+    expect(rows[2].type).toBe('block')
+  })
+
+  it('gap row height is at least 8px', () => {
+    const blocks = [
+      makeBlock(1, 300, 60), // ends at 360
+      makeBlock(2, 365, 60), // starts at 365, 5-minute gap
+    ]
+    const rows = layout(blocks)
+    const gapRow = rows.find((r) => r.type === 'gap')
+    expect(gapRow?.type).toBe('gap')
+    expect(gapRow?.height).toBe(8) // 5 * 1.6 = 8, exactly
+  })
+
+  it('does not render a gap row for negative gaps (overlaps)', () => {
+    const blocks = [
+      makeBlock(1, 300, 60), // ends at 360
+      makeBlock(2, 350, 60), // starts at 350 (overlap)
+    ]
+    const rows = layout(blocks)
+    // Should be just 2 block rows; no gap row for overlap
+    const gapRows = rows.filter((r) => r.type === 'gap')
+    expect(gapRows).toHaveLength(0)
+  })
+
+  it('sorts by startMin then sort field', () => {
+    const blocks = [
+      makeBlock(2, 360, 60), // starts second chronologically
+      makeBlock(1, 300, 60), // starts first chronologically
+    ]
+    const rows = layout(blocks)
+    expect(rows[0].type).toBe('block')
+    if (rows[0].type === 'block') {
+      expect(rows[0].block.id).toBe(1)
+    }
+  })
+})
+
+describe('shiftFrom', () => {
+  const makeBlock = (id: number, startMin: number, durationMin: number): DayBlock => ({
+    id,
+    day: '2026-08-04',
+    taskId: null,
+    title: `Block ${id}`,
+    kind: 'deep',
+    startMin,
+    durationMin,
+    pomodoros: 0,
+    completed: false,
+    sort: 0,
+  })
+
+  it('does not mutate the input', () => {
+    const blocks = [makeBlock(1, 300, 60), makeBlock(2, 360, 60)]
+    const original = JSON.parse(JSON.stringify(blocks))
+    shiftFrom(blocks, 1, 30)
+    expect(blocks).toEqual(original)
+  })
+
+  it('shifts block at index and all downstream blocks', () => {
+    const blocks = [makeBlock(1, 300, 60), makeBlock(2, 360, 60), makeBlock(3, 420, 60)]
+    const shifted = shiftFrom(blocks, 1, 30)
+    expect(shifted[0].startMin).toBe(300) // unchanged
+    expect(shifted[1].startMin).toBe(390) // 360 + 30
+    expect(shifted[2].startMin).toBe(450) // 420 + 30
+  })
+
+  it('clamps startMin to 0', () => {
+    const blocks = [makeBlock(1, 50, 60), makeBlock(2, 110, 60)]
+    const shifted = shiftFrom(blocks, 0, -100)
+    expect(shifted[0].startMin).toBe(0)
+    expect(shifted[1].startMin).toBe(10) // max(0, 110 - 100) = 10
+  })
+})
+
+describe('nudge', () => {
+  const makeBlock = (id: number, startMin: number, durationMin: number): DayBlock => ({
+    id,
+    day: '2026-08-04',
+    taskId: null,
+    title: `Block ${id}`,
+    kind: 'deep',
+    startMin,
+    durationMin,
+    pomodoros: 0,
+    completed: false,
+    sort: 0,
+  })
+
+  it('moves one block with ripple=true by default', () => {
+    const blocks = [makeBlock(1, 300, 60), makeBlock(2, 360, 60), makeBlock(3, 420, 60)]
+    const nudged = nudge(blocks, 2, 30)
+    expect(nudged[0].startMin).toBe(300) // unchanged
+    expect(nudged[1].startMin).toBe(390) // 360 + 30
+    expect(nudged[2].startMin).toBe(450) // 420 + 30
+  })
+
+  it('moves one block without ripple when ripple=false', () => {
+    const blocks = [makeBlock(1, 300, 60), makeBlock(2, 360, 60), makeBlock(3, 420, 60)]
+    const nudged = nudge(blocks, 2, 30, false)
+    expect(nudged[0].startMin).toBe(300) // unchanged (block 1)
+    expect(nudged[1].startMin).toBe(390) // 360 + 30 (block 2 moved, no ripple)
+    expect(nudged[2].startMin).toBe(420) // unchanged (block 3, no ripple)
+  })
+
+  it('clamps startMin to 0', () => {
+    const blocks = [makeBlock(1, 50, 60)]
+    const nudged = nudge(blocks, 1, -100)
+    expect(nudged[0].startMin).toBe(0)
+  })
+
+  it('returns unchanged array if id not found', () => {
+    const blocks = [makeBlock(1, 300, 60)]
+    const nudged = nudge(blocks, 999, 30)
+    expect(nudged).toEqual(blocks)
+  })
+})
+
+describe('moveBlock', () => {
+  const makeBlock = (id: number, startMin: number, durationMin: number, sort: number): DayBlock => ({
+    id,
+    day: '2026-08-04',
+    taskId: null,
+    title: `Block ${id}`,
+    kind: 'deep',
+    startMin,
+    durationMin,
+    pomodoros: 0,
+    completed: false,
+    sort,
+  })
+
+  it('swaps adjacent blocks and recomputes start times', () => {
+    // Block 1: 300–360 (60 min), Block 2: 360–420 (60 min, contiguous)
+    const blocks = [
+      makeBlock(1, 300, 60, 0),
+      makeBlock(2, 360, 60, 1),
+    ]
+    const moved = moveBlock(blocks, 0, 1)
+    // After swap: [Block 2, Block 1]
+    // When recomputed, both should be re-laid out preserving any gaps
+    expect(moved[0].id).toBe(2)
+    expect(moved[1].id).toBe(1)
+    // Block 1's gap-to-predecessor should be preserved (was contiguous, should remain so)
+    expect(moved[1].startMin).toBe(moved[0].startMin + moved[0].durationMin)
+  })
+
+  it('is no-op at the top boundary', () => {
+    const blocks = [
+      makeBlock(1, 300, 60, 0),
+      makeBlock(2, 360, 60, 1),
+    ]
+    const moved = moveBlock(blocks, 0, -1)
+    expect(moved).toEqual(blocks)
+  })
+
+  it('is no-op at the bottom boundary', () => {
+    const blocks = [
+      makeBlock(1, 300, 60, 0),
+      makeBlock(2, 360, 60, 1),
+    ]
+    const moved = moveBlock(blocks, 1, 1)
+    expect(moved).toEqual(blocks)
+  })
+
+  it('does not mutate the input', () => {
+    const blocks = [
+      makeBlock(1, 300, 60, 0),
+      makeBlock(2, 360, 60, 1),
+    ]
+    const original = JSON.parse(JSON.stringify(blocks))
+    moveBlock(blocks, 0, 1)
+    expect(blocks).toEqual(original)
+  })
+
+  it('preserves the day\'s original start time when the first block changes', () => {
+    // Regression test for the chosen first-block semantics: promoting a
+    // later block to the front must not push the whole day later by
+    // letting that block keep its own (later) original startMin. Block 1
+    // starts the day at 300 with a 40-min gap before block 2 (400-460).
+    const blocks = [
+      makeBlock(1, 300, 60, 0), // 5:00-6:00, day starts at 300
+      makeBlock(2, 400, 60, 1), // 6:40-7:40, 40-min gap after block 1
+    ]
+    const moved = moveBlock(blocks, 0, 1) // swap: block 2 becomes first
+    expect(moved[0].id).toBe(2)
+    expect(moved[1].id).toBe(1)
+    // The day must still start at 300, not at block 2's original 400.
+    expect(moved[0].startMin).toBe(300)
+    // Block 1 (now second) had no predecessor in its original position, so
+    // its recorded "gap to predecessor" is 0 (gapBefore's documented
+    // definition for a first block) — it lands contiguous with whatever is
+    // now ahead of it, rather than re-deriving a gap it never had.
+    expect(moved[1].startMin).toBe(moved[0].startMin + moved[0].durationMin)
+  })
+})
+
+describe('sortBlocks', () => {
+  const makeBlock = (id: number, startMin: number, sort: number): DayBlock => ({
+    id,
+    day: '2026-08-04',
+    taskId: null,
+    title: `Block ${id}`,
+    kind: 'deep',
+    startMin,
+    durationMin: 60,
+    pomodoros: 0,
+    completed: false,
+    sort,
+  })
+
+  it('sorts by startMin regardless of input order', () => {
+    const blocks = [makeBlock(3, 420, 0), makeBlock(1, 300, 0), makeBlock(2, 360, 0)]
+    const sorted = sortBlocks(blocks)
+    expect(sorted.map((b) => b.id)).toEqual([1, 2, 3])
+  })
+
+  it('uses sort as a tie-breaker for equal startMin', () => {
+    const blocks = [makeBlock(2, 300, 1), makeBlock(1, 300, 0)]
+    const sorted = sortBlocks(blocks)
+    expect(sorted.map((b) => b.id)).toEqual([1, 2])
+  })
+
+  it('does not mutate the input', () => {
+    const blocks = [makeBlock(2, 360, 0), makeBlock(1, 300, 0)]
+    const original = JSON.parse(JSON.stringify(blocks))
+    sortBlocks(blocks)
+    expect(blocks).toEqual(original)
+  })
+})
+
+describe('conflicts', () => {
+  const makeBlock = (id: number, startMin: number, durationMin: number): DayBlock => ({
+    id,
+    day: '2026-08-04',
+    taskId: null,
+    title: `Block ${id}`,
+    kind: 'deep',
+    startMin,
+    durationMin,
+    pomodoros: 0,
+    completed: false,
+    sort: 0,
+  })
+
+  it('returns empty array for well-formed days', () => {
+    const blocks = [
+      makeBlock(1, 300, 60), // ends at 360
+      makeBlock(2, 360, 60), // starts at 360 (contiguous)
+      makeBlock(3, 420, 60), // starts at 420 (10-min buffer)
+    ]
+    expect(conflicts(blocks)).toEqual([])
+  })
+
+  it('detects overlapping blocks', () => {
+    const blocks = [
+      makeBlock(1, 300, 60), // ends at 360
+      makeBlock(2, 350, 60), // starts at 350, overlaps by 10 min
+    ]
+    const conf = conflicts(blocks)
+    expect(conf).toHaveLength(1)
+    expect(conf[0]).toEqual({ blockId: 2, overlapMin: 10 })
+  })
+
+  it('returns empty array for empty blocks', () => {
+    expect(conflicts([])).toEqual([])
+  })
+})
+
+describe('daySummary', () => {
+  const makeBlock = (id: number, startMin: number, durationMin: number, kind: 'deep' | 'shallow' | 'break' = 'deep'): DayBlock => ({
+    id,
+    day: '2026-08-04',
+    taskId: null,
+    title: `Block ${id}`,
+    kind,
+    startMin,
+    durationMin,
+    pomodoros: 0,
+    completed: false,
+    sort: 0,
+  })
+
+  it('returns all zeros for empty blocks', () => {
+    const summary = daySummary([])
+    expect(summary).toEqual({
+      plannedMin: 0,
+      deepMin: 0,
+      endMin: 0,
+      idleMin: 0,
+    })
+  })
+
+  it('computes plannedMin excluding gaps', () => {
+    const blocks = [
+      makeBlock(1, 300, 60), // ends at 360
+      makeBlock(2, 370, 60), // 10-min buffer, ends at 430
+    ]
+    const summary = daySummary(blocks)
+    expect(summary.plannedMin).toBe(120) // 60 + 60, gaps not included
+  })
+
+  it('computes deepMin correctly', () => {
+    const blocks = [
+      makeBlock(1, 300, 60, 'deep'),
+      makeBlock(2, 360, 30, 'shallow'),
+      makeBlock(3, 390, 60, 'deep'),
+    ]
+    const summary = daySummary(blocks)
+    expect(summary.deepMin).toBe(120) // 60 + 60
+  })
+
+  it('computes endMin as the latest block end time', () => {
+    const blocks = [
+      makeBlock(1, 300, 60),
+      makeBlock(2, 360, 90), // ends at 450, the latest
+    ]
+    const summary = daySummary(blocks)
+    expect(summary.endMin).toBe(450)
+  })
+
+  it('computes idleMin as the sum of positive gaps', () => {
+    const blocks = [
+      makeBlock(1, 300, 60), // ends at 360
+      makeBlock(2, 370, 60), // 10-min buffer
+      makeBlock(3, 430, 60), // contiguous
+      makeBlock(4, 500, 60), // 10-min buffer
+    ]
+    const summary = daySummary(blocks)
+    expect(summary.idleMin).toBe(20) // 10 + 10
+  })
+
+  it('handles over-planned days (endMin > 1440)', () => {
+    const blocks = [makeBlock(1, 1200, 360)]
+    const summary = daySummary(blocks)
+    expect(summary.endMin).toBe(1560)
+  })
+})
+
+describe('blockState', () => {
+  const makeBlock = (id: number, completed: boolean, kind: 'deep' | 'shallow' | 'break', startMin: number, durationMin: number): DayBlock => ({
+    id,
+    day: '2026-08-04',
+    taskId: null,
+    title: `Block ${id}`,
+    kind,
+    startMin,
+    durationMin,
+    pomodoros: 0,
+    completed,
+    sort: 0,
+  })
+
+  it('returns completed when completed=true (even if active)', () => {
+    const block = makeBlock(1, true, 'deep', 500, 60)
+    expect(blockState(block, 530)).toBe('completed')
+  })
+
+  it('returns active when within time window and not completed', () => {
+    const block = makeBlock(1, false, 'deep', 500, 60)
+    expect(blockState(block, 500)).toBe('active')
+    expect(blockState(block, 530)).toBe('active')
+    expect(blockState(block, 559)).toBe('active')
+  })
+
+  it('returns planned when before the time window', () => {
+    const block = makeBlock(1, false, 'deep', 500, 60)
+    expect(blockState(block, 499)).toBe('planned')
+  })
+
+  it('returns planned when after the time window', () => {
+    const block = makeBlock(1, false, 'deep', 500, 60)
+    expect(blockState(block, 560)).toBe('planned')
+  })
+
+  it('returns active over break for active breaks', () => {
+    const block = makeBlock(1, false, 'break', 500, 30)
+    expect(blockState(block, 500)).toBe('active')
+  })
+
+  it('returns break for planned breaks', () => {
+    const block = makeBlock(1, false, 'break', 500, 30)
+    expect(blockState(block, 450)).toBe('break')
+  })
+})
+
+describe('blockProgress', () => {
+  const makeBlock = (startMin: number, durationMin: number): DayBlock => ({
+    id: 1,
+    day: '2026-08-04',
+    taskId: null,
+    title: 'Test block',
+    kind: 'deep',
+    startMin,
+    durationMin,
+    pomodoros: 0,
+    completed: false,
+    sort: 0,
+  })
+
+  it('computes progress at the start', () => {
+    const block = makeBlock(300, 60)
+    const prog = blockProgress(block, 300)
+    expect(prog.elapsedMin).toBe(0)
+    expect(prog.remainingMin).toBe(60)
+    expect(prog.pct).toBe(0)
+  })
+
+  it('computes progress at the midpoint', () => {
+    const block = makeBlock(300, 60)
+    const prog = blockProgress(block, 330)
+    expect(prog.elapsedMin).toBe(30)
+    expect(prog.remainingMin).toBe(30)
+    expect(prog.pct).toBe(50)
+  })
+
+  it('computes progress at the end', () => {
+    const block = makeBlock(300, 60)
+    const prog = blockProgress(block, 360)
+    expect(prog.elapsedMin).toBe(60)
+    expect(prog.remainingMin).toBe(0)
+    expect(prog.pct).toBe(100)
+  })
+
+  it('clamps when before start', () => {
+    const block = makeBlock(300, 60)
+    const prog = blockProgress(block, 250)
+    expect(prog.elapsedMin).toBe(0)
+    expect(prog.remainingMin).toBe(60)
+    expect(prog.pct).toBe(0)
+  })
+
+  it('clamps when after end', () => {
+    const block = makeBlock(300, 60)
+    const prog = blockProgress(block, 400)
+    expect(prog.elapsedMin).toBe(60)
+    expect(prog.remainingMin).toBe(0)
+    expect(prog.pct).toBe(100)
+  })
+})
