@@ -145,7 +145,13 @@ Status: `[ ]` todo · `[~]` in progress · `[x]` done · `[!]` blocked
 - [x] **`package.json` name was `dwscaffold`** (leftover temp scaffold dir) → `deep-work`.
 - [x] **CI pinned pnpm 10 while local is 11.18.0.** Replaced the hardcoded `version:` input in all three workflows with an authoritative `packageManager: "pnpm@11.18.0"` field.
 - [x] **Removed an unrequested `pnpm-workspace.yaml`** containing an unverified `allowBuilds` key. Proven unnecessary: `pnpm install` and `pnpm build` are clean without it, with no ignored-build-script warning. (Note: pnpm silently ignores unknown keys in that file, so "no warning" is never evidence a key is valid.)
-  - **Reopened in Phase 2:** the file was back, again with the invalid `allowBuilds` key. `allowBuilds` is not a pnpm option; the real key is `ignoredBuiltDependencies`. Rewritten to `ignoredBuiltDependencies: [esbuild]`, which actually expresses the intent (skip esbuild's postinstall). Confirms the original warning: an unknown key here is silently a no-op.
+  - **Reopened in Phase 2:** the file was back, again with the `allowBuilds` key, and was rewritten to `ignoredBuiltDependencies: [esbuild]`.
+  - **Both of the above verdicts were wrong — corrected in Phase 3.** `allowBuilds` *is* a valid pnpm 11 key and `ignoredBuiltDependencies` is *not*. Verified against pnpm 11.18.0's own bundle (`dist/pnpm.mjs`): `allowBuilds` occurs 87 times, including in `MIGRATED_PNPM_FIELD_KEYS` and `createAllowBuildFunction()`, which reads it as `Record<string, boolean>`; `ignoredBuiltDependencies` occurs **0 times** — it was a pnpm 10 key removed in 11. So the Phase 2 "fix" replaced a working key with a dead one, and the file has been a silent no-op ever since. Empirically confirmed: with `ignoredBuiltDependencies` alone, `pnpm install` still emits `ERR_PNPM_IGNORED_BUILDS`; with `allowBuilds: {esbuild: false}` it is clean. Correct content is now:
+    ```yaml
+    allowBuilds:
+      esbuild: false
+    ```
+    The *original* warning still stands and is in fact what hid this: pnpm silently ignores unknown keys here, so "no error" never proves a key is live. Check the key against the installed pnpm's source, not against whether the command succeeds.
 - [x] **clippy was declared passing without being run.** Component installed locally; `cargo clippy --all-targets -- -D warnings` verified clean.
 
 **Phase 1 acceptance — MET (independently verified, not taken on the sub-agent's report):**
@@ -213,11 +219,47 @@ under plain `vite dev`. Settings live in the app store until Phase 3 persists th
 Note: WSLg still emits the `libEGL` / `MESA ZINK` / `gdk_seat_get_keyboard` warnings recorded in
 Phase 1. Same software-rendering noise, not app faults.
 
-### Phase 3 — Persistence layer
-- [ ] SQLite migrations for the schema in §2
-- [ ] Rust commands / SQL layer for tasks, blocks, templates, rituals, archive, tracks, settings
-- [ ] Typed TS client wrapper over the SQL calls
-- [ ] Seed defaults on first run (rituals, one "Maker Day" template)
+### Phase 3 — Persistence layer *(owner: Haiku sub-agents, verified by Sonnet + main session)*
+- [x] SQLite migrations for the schema in §2 — `src-tauri/migrations/0001_init.sql` (11 tables, CHECK constraints on `kind`/`phase`, FK cascades, 9 indexes), registered in `lib.rs` via `add_migrations("sqlite:deepwork.db", …)` with `include_str!`
+- [x] SQL layer for tasks, blocks, templates, rituals, sessions, notes, archive, tracks, settings — 9 repositories under `src/db/repos/`
+- [x] Typed TS client wrapper over the SQL calls — `SqlDriver` interface + `TauriDriver`; `openDatabase()` returns `null` outside Tauri so `vite dev` still runs
+- [x] Seed defaults on first run (3 rituals, one "Maker Day" template with its 5 mockup blocks, 7 settings) — `0002_seed.sql`
+- [x] Wiring deferred to this phase by the Phase 2 notes: settings and the ritual checklist now persist; the sidebar's deep-hours figure and 7-bar histogram are computed from `day_block` (a fresh DB correctly shows `0 h` and empty bars)
+- [x] Local-date helpers in `src/lib/time.ts` (`toDayKey`, `fromDayKey`, `addDays`, `startOfWeek`, `minutesToClock`, `formatDuration`, `splitDeepHours`)
+
+#### Deliberate reading of "Rust commands / SQL layer"
+The SQL layer is **TypeScript over `tauri-plugin-sql`; Rust owns migrations only.** The plugin
+already registers `execute`/`select` as Tauri commands, so hand-written `#[tauri::command]`
+wrappers would add a second serialization hop and a second place for the schema to drift,
+for no gain. This follows the plugin choice already made in §1.
+
+All statements use **`?` positional placeholders**, not the `$1` form the plugin docs show.
+`?` is SQLite's native placeholder and is the only style that behaves identically under sqlx
+(production) and `node:sqlite` (tests) — which is what lets the tests exercise the real SQL.
+
+#### Testing approach
+Tests run the **real** `src-tauri/migrations/*.sql` files against an in-memory database via
+Node 24's built-in `node:sqlite` (`src/test/nodeDriver.ts`), so they verify the schema that
+actually ships — real CHECK constraints, real FK cascades, real aggregate SQL — rather than a
+TS re-declaration of it. No new dependencies. The driver lives under `src/test/`, which
+`tsconfig.app.json` already excludes, so `node:sqlite` never reaches the vite build.
+
+#### Defects found in verification and fixed
+- [x] **`sql:default` does not grant write access.** Per `tauri-plugin-sql-2.4.0/permissions/default.toml` it is only `["allow-close", "allow-load", "allow-select"]`. The capability file granted just `sql:default`, so every INSERT/UPDATE/DELETE would have failed at runtime — a live defect carried in since Phase 1. Added `sql:allow-execute`.
+- [x] **The day-streak query was wrong and a tautological test hid it.** The recursive CTE seeded one anchor row per *distinct day present in `day_block`* and expanded each, producing a duplicate-counting fan-out; it also never walked back from today stopping at the first break. Probed directly: a 3-day streak returned **6**. The only test asserted `expect(typeof stats.dayStreak).toBe('number')`, which cannot fail. Replaced with `SELECT DISTINCT day … WHERE completed = 1` plus a short backward walk in TS — O(streak) and reviewable at a glance.
+- [x] **UTC day-keys where local dates are required.** `new Date().toISOString().split('T')[0]` in four places in `archive.ts` computed the wrong calendar day for any user behind/ahead of UTC near midnight. `headlineStats` now takes the day as an explicit parameter instead of reading the clock. **Regressed once** into `stores/rituals.ts` after being fixed, and was caught again on review — `toISOString` is legitimate only for `created_at`/`started_at` *instants*, never for a day key.
+- [x] **"Deep minutes" meant two different things.** `dayRecord` summed deep blocks regardless of `completed`, while the sidebar and 12-week histogram required `completed = 1`. Unified on completed-only.
+- [x] **`dayTotals.completedCount` returned SQL `NULL` on an empty day** instead of `0` — missing `COALESCE`. Found by an adversarial empty-input test, not by any happy-path test.
+- [x] **The rituals store invented its own ids.** `add()` assigned a local `nextId++` while `addRitual()` returned the real autoincrement id; the two counters diverge, and `toggle()` then wrote `ritual_log.ritual_id` = the local id — a column declared `NOT NULL REFERENCES ritual(id)`, so the write would either violate the FK or land on a different ritual's row. Now uses the id returned by the database.
+- [x] **`hydrate(driver, day)` discarded its `day`**, so `toggle` recomputed "today" independently and could write to a day the checklist was not displaying. The hydrated day is now retained.
+- [x] **The deep-hours figure could be a full hour off.** Integer and fractional parts were rounded independently: at 1138 minutes `Math.floor` gave `18` while `(0.966).toFixed(1)` gave `"1.0"`, rendering "18.0 h" for 19.0. Now rounds once via `splitDeepHours` and splits that single value.
+- [x] **A failed database connection was memoised forever.** `openDatabase()` cached the rejected promise, so the app could never retry. Resets on error.
+- [x] **Untyped rows.** `select<any>` / `(row: any)` in `archive.ts` replaced with a declared row interface, matching every other repo.
+
+#### Note on `pnpm-workspace.yaml`
+Corrected in this phase — see the Phase 1 defect entry above. `allowBuilds` is the valid
+pnpm 11 key; `ignoredBuiltDependencies` does not exist in pnpm 11 and had been a silent
+no-op since Phase 2.
 
 ### Phase 4 — Today view
 - [ ] Proportional timeline (gutter times + `max(34, min*1.6)` block heights)

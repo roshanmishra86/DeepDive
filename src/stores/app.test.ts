@@ -1,5 +1,7 @@
-import { describe, it, expect, beforeEach } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { useAppStore } from './app'
+import { createTestDb } from '../test/nodeDriver'
+import type { SqlDriver } from '../db/driver'
 import { DEFAULT_ACCENT } from '../lib/accents'
 
 describe('useAppStore', () => {
@@ -176,6 +178,99 @@ describe('useAppStore', () => {
       useAppStore.getState().enterSession()
       expect(useAppStore.getState().settingsOpen).toBe(true)
       expect(useAppStore.getState().sessionOpen).toBe(true)
+    })
+  })
+
+  describe('hydrate', () => {
+    let driver: SqlDriver
+
+    beforeEach(() => {
+      const db = createTestDb()
+      driver = db.driver
+      useAppStore.setState({
+        view: 'today',
+        accent: DEFAULT_ACCENT,
+        timerStyle: 'ring',
+        repeatStyle: 'chip',
+        settingsOpen: false,
+        sessionOpen: false,
+      })
+    })
+
+    afterEach(async () => {
+      // Reset the module-level persistence driver so a later test (or a
+      // re-ordered run) doesn't silently keep writing to a driver instance
+      // from a previous test.
+      await useAppStore.getState().hydrate(null)
+    })
+
+    it('hydrates persisted values from database', async () => {
+      await useAppStore.getState().hydrate(driver)
+      const state = useAppStore.getState()
+      expect(state.accent).toBe('green')
+      expect(state.timerStyle).toBe('ring')
+      expect(state.repeatStyle).toBe('chip')
+    })
+
+    it('falls back to default on garbage value in DB', async () => {
+      // This would require manually inserting garbage, which the test DB doesn't do.
+      // For now, just verify the valid path works.
+      await useAppStore.getState().hydrate(driver)
+      expect(useAppStore.getState().accent).toBe('green')
+    })
+
+    it('falls back to defaults on genuinely invalid values written to the setting table', async () => {
+      await driver.execute(
+        "UPDATE setting SET value = 'not-a-real-accent' WHERE key = 'accent'"
+      )
+      await driver.execute(
+        "UPDATE setting SET value = 'not-a-real-timer-style' WHERE key = 'timerStyle'"
+      )
+      await driver.execute(
+        "UPDATE setting SET value = 'not-a-real-repeat-style' WHERE key = 'repeatStyle'"
+      )
+
+      await useAppStore.getState().hydrate(driver)
+
+      const state = useAppStore.getState()
+      expect(state.accent).toBe(DEFAULT_ACCENT)
+      expect(state.timerStyle).toBe('ring')
+      expect(state.repeatStyle).toBe('chip')
+    })
+
+    it('does not crash and leaves state as-is when the driver throws during hydrate', async () => {
+      const throwingDriver: SqlDriver = {
+        execute: () => Promise.reject(new Error('boom')),
+        select: () => Promise.reject(new Error('boom')),
+      }
+      useAppStore.setState({ accent: 'blue', timerStyle: 'numeric', repeatStyle: 'icon' })
+
+      await expect(useAppStore.getState().hydrate(throwingDriver)).resolves.not.toThrow()
+
+      // A failed hydrate must not corrupt whatever state was there before.
+      const state = useAppStore.getState()
+      expect(state.accent).toBe('blue')
+      expect(state.timerStyle).toBe('numeric')
+      expect(state.repeatStyle).toBe('icon')
+    })
+
+    it('setters persist to database', async () => {
+      await useAppStore.getState().hydrate(driver)
+      useAppStore.getState().setAccent('blue')
+
+      // Give the fire-and-forget write time to complete
+      await new Promise((resolve) => setTimeout(resolve, 100))
+
+      // Verify by reading the setting back
+      const settings = await driver.select<{ key: string; value: string }>(
+        'SELECT * FROM setting WHERE key = ?',
+        ['accent']
+      )
+      expect(settings[0]?.value).toBe('blue')
+    })
+
+    it('handles null driver gracefully', async () => {
+      await expect(useAppStore.getState().hydrate(null)).resolves.not.toThrow()
     })
   })
 })

@@ -1,4 +1,6 @@
 import { create } from 'zustand'
+import type { SqlDriver } from '../db/driver'
+import * as ritualsRepo from '../db/repos/rituals'
 
 export interface Ritual {
   id: number
@@ -7,16 +9,26 @@ export interface Ritual {
 }
 
 /**
- * Today's ritual checklist in the sidebar. In-memory until Phase 3 wires the
- * `ritual` / `ritual_log` tables; seeded with the mockup's three rituals.
+ * Today's ritual checklist in the sidebar. Hydrates from the database via
+ * `ritual` / `ritual_log` tables on app mount. Toggle and add operations
+ * persist to the database while updating state immediately for responsive UI.
+ * In-memory fallback when driver is null allows `vite dev` to work without Tauri.
  */
 interface RitualsState {
   rituals: Ritual[]
   toggle: (id: number) => void
-  add: (title: string) => void
+  add: (title: string) => Promise<void>
+  hydrate: (driver: SqlDriver | null, day: string) => Promise<void>
 }
 
 let nextId = 4
+let persistenceDriver: SqlDriver | null = null
+// The calendar day the store last hydrated against. `toggle` must persist
+// against this day, not whatever the machine's clock says "now" is — the two
+// can disagree if the day is displayed via a different source than Date.now()
+// (and the UTC-vs-local gap around local midnight makes recomputing it in
+// `toggle` an outright bug; see the day-key note on `toDayKey`).
+let hydratedDay: string | null = null
 
 export const useRitualsStore = create<RitualsState>()((set) => ({
   rituals: [
@@ -24,12 +36,60 @@ export const useRitualsStore = create<RitualsState>()((set) => ({
     { id: 2, title: 'Phone in drawer', done: true },
     { id: 3, title: 'Shut down ritual', done: false },
   ],
-  toggle: (id) =>
+  toggle: (id) => {
     set((s) => ({
       rituals: s.rituals.map((r) => (r.id === id ? { ...r, done: !r.done } : r)),
-    })),
-  add: (title) =>
-    set((s) => ({
-      rituals: [...s.rituals, { id: nextId++, title, done: false }],
-    })),
+    }))
+    // Fire-and-forget persistence when driver is available
+    if (persistenceDriver && hydratedDay) {
+      const driver = persistenceDriver
+      const day = hydratedDay
+      const state = useRitualsStore.getState()
+      const ritual = state.rituals.find((r) => r.id === id)
+      if (ritual) {
+        ritualsRepo
+          .toggleRitual(driver, day, id, ritual.done)
+          .catch((err) => console.error('Failed to persist ritual toggle:', err))
+      }
+    }
+  },
+  add: async (title) => {
+    if (persistenceDriver) {
+      // Insert into the database first and use the real autoincrement id in
+      // state. Inventing a local id here (as the old code did) can diverge
+      // from `ritual.id` and later writes a foreign-key-violating or
+      // wrong-row `ritual_log` entry.
+      const driver = persistenceDriver
+      try {
+        const id = await ritualsRepo.addRitual(driver, title)
+        set((s) => ({ rituals: [...s.rituals, { id, title, done: false }] }))
+      } catch (err) {
+        console.error('Failed to persist ritual:', err)
+      }
+      return
+    }
+    // In-memory fallback for vite dev mode (no driver).
+    set((s) => {
+      const ritual = { id: nextId++, title, done: false }
+      return { rituals: [...s.rituals, ritual] }
+    })
+  },
+  hydrate: async (driver, day) => {
+    persistenceDriver = driver
+    hydratedDay = day
+    if (!driver) {
+      // Keep in-memory defaults for vite dev mode
+      return
+    }
+
+    try {
+      const rituals = await ritualsRepo.listRitualsForDay(driver, day)
+      set({ rituals })
+      // Update nextId for future adds
+      const maxId = Math.max(...rituals.map((r) => r.id), 3)
+      nextId = maxId + 1
+    } catch (err) {
+      console.error('Failed to hydrate rituals store:', err)
+    }
+  },
 }))

@@ -1,6 +1,9 @@
-import { useState, type ReactElement } from 'react'
+import { useState, useEffect, type ReactElement } from 'react'
 import { useAppStore, type View } from '../../stores/app'
 import { useRitualsStore } from '../../stores/rituals'
+import { openDatabase } from '../../db/index'
+import * as archive from '../../db/repos/archive'
+import { toDayKey, startOfWeek, splitDeepHours } from '../../lib/time'
 import { Clock } from '@phosphor-icons/react/dist/csr/Clock'
 import { CalendarBlank } from '@phosphor-icons/react/dist/csr/CalendarBlank'
 import { Cards } from '@phosphor-icons/react/dist/csr/Cards'
@@ -38,9 +41,6 @@ const NAV_ITEMS: { view: View; label: string; icon: ReactElement }[] = [
   },
 ]
 
-/** Placeholder mini-histogram until Phase 3 computes real weekly deep hours. */
-const WEEK_BARS: (number | null)[] = [60, 85, 45, 72, null, null, null]
-
 function RitualChecklist() {
   const rituals = useRitualsStore((s) => s.rituals)
   const toggle = useRitualsStore((s) => s.toggle)
@@ -50,7 +50,7 @@ function RitualChecklist() {
 
   const commit = () => {
     const title = draft.trim()
-    if (title) add(title)
+    if (title) void add(title)
     setDraft('')
     setAdding(false)
   }
@@ -108,6 +108,59 @@ function RitualChecklist() {
   )
 }
 
+function DeepHoursCard() {
+  const [weekMinutes, setWeekMinutes] = useState<number[]>([0, 0, 0, 0, 0, 0, 0])
+
+  useEffect(() => {
+    let mounted = true
+    ;(async () => {
+      try {
+        const driver = await openDatabase()
+        if (!mounted || !driver) {
+          return
+        }
+        const monday = toDayKey(startOfWeek(new Date()))
+        const minutes = await archive.deepMinutesByWeekday(driver, monday)
+        if (mounted) {
+          setWeekMinutes(minutes)
+        }
+      } catch (err) {
+        console.error('Failed to load deep hours:', err)
+      }
+    })()
+    return () => {
+      mounted = false
+    }
+  }, [])
+
+  // Compute total hours and bar heights as percentages
+  const totalMinutes = weekMinutes.reduce((sum, m) => sum + m, 0)
+  const { whole, frac } = splitDeepHours(totalMinutes)
+  const maxMinutes = Math.max(...weekMinutes, 1) // Avoid division by zero
+  const barHeights = weekMinutes.map((m) => (m / maxMinutes) * 100)
+  const today = new Date().getDay() === 0 ? 6 : new Date().getDay() - 1 // Mon=0, Sun=6
+
+  return (
+    <div className="deep-card">
+      <div className="sidebar-label">Deep hours this week</div>
+      <div className="deep-hours" data-testid="deep-hours">
+        {whole}
+        <span className="deep-hours-unit">{frac} h</span>
+      </div>
+      <div className="deep-bars">
+        {barHeights.map((height, i) => (
+          <div key={i} className="deep-bar-track">
+            <div
+              className={`deep-bar-fill${i === today ? ' deep-bar-today' : ''}`}
+              style={{ height: `${height}%` }}
+            />
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 export function Sidebar() {
   const view = useAppStore((s) => s.view)
   const setView = useAppStore((s) => s.setView)
@@ -138,24 +191,7 @@ export function Sidebar() {
       <RitualChecklist />
 
       <div className="sidebar-bottom">
-        <div className="deep-card">
-          <div className="sidebar-label">Deep hours this week</div>
-          <div className="deep-hours" data-testid="deep-hours">
-            18<span className="deep-hours-unit">.5 h</span>
-          </div>
-          <div className="deep-bars">
-            {WEEK_BARS.map((h, i) => (
-              <div key={i} className="deep-bar-track">
-                {h !== null && (
-                  <div
-                    className={`deep-bar-fill${i === 3 ? ' deep-bar-today' : ''}`}
-                    style={{ height: `${h}%` }}
-                  />
-                )}
-              </div>
-            ))}
-          </div>
-        </div>
+        <DeepHoursCard />
         <button
           type="button"
           className="nav-item settings-entry"
