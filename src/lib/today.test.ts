@@ -18,29 +18,67 @@ import {
   composerSummary,
   initialComposerDraft,
   resolveTaskAction,
+  resolveBlockTitle,
+  durationPresetsFor,
+  nearestBreakDuration,
+  DURATION_PRESETS,
+  BREAK_DURATION_PRESETS,
 } from './today'
 import type { DayBlock, BlockKind } from '../db/types'
 
 describe('blockHeight', () => {
-  it('returns 34px minimum for short blocks', () => {
-    expect(blockHeight(5)).toBe(34)
-    expect(blockHeight(10)).toBe(34)
+  describe('break/ritual (unchanged proportional scale)', () => {
+    it('returns 34px minimum for short blocks', () => {
+      expect(blockHeight(5, 'break')).toBe(34)
+      expect(blockHeight(5, 'ritual')).toBe(34)
+      expect(blockHeight(10, 'break')).toBe(34)
+      expect(blockHeight(10, 'ritual')).toBe(34)
+    })
+
+    it('scales with duration: 30→48', () => {
+      expect(blockHeight(30, 'break')).toBe(48)
+      expect(blockHeight(30, 'ritual')).toBe(48)
+    })
+
+    it('scales with duration: 60→96', () => {
+      expect(blockHeight(60, 'break')).toBe(96)
+      expect(blockHeight(60, 'ritual')).toBe(96)
+    })
+
+    it('scales with duration: 90→144', () => {
+      expect(blockHeight(90, 'break')).toBe(144)
+      expect(blockHeight(90, 'ritual')).toBe(144)
+    })
+
+    it('handles zero duration', () => {
+      expect(blockHeight(0, 'break')).toBe(34)
+      expect(blockHeight(0, 'ritual')).toBe(34)
+    })
   })
 
-  it('scales with duration: 30→48', () => {
-    expect(blockHeight(30)).toBe(48)
-  })
+  describe('deep/shallow (compressed legibility scale)', () => {
+    it('scales with duration: 30→126.72', () => {
+      expect(blockHeight(30, 'deep')).toBeCloseTo(126.72)
+      expect(blockHeight(30, 'shallow')).toBeCloseTo(126.72)
+    })
 
-  it('scales with duration: 60→96', () => {
-    expect(blockHeight(60)).toBe(96)
-  })
+    it('scales with duration: 60→142.56', () => {
+      expect(blockHeight(60, 'deep')).toBeCloseTo(142.56)
+      expect(blockHeight(60, 'shallow')).toBeCloseTo(142.56)
+    })
 
-  it('scales with duration: 90→144', () => {
-    expect(blockHeight(90)).toBe(144)
-  })
+    it('scales with duration: 90→158.4', () => {
+      expect(blockHeight(90, 'deep')).toBeCloseTo(158.4)
+      expect(blockHeight(90, 'shallow')).toBeCloseTo(158.4)
+    })
 
-  it('handles zero duration', () => {
-    expect(blockHeight(0)).toBe(34)
+    it('pins the user-specified ratios: 30-min and 60-min heights are 80% and 90% of the 90-min height', () => {
+      const h30 = blockHeight(30, 'deep')
+      const h60 = blockHeight(60, 'deep')
+      const h90 = blockHeight(90, 'deep')
+      expect(h30).toBeCloseTo(h90 * 0.8)
+      expect(h60).toBeCloseTo(h90 * 0.9)
+    })
   })
 })
 
@@ -112,11 +150,18 @@ describe('layout', () => {
     const blocks = [makeBlock(1, 300, 60)]
     const rows = layout(blocks)
     expect(rows).toHaveLength(1)
-    expect(rows[0]).toEqual({
+    expect(rows[0]?.type).toBe('block')
+    expect(rows[0]).toMatchObject({
       type: 'block',
       block: blocks[0],
-      height: 96,
     })
+    // Block is kind 'deep' (see makeBlock default), so it uses the
+    // compressed deep/shallow scale: 110.88 + 0.528 * 60 = 142.56, not the
+    // old proportional 60 * 1.6 = 96 (that formula now applies only to
+    // break/ritual blocks).
+    if (rows[0]?.type === 'block') {
+      expect(rows[0].height).toBeCloseTo(142.56)
+    }
   })
 
   it('renders contiguous blocks without gap rows', () => {
@@ -840,5 +885,78 @@ describe('resolveTaskAction', () => {
 
   it('does nothing when there is no taskId and neither chip is on', () => {
     expect(resolveTaskAction(null, false, false)).toBe('none')
+  })
+})
+
+describe('resolveBlockTitle', () => {
+  it('break with an empty title resolves to "Break"', () => {
+    expect(resolveBlockTitle('', 'break')).toBe('Break')
+  })
+
+  it('break with a whitespace-only title resolves to "Break"', () => {
+    expect(resolveBlockTitle('   ', 'break')).toBe('Break')
+  })
+
+  it('break with a real title keeps that title, trimmed', () => {
+    expect(resolveBlockTitle('Coffee', 'break')).toBe('Coffee')
+    expect(resolveBlockTitle('  Coffee  ', 'break')).toBe('Coffee')
+  })
+
+  it('non-break kinds are trimmed but otherwise unchanged', () => {
+    expect(resolveBlockTitle('  Write report  ', 'deep')).toBe('Write report')
+    expect(resolveBlockTitle('  Standup  ', 'shallow')).toBe('Standup')
+    expect(resolveBlockTitle('  Reset desk  ', 'ritual')).toBe('Reset desk')
+  })
+
+  it('non-break kinds: an empty title is returned as-is (upstream validation blocks this in practice)', () => {
+    expect(resolveBlockTitle('', 'deep')).toBe('')
+    expect(resolveBlockTitle('   ', 'shallow')).toBe('')
+    expect(resolveBlockTitle('', 'ritual')).toBe('')
+  })
+})
+
+describe('durationPresetsFor', () => {
+  it('break gets the tight 5/10/15 preset set', () => {
+    expect(durationPresetsFor('break')).toEqual(BREAK_DURATION_PRESETS)
+  })
+
+  it('deep, shallow, and ritual get the standard 30/60/90 preset set', () => {
+    expect(durationPresetsFor('deep')).toEqual(DURATION_PRESETS)
+    expect(durationPresetsFor('shallow')).toEqual(DURATION_PRESETS)
+    expect(durationPresetsFor('ritual')).toEqual(DURATION_PRESETS)
+  })
+})
+
+describe('nearestBreakDuration', () => {
+  it('exact presets map to themselves', () => {
+    expect(nearestBreakDuration(5)).toBe(5)
+    expect(nearestBreakDuration(10)).toBe(10)
+    expect(nearestBreakDuration(15)).toBe(15)
+  })
+
+  it('values strictly between presets snap to the closer one', () => {
+    expect(nearestBreakDuration(6)).toBe(5)
+    expect(nearestBreakDuration(9)).toBe(10)
+    expect(nearestBreakDuration(11)).toBe(10)
+    expect(nearestBreakDuration(14)).toBe(15)
+  })
+
+  it('ties between two presets resolve to the larger preset (round-half-up)', () => {
+    expect(nearestBreakDuration(7.5)).toBe(10)
+    expect(nearestBreakDuration(12.5)).toBe(15)
+  })
+
+  it('values below the smallest preset clamp to 5', () => {
+    expect(nearestBreakDuration(0)).toBe(5)
+    expect(nearestBreakDuration(1)).toBe(5)
+  })
+
+  it('values above the largest preset clamp to 15', () => {
+    expect(nearestBreakDuration(20)).toBe(15)
+    expect(nearestBreakDuration(90)).toBe(15)
+  })
+
+  it('a brand-new block defaulted to 30 min snaps to 15 when switched to break', () => {
+    expect(nearestBreakDuration(30)).toBe(15)
   })
 })

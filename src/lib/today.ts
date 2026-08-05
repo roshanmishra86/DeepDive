@@ -12,11 +12,38 @@ import type { DayBlock, BlockKind, BlockRepeat } from '../db/types'
 import { minutesToClock, formatDuration } from './time'
 
 /**
- * Block height in pixels proportional to duration.
- * Formula: max(34, duration_minutes * 1.6)
- * Matches mockup literals: 5→34, 30→48, 60→96, 90→144
+ * Slope and intercept for the deep/shallow block height formula (see
+ * `blockHeight`). Anchored on the user's spec: the 90-minute card grows 10%
+ * over the old proportional height (144 → 158.4), and the 30/60-minute
+ * cards become 80% / 90% of that new 90-minute height (126.72, 142.56).
+ * `DEEP_SHALLOW_HEIGHT_SLOPE` and `DEEP_SHALLOW_HEIGHT_INTERCEPT` are the
+ * unique linear coefficients solving height(30)=126.72 and height(90)=158.4.
  */
-export function blockHeight(durationMin: number): number {
+const DEEP_SHALLOW_HEIGHT_SLOPE = 0.528
+const DEEP_SHALLOW_HEIGHT_INTERCEPT = 110.88
+
+/**
+ * Block height in pixels, kind-dependent.
+ *
+ * - break | ritual: `max(34, duration_minutes * 1.6)`, unchanged from
+ *   Phase 4. These can be as short as 5 minutes (the seeded "Maker Day"
+ *   template has a 5-minute Shut Down Ritual) and must stay thin strips, so
+ *   they keep the original proportional scale.
+ * - deep | shallow: `110.88 + 0.528 * duration_minutes`, a compressed
+ *   linear scale used only for work blocks. Anchors: 30→126.72, 60→142.56,
+ *   90→158.4. Work blocks are floored at 30 minutes by `minDurationFor`, so
+ *   this compressed scale never has to apply to a very short block the way
+ *   break/ritual heights do.
+ *
+ *   This scale is deliberately NOT proportional to duration — it trades the
+ *   Phase 4 proportional-timeline property for legibility. Under the old
+ *   `duration * 1.6` formula a 30-minute card rendered at 48px, too short to
+ *   fit the card content.
+ */
+export function blockHeight(durationMin: number, kind: BlockKind): number {
+  if (kind === 'deep' || kind === 'shallow') {
+    return DEEP_SHALLOW_HEIGHT_INTERCEPT + DEEP_SHALLOW_HEIGHT_SLOPE * durationMin
+  }
   return Math.max(34, durationMin * 1.6)
 }
 
@@ -75,7 +102,7 @@ export function layout(blocks: DayBlock[]): LayoutRow[] {
       const gapHeight = Math.max(8, gap * 1.6)
       rows.push({ type: 'gap', minutes: gap, height: gapHeight })
     }
-    rows.push({ type: 'block', block, height: blockHeight(block.durationMin) })
+    rows.push({ type: 'block', block, height: blockHeight(block.durationMin, block.kind) })
     prev = block
   }
 
@@ -363,6 +390,60 @@ export function blockProgress(block: DayBlock, nowMin: number): {
  * free-form editable duration field.
  */
 export const DURATION_PRESETS = [30, 60, 90] as const
+
+/**
+ * Duration chips for break blocks. Unlike other kinds, breaks have no
+ * free-text duration entry — these three presets are the only durations a
+ * user can newly choose for a break.
+ */
+export const BREAK_DURATION_PRESETS = [5, 10, 15] as const
+
+/**
+ * Which duration preset chips the composer should show for a given kind.
+ * Breaks get the tight 5/10/15 set; every other kind keeps DURATION_PRESETS.
+ */
+export function durationPresetsFor(kind: BlockKind): readonly number[] {
+  return kind === 'break' ? BREAK_DURATION_PRESETS : DURATION_PRESETS
+}
+
+/**
+ * Snaps an arbitrary duration to the nearest break preset (5, 10, or 15).
+ * Used only when a block actively becomes a break (e.g. the user switches
+ * kind to break) — never applied to an existing break's stored duration
+ * merely because it's off-preset, so pre-existing out-of-range breaks (e.g.
+ * the seeded 30-minute "Maker Day" break) are preserved until the user
+ * deliberately changes something.
+ *
+ * Ties (7.5, 12.5) resolve to the larger preset — i.e. round-half-up,
+ * matching the everyday behavior of Math.round.
+ */
+export function nearestBreakDuration(durationMin: number): number {
+  let best: number = BREAK_DURATION_PRESETS[0]
+  for (const preset of BREAK_DURATION_PRESETS) {
+    const bestDiff = Math.abs(best - durationMin)
+    const presetDiff = Math.abs(preset - durationMin)
+    if (presetDiff < bestDiff || (presetDiff === bestDiff && preset > best)) {
+      best = preset
+    }
+  }
+  return best
+}
+
+/**
+ * Resolves the title to persist for a block. `day_block.title` is
+ * `TEXT NOT NULL`, so a break with an empty title (breaks are the only kind
+ * where an empty title is allowed — see `canSave` in BlockComposer) persists
+ * as the literal 'Break' rather than an empty string, so every downstream
+ * consumer (timeline, archive, week view) reads sensibly with no extra
+ * fallback logic. Non-break kinds are returned trimmed but otherwise
+ * unchanged — an empty title is returned as-is for them since the composer's
+ * save gate blocks submission before this is ever called with one.
+ */
+export function resolveBlockTitle(title: string, kind: BlockKind): string {
+  const trimmed = title.trim()
+  if (kind === 'break' && trimmed === '') return 'Break'
+  return trimmed
+}
 
 /**
  * Mono summary line for the composer footer, e.g.

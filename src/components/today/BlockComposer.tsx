@@ -11,7 +11,10 @@ import {
   composerSummary,
   initialComposerDraft,
   resolveTaskAction,
-  DURATION_PRESETS,
+  resolveBlockTitle,
+  durationPresetsFor,
+  nearestBreakDuration,
+  BREAK_DURATION_PRESETS,
 } from '../../lib/today'
 import type { BlockKind, BlockRepeat, Track } from '../../db/types'
 
@@ -84,7 +87,9 @@ export function BlockComposer({ blockId, startMin: startMinProp, onDone }: Block
   }, [])
 
   const startValid = parseClock(startText, 0) !== null
-  const durationValid = parseDuration(durationText) !== null
+  // Breaks have no free-text duration field — draft.durationMin is always a
+  // valid number for them, set only via chips or kind-switch snapping.
+  const durationValid = draft.kind === 'break' || parseDuration(durationText) !== null
   const shutdownNeeded = !block && shutdownMin === null
   const shutdownParsed = shutdownNeeded ? parseClock(shutdownInputText, 0) : null
   const showPomodoros = draft.kind !== 'break' && draft.kind !== 'ritual'
@@ -121,20 +126,27 @@ export function BlockComposer({ blockId, startMin: startMinProp, onDone }: Block
 
   const handleKindChange = (kind: BlockKind) => {
     const minDur = minDurationFor(kind)
-    const nextDuration = Math.max(minDur, draft.durationMin)
+    // Switching TO break is a deliberate user action, so snap to the
+    // nearest preset (this also gives a brand-new break a sensible default:
+    // nearestBreakDuration(30) === 15). Switching between any other kinds,
+    // or re-selecting break while already a break, keeps the current value.
+    const nextDuration =
+      kind === 'break' && draft.kind !== 'break'
+        ? nearestBreakDuration(draft.durationMin)
+        : Math.max(minDur, draft.durationMin)
     const nextPomodoros = kind === 'break' || kind === 'ritual' ? 0 : Math.min(draft.pomodoros, maxPomodoros(nextDuration))
     setDraft((d) => ({ ...d, kind, durationMin: nextDuration, pomodoros: nextPomodoros }))
     if (nextDuration !== draft.durationMin) setDurationText(String(nextDuration))
   }
 
   const canSave =
-    draft.title.trim() !== '' &&
+    (draft.kind === 'break' || draft.title.trim() !== '') &&
     startValid &&
     durationValid &&
     (!shutdownNeeded || shutdownParsed !== null)
 
   const doSave = async () => {
-    const title = draft.title.trim()
+    const title = resolveBlockTitle(draft.title, draft.kind)
     const effectivePomodoros = showPomodoros ? draft.pomodoros : 0
 
     if (block) {
@@ -213,14 +225,25 @@ export function BlockComposer({ blockId, startMin: startMinProp, onDone }: Block
   }
 
   const handleAddToThisWeek = async () => {
-    await addTask({ title: draft.title.trim(), estimateMin: draft.durationMin })
+    await addTask({ title: resolveBlockTitle(draft.title, draft.kind), estimateMin: draft.durationMin })
     onDone()
   }
 
   const handleShorten = () => {
     if (shutdownMin === null) return
     const check = checkShutdown(draft.startMin, draft.durationMin, shutdownMin)
-    const next = Math.max(minDurationFor(draft.kind), check.fitDurationMin)
+    let next: number
+    if (draft.kind === 'break') {
+      // Land on the largest preset that still fits before shutdown, never
+      // an arbitrary minute value. handleShorten is only reachable when
+      // canShorten is true, which for breaks already guarantees some
+      // preset fits.
+      const fitting = BREAK_DURATION_PRESETS.filter((p) => p <= check.fitDurationMin)
+      if (fitting.length === 0) return
+      next = Math.max(...fitting)
+    } else {
+      next = Math.max(minDurationFor(draft.kind), check.fitDurationMin)
+    }
     setDraft((d) => ({ ...d, durationMin: next, pomodoros: Math.min(d.pomodoros, maxPomodoros(next)) }))
     setDurationText(String(next))
     setShutdownAlert(false)
@@ -245,7 +268,11 @@ export function BlockComposer({ blockId, startMin: startMinProp, onDone }: Block
 
   const fitCheck =
     !block && shutdownMin !== null ? checkShutdown(draft.startMin, draft.durationMin, shutdownMin) : null
-  const canShorten = fitCheck !== null && fitCheck.fitDurationMin >= minDurationFor(draft.kind)
+  const canShorten =
+    fitCheck !== null &&
+    (draft.kind === 'break'
+      ? BREAK_DURATION_PRESETS.some((p) => p <= fitCheck.fitDurationMin)
+      : fitCheck.fitDurationMin >= minDurationFor(draft.kind))
 
   return (
     <div className="composer-overlay" onClick={onDone}>
@@ -280,7 +307,7 @@ export function BlockComposer({ blockId, startMin: startMinProp, onDone }: Block
             className="composer-name-input"
             value={draft.title}
             onChange={(e) => setDraft((d) => ({ ...d, title: e.target.value }))}
-            placeholder="What is this block for?"
+            placeholder={draft.kind === 'break' ? 'Optional — what kind of break?' : 'What is this block for?'}
             autoFocus
           />
           <input
@@ -336,7 +363,7 @@ export function BlockComposer({ blockId, startMin: startMinProp, onDone }: Block
           <div className="composer-field">
             <span className="composer-field-label">Duration</span>
             <div className="composer-duration-chips">
-              {DURATION_PRESETS.map((preset) => (
+              {durationPresetsFor(draft.kind).map((preset) => (
                 <button
                   key={preset}
                   type="button"
@@ -347,15 +374,23 @@ export function BlockComposer({ blockId, startMin: startMinProp, onDone }: Block
                 </button>
               ))}
             </div>
-            <input
-              type="text"
-              className="composer-mono-input"
-              value={durationText}
-              onChange={(e) => handleDurationTextChange(e.target.value)}
-              placeholder="90"
-            />
-            {!durationValid && (
-              <span className="composer-hint composer-hint-error">Try 90, 1.5h, or 1h30</span>
+            {draft.kind === 'break' ? (
+              !(BREAK_DURATION_PRESETS as readonly number[]).includes(draft.durationMin) && (
+                <span className="composer-hint">{draft.durationMin} min (kept as-is; pick a chip to change)</span>
+              )
+            ) : (
+              <>
+                <input
+                  type="text"
+                  className="composer-mono-input"
+                  value={durationText}
+                  onChange={(e) => handleDurationTextChange(e.target.value)}
+                  placeholder="90"
+                />
+                {!durationValid && (
+                  <span className="composer-hint composer-hint-error">Try 90, 1.5h, or 1h30</span>
+                )}
+              </>
             )}
           </div>
 
