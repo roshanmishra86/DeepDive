@@ -4,6 +4,8 @@ import { useTodayStore } from '../../stores/today'
 import { useAppStore } from '../../stores/app'
 import type { Task } from '../../db/types'
 import { taskMeta, blockDraftFromTask } from '../../lib/week'
+import { nextFreeStart, checkShutdown } from '../../lib/today'
+import { minutesToClock } from '../../lib/time'
 import { Trash } from '@phosphor-icons/react/dist/csr/Trash'
 import { Pencil } from '@phosphor-icons/react/dist/csr/Pencil'
 
@@ -21,16 +23,36 @@ export function TaskRow({ task, isDrop = false, onEdit, now }: TaskRowProps) {
   const removeTask = useTasksStore((s) => s.removeTask)
   const addBlock = useTodayStore((s) => s.addBlock)
   const blocks = useTodayStore((s) => s.blocks)
+  const shutdownMin = useTodayStore((s) => s.shutdownMin)
   const setView = useAppStore((s) => s.setView)
 
   const [deleteConfirm, setDeleteConfirm] = useState(false)
+  const [shutdownWarning, setShutdownWarning] = useState<string | null>(null)
 
   const meta = taskMeta(task, now)
   const isPlanned = blocks.some((b) => b.taskId === task.id)
 
   const handlePlanToday = async () => {
     const draft = blockDraftFromTask(task)
-    await addBlock(draft)
+    // `blockDraftFromTask` never sets a startMin, so addBlock places the block
+    // at nextFreeStart(blocks, fromMin, durationMin). Anchor that on the
+    // current minute rather than letting it default to 0 — otherwise planning
+    // a task on an empty day would schedule it at 12:00 AM. `now` is already
+    // passed in and refreshed by WeekView, so this component never reads the
+    // clock itself.
+    const fromMin = now.getHours() * 60 + now.getMinutes()
+    const prospectiveStart = nextFreeStart(blocks, fromMin, draft.durationMin)
+    const check = checkShutdown(prospectiveStart, draft.durationMin, shutdownMin)
+    if (!check.fits) {
+      setShutdownWarning(
+        shutdownMin !== null
+          ? `Doesn't fit before shutdown (${minutesToClock(shutdownMin)})`
+          : "Doesn't fit before shutdown"
+      )
+      return
+    }
+    setShutdownWarning(null)
+    await addBlock({ ...draft, fromMin })
     setView('today')
   }
 
@@ -52,6 +74,11 @@ export function TaskRow({ task, isDrop = false, onEdit, now }: TaskRowProps) {
         <div className="task-content">
           <div className={`task-title${task.done ? ' task-done' : ''}`}>{task.title}</div>
           {meta && <div className="task-meta">{meta}</div>}
+          {shutdownWarning && (
+            <div className="task-shutdown-warning" role="alert">
+              {shutdownWarning}
+            </div>
+          )}
         </div>
       </div>
 

@@ -34,6 +34,56 @@ describe('notes repository', () => {
     expect(note?.note).toBe('Updated version')
   })
 
+  it('returns null shutdown for a day with no row', async () => {
+    const shutdown = await notes.getDayShutdown(driver, '2026-12-25')
+    expect(shutdown).toBeNull()
+  })
+
+  it('returns null shutdown for a day that has a note but no shutdown set', async () => {
+    const day = '2026-08-03'
+    await notes.setDayNote(driver, day, 'Just a note')
+
+    const shutdown = await notes.getDayShutdown(driver, day)
+    expect(shutdown).toBeNull()
+  })
+
+  it('sets and gets a day shutdown time', async () => {
+    const day = '2026-08-03'
+    await notes.setDayShutdown(driver, day, 1200)
+
+    const shutdown = await notes.getDayShutdown(driver, day)
+    expect(shutdown).toBe(1200)
+  })
+
+  it('sets a day shutdown twice without erroring, keeping the latest value', async () => {
+    const day = '2026-08-03'
+    await notes.setDayShutdown(driver, day, 1200)
+    await notes.setDayShutdown(driver, day, 1260)
+
+    const shutdown = await notes.getDayShutdown(driver, day)
+    expect(shutdown).toBe(1260)
+  })
+
+  it('preserves the note when setting shutdown after setDayNote', async () => {
+    const day = '2026-08-03'
+    await notes.setDayNote(driver, day, 'Great day!')
+    await notes.setDayShutdown(driver, day, 1200)
+
+    const note = await notes.getDayNote(driver, day)
+    expect(note?.note).toBe('Great day!')
+    expect(note?.shutdownMin).toBe(1200)
+  })
+
+  it('preserves the shutdown when setting note after setDayShutdown', async () => {
+    const day = '2026-08-03'
+    await notes.setDayShutdown(driver, day, 1200)
+    await notes.setDayNote(driver, day, 'Great day!')
+
+    const note = await notes.getDayNote(driver, day)
+    expect(note?.note).toBe('Great day!')
+    expect(note?.shutdownMin).toBe(1200)
+  })
+
   it('adds a distraction', async () => {
     const day = '2026-08-03'
     const id = await notes.addDistraction(driver, {

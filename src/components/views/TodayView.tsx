@@ -2,26 +2,34 @@ import { useEffect, useState } from 'react'
 import { useTodayStore } from '../../stores/today'
 import { toDayKey } from '../../lib/time'
 import { openDatabase } from '../../db/index'
-import { layout, daySummary, blockState, conflicts } from '../../lib/today'
-import { formatDuration, minutesToClock } from '../../lib/time'
+import { layout, daySummary, blockState, conflicts, nextFreeStart } from '../../lib/today'
+import { formatDuration, minutesToClock, parseClock } from '../../lib/time'
 import { TimelineBlock } from '../today/TimelineBlock'
-import { BlockEditor } from '../today/BlockEditor'
+import { BlockComposer } from '../today/BlockComposer'
 import { ApplyTemplateMenu } from '../today/ApplyTemplateMenu'
+
+type ComposerState =
+  | { mode: 'closed' }
+  | { mode: 'new'; startMin: number }
+  | { mode: 'edit'; blockId: number }
 
 export function TodayView() {
   const blocks = useTodayStore((s) => s.blocks)
   const loading = useTodayStore((s) => s.loading)
   const error = useTodayStore((s) => s.error)
   const hydrate = useTodayStore((s) => s.hydrate)
+  const shutdownMin = useTodayStore((s) => s.shutdownMin)
+  const setShutdown = useTodayStore((s) => s.setShutdown)
 
   const [nowMin, setNowMin] = useState(() => {
     const d = new Date()
     return d.getHours() * 60 + d.getMinutes()
   })
 
-  const [editorOpen, setEditorOpen] = useState(false)
-  const [editorBlockId, setEditorBlockId] = useState<number | null>(null)
+  const [composerState, setComposerState] = useState<ComposerState>({ mode: 'closed' })
   const [templateMenuOpen, setTemplateMenuOpen] = useState(false)
+  const [shutdownEditing, setShutdownEditing] = useState(false)
+  const [shutdownText, setShutdownText] = useState('')
 
   // Hydrate on mount
   useEffect(() => {
@@ -51,18 +59,27 @@ export function TodayView() {
   }, [])
 
   const summary = daySummary(blocks)
-  const rows = layout(blocks)
   const conflictList = conflicts(blocks)
   const overlapByBlockId = new Map(conflictList.map((c) => [c.blockId, c.overlapMin]))
 
-  const openEditor = (blockId: number | null = null) => {
-    setEditorBlockId(blockId)
-    setEditorOpen(true)
+  const openNewComposer = () => {
+    setComposerState({ mode: 'new', startMin: nextFreeStart(blocks, nowMin, 30) })
   }
 
-  const closeEditor = () => {
-    setEditorOpen(false)
-    setEditorBlockId(null)
+  const openEditComposer = (blockId: number) => {
+    setComposerState({ mode: 'edit', blockId })
+  }
+
+  const closeComposer = () => {
+    setComposerState({ mode: 'closed' })
+  }
+
+  const handleShutdownSave = async () => {
+    const parsed = parseClock(shutdownText, 0)
+    if (parsed !== null) {
+      await setShutdown(parsed, 'day')
+      setShutdownEditing(false)
+    }
   }
 
   if (loading) {
@@ -85,6 +102,10 @@ export function TodayView() {
     )
   }
 
+  const isEmptyAndClosed = blocks.length === 0 && composerState.mode === 'closed'
+
+  const rows = layout(blocks)
+
   return (
     <div className="today-view">
       {/* Header */}
@@ -103,6 +124,41 @@ export function TodayView() {
                 : `${conflictList.length} blocks overlap their predecessors`}
             </div>
           )}
+          {shutdownMin !== null && (
+            <div className="shutdown-control">
+              {shutdownEditing ? (
+                <input
+                  type="text"
+                  className="shutdown-input"
+                  autoFocus
+                  value={shutdownText}
+                  onChange={(e) => setShutdownText(e.target.value)}
+                  onBlur={() => void handleShutdownSave()}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') void handleShutdownSave()
+                    if (e.key === 'Escape') {
+                      e.stopPropagation()
+                      setShutdownEditing(false)
+                    }
+                  }}
+                  aria-label="Edit today's shutdown time"
+                  placeholder="8pm"
+                />
+              ) : (
+                <button
+                  type="button"
+                  className="shutdown-btn"
+                  onClick={() => {
+                    setShutdownText(minutesToClock(shutdownMin))
+                    setShutdownEditing(true)
+                  }}
+                  aria-label={`Shutdown time ${minutesToClock(shutdownMin)}, click to change for today`}
+                >
+                  shutdown {minutesToClock(shutdownMin)}
+                </button>
+              )}
+            </div>
+          )}
         </div>
         <div className="today-actions">
           <button
@@ -118,7 +174,7 @@ export function TodayView() {
           </button>
           <button
             className="btn-primary"
-            onClick={() => openEditor(null)}
+            onClick={openNewComposer}
             aria-label="Create new block"
           >
             <svg width="13" height="13" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.3">
@@ -130,16 +186,22 @@ export function TodayView() {
       </div>
 
       {/* Timeline */}
-      {blocks.length === 0 ? (
-        <div className="view-empty">
-          <div>No blocks scheduled</div>
-          <div style={{ marginTop: '12px', display: 'flex', gap: '8px', justifyContent: 'center' }}>
-            <button className="btn-primary" onClick={() => openEditor(null)}>
-              New block
+      {isEmptyAndClosed ? (
+        <div className="today-timeline">
+          <div className="timeline-gutter" />
+          <div className="timeline-blocks">
+            <button
+              type="button"
+              className="timeline-ghost-row"
+              onClick={openNewComposer}
+            >
+              Add your first block — starts now at {minutesToClock(nowMin)}
             </button>
-            <button className="btn-secondary" onClick={() => setTemplateMenuOpen(true)}>
-              Apply template
-            </button>
+            <div style={{ marginTop: '12px' }}>
+              <button className="btn-secondary" onClick={() => setTemplateMenuOpen(true)}>
+                Apply template
+              </button>
+            </div>
           </div>
         </div>
       ) : (
@@ -172,43 +234,49 @@ export function TodayView() {
 
           {/* Blocks column */}
           <div className="timeline-blocks">
-            {rows.map((row, i) => (
-              row.type === 'block' ? (
+            {rows.map((row, i) => {
+              if (row.type !== 'block') {
+                return (
+                  <div
+                    key={`gap-${i}`}
+                    style={{
+                      height: `${row.height}px`,
+                      background: 'transparent',
+                    }}
+                  />
+                )
+              }
+
+              return (
                 <TimelineBlock
                   key={row.block.id}
                   block={row.block}
                   height={row.height}
                   state={blockState(row.block, nowMin)}
                   nowMin={nowMin}
-                  onEdit={() => openEditor(row.block.id)}
+                  onEdit={() => openEditComposer(row.block.id)}
                   overlapMin={overlapByBlockId.get(row.block.id)}
                 />
-              ) : (
-                <div
-                  key={`gap-${i}`}
-                  style={{
-                    height: `${row.height}px`,
-                    background: 'transparent',
-                  }}
-                />
               )
-            ))}
+            })}
           </div>
         </div>
-      )}
-
-      {/* Editor modal */}
-      {editorOpen && (
-        <BlockEditor
-          blockId={editorBlockId}
-          onClose={closeEditor}
-        />
       )}
 
       {/* Template menu */}
       {templateMenuOpen && (
         <ApplyTemplateMenu
           onClose={() => setTemplateMenuOpen(false)}
+        />
+      )}
+
+      {/* Block composer */}
+      {composerState.mode !== 'closed' && (
+        <BlockComposer
+          key={composerState.mode === 'edit' ? composerState.blockId : 'new'}
+          blockId={composerState.mode === 'edit' ? composerState.blockId : null}
+          startMin={composerState.mode === 'new' ? composerState.startMin : 0}
+          onDone={closeComposer}
         />
       )}
     </div>

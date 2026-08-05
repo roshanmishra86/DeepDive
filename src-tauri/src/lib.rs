@@ -28,6 +28,18 @@ pub fn run() {
                                 sql: include_str!("../migrations/0002_seed.sql"),
                                 kind: MigrationKind::Up,
                             },
+                            Migration {
+                                version: 3,
+                                description: "Per-day shutdown time",
+                                sql: include_str!("../migrations/0003_day_shutdown.sql"),
+                                kind: MigrationKind::Up,
+                            },
+                            Migration {
+                                version: 4,
+                                description: "Block composer fields",
+                                sql: include_str!("../migrations/0004_block_composer.sql"),
+                                kind: MigrationKind::Up,
+                            },
                         ],
                     )
                     .build(),

@@ -5,7 +5,7 @@
  */
 
 import type { SqlDriver } from '../driver'
-import type { DayStatus, DayBlock, BlockKind } from '../types'
+import type { DayStatus, DayBlock, BlockKind, BlockRepeat } from '../types'
 import { toDayKey, fromDayKey, addDays } from '../../lib/time'
 
 export interface DayRecord {
@@ -37,6 +37,10 @@ interface DayBlockRow {
   pomodoros: number
   completed: number
   sort: number
+  note: string
+  repeat: BlockRepeat
+  track_id: number | null
+  quiet: number
 }
 
 export async function dayStatuses(
@@ -113,6 +117,10 @@ export async function dayRecord(driver: SqlDriver, day: string): Promise<DayReco
     pomodoros: row.pomodoros,
     completed: row.completed === 1,
     sort: row.sort,
+    note: row.note,
+    repeat: row.repeat,
+    trackId: row.track_id,
+    quiet: row.quiet === 1,
   }))
 
   return {

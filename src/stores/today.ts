@@ -1,8 +1,10 @@
 import { create } from 'zustand'
 import type { SqlDriver } from '../db/driver'
-import type { DayBlock } from '../db/types'
+import type { DayBlock, BlockRepeat } from '../db/types'
 import * as blocksRepo from '../db/repos/blocks'
-import { nudge, moveBlock as moveBlockPure, sortBlocks } from '../lib/today'
+import * as notesRepo from '../db/repos/notes'
+import * as settingsRepo from '../db/repos/settings'
+import { nudge, moveBlock as moveBlockPure, sortBlocks, nextFreeStart } from '../lib/today'
 
 /**
  * Today's blocks store. Hydrates from the database via `day_block` table.
@@ -16,15 +18,33 @@ interface TodayState {
   blocks: DayBlock[]
   loading: boolean
   error: string | null
+  // Effective shutdown time for the loaded day (null if none configured).
+  shutdownMin: number | null
+  // true when shutdownMin came from the global 'shutdownMin' setting, false
+  // when it came from a per-day override (day_note.shutdown_min).
+  shutdownIsDefault: boolean
   hydrate: (driver: SqlDriver | null, day: string) => Promise<void>
   addBlock: (input: {
     title: string
     kind: 'deep' | 'shallow' | 'ritual' | 'break'
     durationMin: number
     startMin?: number
+    /**
+     * Current minute-of-day, supplied by the caller, used to compute a
+     * default startMin when none is given. The store must never call
+     * `new Date()` itself — a store reading the clock directly is what
+     * produced this project's past UTC-day-key defect, and it makes this
+     * action untestable. Defaults to 0 for back-compat.
+     */
+    fromMin?: number
     pomodoros?: number
     taskId?: number | null
-  }) => Promise<void>
+    note?: string
+    repeat?: BlockRepeat
+    trackId?: number | null
+    quiet?: boolean
+  }) => Promise<number | null>
+  setShutdown: (min: number, scope: 'day' | 'default') => Promise<void>
   editBlock: (id: number, patch: Partial<Omit<DayBlock, 'id' | 'day' | 'sort'>>, ripple?: boolean) => Promise<void>
   removeBlock: (id: number) => Promise<void>
   move: (id: number, direction: -1 | 1) => Promise<void>
@@ -47,16 +67,35 @@ export const useTodayStore = create<TodayState>()((set, get) => ({
   blocks: [],
   loading: false,
   error: null,
+  shutdownMin: null,
+  shutdownIsDefault: true,
 
   hydrate: async (driver, day) => {
     persistenceDriver = driver
     hydratedDay = day
-    set({ day, loading: true, error: null })
+    set({ day, loading: true, error: null, shutdownMin: null, shutdownIsDefault: true })
 
     if (!driver) {
       // In-memory mode: keep empty state for vite dev
       set({ loading: false })
       return
+    }
+
+    // Resolve the shutdown time. This is secondary to the day's blocks, so a
+    // failure here must not abort block hydration below.
+    try {
+      const dayShutdown = await notesRepo.getDayShutdown(driver, day)
+      if (dayShutdown !== null) {
+        set({ shutdownMin: dayShutdown, shutdownIsDefault: false })
+      } else {
+        const raw = await settingsRepo.getSetting(driver, 'shutdownMin')
+        const parsed = raw !== null && raw.trim() !== '' ? Number(raw) : NaN
+        if (!Number.isNaN(parsed)) {
+          set({ shutdownMin: parsed, shutdownIsDefault: true })
+        }
+      }
+    } catch (err) {
+      console.error('Failed to hydrate shutdown time:', err)
     }
 
     try {
@@ -71,20 +110,15 @@ export const useTodayStore = create<TodayState>()((set, get) => ({
 
   addBlock: async (input) => {
     const state = get()
-    if (!state.day) return
+    if (!state.day) return null
 
     // Optimistically add to in-memory state
     const localId = nextLocalId--
     const blocks = state.blocks
-    // Default startMin: after the last block's end, or 5:00 AM if empty
+    // Default startMin: earliest free slot at or after fromMin (0 if not given)
     let startMin = input.startMin
     if (startMin === undefined) {
-      if (blocks.length > 0) {
-        const lastBlock = blocks[blocks.length - 1]
-        startMin = lastBlock.startMin + lastBlock.durationMin
-      } else {
-        startMin = 300 // 5:00 AM
-      }
+      startMin = nextFreeStart(blocks, input.fromMin ?? 0, input.durationMin)
     }
 
     const newBlock: DayBlock = {
@@ -98,6 +132,10 @@ export const useTodayStore = create<TodayState>()((set, get) => ({
       pomodoros: input.pomodoros ?? 0,
       completed: false,
       sort: blocks.length,
+      note: input.note ?? '',
+      repeat: input.repeat ?? 'once',
+      trackId: input.trackId ?? null,
+      quiet: input.quiet ?? false,
     }
     const withNew = sortBlocks([...blocks, newBlock])
     set({ blocks: withNew })
@@ -116,18 +154,26 @@ export const useTodayStore = create<TodayState>()((set, get) => ({
           durationMin: input.durationMin,
           pomodoros: input.pomodoros ?? 0,
           sort: withNew.length - 1,
+          note: input.note ?? '',
+          repeat: input.repeat ?? 'once',
+          trackId: input.trackId ?? null,
+          quiet: input.quiet ?? false,
         })
         // Update state with real id
         set((_s) => ({
           blocks: get().blocks.map((b) => (b.id === localId ? { ...b, id: realId } : b)),
         }))
+        return realId
       } catch (err) {
         set((_s) => ({ error: err instanceof Error ? err.message : 'Save failed' }))
         console.error('Failed to persist new block:', err)
         // Revert optimistic update
         set({ blocks })
+        return null
       }
     }
+
+    return localId
   },
 
   editBlock: async (id, patch, ripple = true) => {
@@ -187,6 +233,11 @@ export const useTodayStore = create<TodayState>()((set, get) => ({
         if (patch.durationMin !== undefined) persistPatch.durationMin = patch.durationMin
         if (patch.pomodoros !== undefined) persistPatch.pomodoros = patch.pomodoros
         if (patch.completed !== undefined) persistPatch.completed = patch.completed
+        if (patch.taskId !== undefined) persistPatch.taskId = patch.taskId
+        if (patch.note !== undefined) persistPatch.note = patch.note
+        if (patch.repeat !== undefined) persistPatch.repeat = patch.repeat
+        if (patch.trackId !== undefined) persistPatch.trackId = patch.trackId
+        if (patch.quiet !== undefined) persistPatch.quiet = patch.quiet
         if (Object.keys(persistPatch).length > 0) {
           await blocksRepo.updateBlock(driver, id, persistPatch)
         }
@@ -343,6 +394,36 @@ export const useTodayStore = create<TodayState>()((set, get) => ({
         console.error('Failed to persist nudge:', err)
         // Revert optimistic update
         set({ blocks: state.blocks })
+      }
+    }
+  },
+
+  setShutdown: async (min, scope) => {
+    const state = get()
+    const prev = { shutdownMin: state.shutdownMin, shutdownIsDefault: state.shutdownIsDefault }
+
+    if (scope === 'day') {
+      if (!hydratedDay) return
+      set({ shutdownMin: min, shutdownIsDefault: false })
+      if (persistenceDriver) {
+        try {
+          await notesRepo.setDayShutdown(persistenceDriver, hydratedDay, min)
+        } catch (err) {
+          set({ error: err instanceof Error ? err.message : 'Save failed' })
+          console.error('Failed to persist day shutdown time:', err)
+          set(prev)
+        }
+      }
+    } else {
+      set({ shutdownMin: min, shutdownIsDefault: true })
+      if (persistenceDriver) {
+        try {
+          await settingsRepo.setSetting(persistenceDriver, 'shutdownMin', String(min))
+        } catch (err) {
+          set({ error: err instanceof Error ? err.message : 'Save failed' })
+          console.error('Failed to persist default shutdown time:', err)
+          set(prev)
+        }
       }
     }
   },

@@ -191,6 +191,116 @@ describe('blocks repository', () => {
     })
   })
 
+  it('round-trips the block composer fields (note, repeat, trackId, quiet) through real SQLite', async () => {
+    const day = '2026-08-12'
+    const trackId = await driver.execute(
+      'INSERT INTO track (path, display_name, category) VALUES (?, ?, ?)',
+      ['/music/focus.mp3', 'Focus', 'ambient']
+    )
+
+    const id = await blocks.createBlock(driver, {
+      day,
+      title: 'Composed block',
+      kind: 'deep',
+      startMin: 300,
+      durationMin: 90,
+      note: 'Ship the thing',
+      repeat: 'daily',
+      trackId: trackId.lastInsertId,
+      quiet: true,
+    })
+
+    const retrieved = await blocks.listBlocksForDay(driver, day)
+    const block = retrieved.find((b) => b.id === id)
+    expect(block?.note).toBe('Ship the thing')
+    expect(block?.repeat).toBe('daily')
+    expect(block?.trackId).toBe(trackId.lastInsertId)
+    expect(block?.quiet).toBe(true)
+  })
+
+  it('defaults the block composer fields when not provided', async () => {
+    const day = '2026-08-13'
+    const id = await blocks.createBlock(driver, {
+      day,
+      title: 'Plain block',
+      kind: 'shallow',
+      startMin: 300,
+      durationMin: 30,
+    })
+
+    const retrieved = await blocks.listBlocksForDay(driver, day)
+    const block = retrieved.find((b) => b.id === id)
+    expect(block?.note).toBe('')
+    expect(block?.repeat).toBe('once')
+    expect(block?.trackId).toBeNull()
+    expect(block?.quiet).toBe(false)
+  })
+
+  it('updateBlock persists note, repeat, trackId, and quiet', async () => {
+    const day = '2026-08-14'
+    const trackId = await driver.execute(
+      'INSERT INTO track (path, display_name, category) VALUES (?, ?, ?)',
+      ['/music/deep.mp3', 'Deep', 'ambient']
+    )
+    const id = await blocks.createBlock(driver, {
+      day,
+      title: 'Editable block',
+      kind: 'deep',
+      startMin: 300,
+      durationMin: 90,
+    })
+
+    await blocks.updateBlock(driver, id, {
+      note: 'Updated note',
+      repeat: 'weekdays',
+      trackId: trackId.lastInsertId,
+      quiet: true,
+    })
+
+    const retrieved = await blocks.listBlocksForDay(driver, day)
+    const block = retrieved.find((b) => b.id === id)
+    expect(block?.note).toBe('Updated note')
+    expect(block?.repeat).toBe('weekdays')
+    expect(block?.trackId).toBe(trackId.lastInsertId)
+    expect(block?.quiet).toBe(true)
+  })
+
+  it('enforces the repeat CHECK constraint at the SQL boundary', async () => {
+    const day = '2026-08-15'
+    let error: unknown = null
+    try {
+      await driver.execute(
+        'INSERT INTO day_block (day, title, kind, start_min, duration_min, "repeat") VALUES (?, ?, ?, ?, ?, ?)',
+        [day, 'Bad repeat', 'deep', 300, 90, 'weekly']
+      )
+    } catch (e) {
+      error = e
+    }
+    expect(error).not.toBeNull()
+  })
+
+  it('nulls out trackId when the referenced track is deleted', async () => {
+    const day = '2026-08-16'
+    const trackId = await driver.execute(
+      'INSERT INTO track (path, display_name, category) VALUES (?, ?, ?)',
+      ['/music/gone.mp3', 'Gone', 'ambient']
+    )
+    const id = await blocks.createBlock(driver, {
+      day,
+      title: 'Track-linked block',
+      kind: 'deep',
+      startMin: 300,
+      durationMin: 90,
+      trackId: trackId.lastInsertId,
+    })
+
+    await driver.execute('DELETE FROM track WHERE id = ?', [trackId.lastInsertId])
+
+    const retrieved = await blocks.listBlocksForDay(driver, day)
+    const block = retrieved.find((b) => b.id === id)
+    expect(block?.trackId).toBeNull()
+  })
+
   it('preserves pomodoros and sort when applying a template to a day', async () => {
     const day = '2026-08-11'
     await blocks.applyTemplateToDay(driver, 1, day) // Maker Day

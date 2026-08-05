@@ -16,6 +16,7 @@
   --text-faint: #a09889;
   --warn: #b8862f;
   --danger: #a84a30;
+  --danger-surface: rgba(168, 74, 48, 0.1);
   --close: #c8493b;
   --font-display: "Newsreader Variable", "Newsreader", Georgia, "Times New Roman", serif;
   --font-ui: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;

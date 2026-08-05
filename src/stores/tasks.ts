@@ -22,7 +22,7 @@ interface TasksState {
     urgent?: boolean
     dueAt?: string | null
     estimateMin?: number | null
-  }) => Promise<void>
+  }) => Promise<number | null>
   editTask: (id: number, patch: Partial<Omit<Task, 'id' | 'createdAt' | 'archived'>>) => Promise<void>
   toggleImportant: (id: number) => Promise<void>
   toggleUrgent: (id: number) => Promise<void>
@@ -102,13 +102,17 @@ export const useTasksStore = create<TasksState>()((set, get) => ({
         set((_s) => ({
           tasks: get().tasks.map((t) => (t.id === localId ? { ...t, id: realId } : t)),
         }))
+        return realId
       } catch (err) {
         set((_s) => ({ error: err instanceof Error ? err.message : 'Save failed' }))
         console.error('Failed to persist new task:', err)
         // Revert optimistic update
         set({ tasks })
+        return null
       }
     }
+
+    return localId
   },
 
   editTask: async (id, patch) => {

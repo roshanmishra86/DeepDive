@@ -64,6 +64,20 @@ describe('tasks store', () => {
     expect(fromDb[0].important).toBe(true)
   })
 
+  it('addTask returns the real id when persisted, and a negative optimistic id under a null driver', async () => {
+    await useTasksStore.getState().hydrate(driver)
+
+    const id = await useTasksStore.getState().addTask({ title: 'Persisted task' })
+    expect(id).not.toBeNull()
+    expect(id!).toBeGreaterThan(0)
+
+    useTasksStore.setState({ tasks: [], groupBy: 'matrix', loading: false, error: null })
+    await useTasksStore.getState().hydrate(null)
+    const localId = await useTasksStore.getState().addTask({ title: 'Local only task' })
+    expect(localId).not.toBeNull()
+    expect(localId!).toBeLessThan(0)
+  })
+
   it('trims task title on add', async () => {
     await useTasksStore.getState().hydrate(driver)
 

@@ -474,6 +474,188 @@ gates did pass — 371 tests green — and could not see any of this.
 | Store read-backs from real SQLite + hydrate round-trip | pass |
 | Accessible names include the task title | pass — checkbox, both chips, plan, edit, delete |
 
+### Phase 5.5 — Today composer *(owner: Sonnet sub-agents, verified by main session)*
+> **Superseded in part by Phase 5.6.** The inline-composer decision below was reversed: the
+> composer is a modal again. Everything else in this section still holds. Kept as written because
+> the reasoning and the defect list remain the record of how the scheduling model was arrived at.
+
+- [x] ~~The `BlockEditor` modal is gone. Blocks are composed **inline on the timeline**, in the row
+  the block will occupy — for creating *and* editing.~~ **Reversed in 5.6.** `BlockEditor.tsx` and
+  the `.editor-*` CSS family are still deleted; the replacement modal is `BlockComposer.tsx` with a
+  `.composer-*` family, not a revival of the old editor.
+- [x] New blocks auto-schedule: the first block of a day starts at the **current minute**, and
+  every later block lands in the **next free slot** — `nextFreeStart()`
+- [x] A user-declared **shutdown time** bounds the day; a block that would cross it is refused and
+  offered to the This Week list instead
+- [x] Durations step in 30-minute Pomodoro units; times are typed free-form ("5pm", "17:30",
+  "1h30") rather than dragged on a slider
+- [x] Pomodoro count is derived from duration (`floor(duration / 30)`), offered as a dropdown
+  defaulting to the maximum
+
+#### Scheduling model
+`nextFreeStart(blocks, fromMin, durationMin)` returns the earliest `t >= fromMin` whose
+half-open interval `[t, t + durationMin)` intersects no existing block. Consequences:
+
+| Case | Result |
+| --- | --- |
+| Empty day | `fromMin` **exact and unrounded** — 10:17 AM means 10:17 AM. The 30-minute grid governs *duration*, not clock alignment. |
+| A block in progress | The new block starts when that block ends. |
+| A run of back-to-back blocks | Skipped as a chain, not one block at a time. |
+| A mid-day gap | Used only if the whole duration fits, so default placement never manufactures an overlap. |
+
+The Phase 4 overlap model is untouched: a user can still *type* a colliding start time and get the
+visible conflict badge. Auto-placement simply never creates one on its own.
+
+The algorithm is **order-independent by construction** — it rescans from the top of the list after
+every collision, so it returns the same answer for an unsorted input. The internal `sortBlocks()`
+call is therefore defensive rather than load-bearing. This was confirmed by mutation, not assumed:
+removing the sort leaves the whole suite green.
+
+#### Shutdown time: global default, per-day override
+`setting.shutdownMin` holds the default; `day_note.shutdown_min` (new, nullable, migration
+`0003`) holds a per-day override that wins when present. The setting is deliberately **not
+seeded** — its absence is the signal that the user has never been asked, which is what makes the
+composer's one-time "When do you shut down today?" prompt fire exactly once ever.
+
+`minDurationFor(kind)` floors deep/shallow at 30 minutes but break/ritual at 5, because the seeded
+"Maker Day" template contains a 5-minute Shut Down Ritual that a blanket 30-minute floor would
+make unrepresentable.
+
+#### Defects found in verification and fixed
+Both were found by independent inspection **after** the implementing sub-agent reported all items
+complete with all gates passing. The gates did pass and could not see either.
+- [x] **The draft-row sentinel id collided with real block ids.** The composer splices a synthetic
+  `DayBlock` into `layout()`'s input so it lands in the right position in both the gutter and the
+  block column. That draft used `id: -1` — but the store mints optimistic ids negatively *from -1
+  downward*, and under `vite dev` (null driver) those negative ids are never swapped for SQLite
+  ones, so `-1` is a live id there. Opening the composer would render it over an existing block's
+  row. This is the Phase 4 "latent id collision" defect in a third costume. Now
+  `DRAFT_BLOCK_ID = Number.MIN_SAFE_INTEGER`, which the store's decrementing counter cannot reach
+  in any realistic session.
+- [x] **"Plan today" would schedule at 12:00 AM.** `TaskRow` computed the prospective start with
+  `nextFreeStart(blocks, 0, …)` and called `addBlock` without a `fromMin`, so on an empty day a
+  planned task landed at midnight — a regression from the old hardcoded 5:00 AM. It already
+  receives a refreshed `now` prop, which now drives both the check and the insert. The store still
+  never reads the clock itself (the Phase 3 rule).
+
+#### Note on the `fromMin` parameter
+`addBlock` takes the current minute-of-day from its **caller** rather than calling `new Date()`.
+A store reading the clock directly is what produced the Phase 3 UTC-day-key defect, and it also
+makes the action untestable — the "lands exactly at `fromMin`" test uses 617 specifically to prove
+there is no hidden rounding.
+
+#### Note on proving a regression test can fail
+Per the Phase 3 lesson, the new tests were checked by mutation. Two candidate mutations to
+`nextFreeStart` (dropping the rescan, dropping the sort) left the suite **green** — correctly, as
+both are redundant with each other, and a third (`<` → `<=` on the collision bound) turns the loop
+infinite, which is its own proof that the strict bound is load-bearing. Failability was
+demonstrated on `maxPomodoros` (`floor` → `ceil` ⇒ `1 failed | 68 passed`), then restored. Worth
+recording: *a mutation that does not turn the suite red is not automatically a weak test* — it can
+equally mean the mutated line was not load-bearing.
+
+**Phase 5.5 acceptance — MET (independently verified, not taken on the sub-agents' reports):**
+
+| Check | Result |
+| --- | --- |
+| `oxlint` | clean, zero warnings |
+| `tsc -b` + `tsc -p tsconfig.test.json` | pass |
+| `vitest run` | 437 tests, 19 files (395 before) |
+| `vite build` | pass — 330.4 KB JS / 44.0 KB CSS (gzip 97.3 / 7.5) |
+| `cargo fmt --all -- --check` | pass |
+| `cargo clippy --all-targets -- -D warnings` | pass |
+| New hex literals in `chrome.css` | zero |
+| `.editor-*` rules remaining | zero — `.task-editor-*` and `.modal-*` are separate families, untouched |
+| Dangling `BlockEditor` imports | zero |
+| Regression test proven able to fail | pass — `maxPomodoros` mutated, suite went red, fix restored |
+| Store read-backs from real SQLite | pass — `setShutdown` verified through `notesRepo`/`settingsRepo`, plus hydrate precedence |
+
+#### Known, deliberately not fixed
+- [ ] No component-level test covers the composer's render path, including the draft-id collision
+  above — it was caught by inspection. The suite runs on the `node` environment because jsdom
+  startup costs ~113s on this `/mnt/c` mount (Phase 2). Revisit with the Phase 10 QA pass rather
+  than reintroducing jsdom for one file.
+- [ ] Typing a below-minimum duration (e.g. `5` on a deep block) silently clamps to 30 while the
+  text field still reads `5`. The stepper label shows the true value; the input does not
+  re-render its raw text. Cosmetic.
+
+### Phase 5.6 — Composer modal from the Claude Design source *(owner: Sonnet sub-agents, verified by main session)*
+
+Implements `Deep Work.dc.html` (Claude Design project `Deepwork Desktop Application UI`), composer
+at lines 809–908. The design is the source of truth for layout and type scale; the behaviour rules
+from 5.5 win wherever the two disagree.
+
+- [x] The composer is a **centred modal** over a scrim, opened by "+ New block" — reversing 5.5's
+  inline-on-the-timeline decision. `TodayView` no longer splices a synthetic draft row into
+  `layout()`; the `DRAFT_BLOCK_ID` sentinel and its collision hazard are gone with it.
+- [x] Serif title input, one-line intent `note`, Start / Duration / Pomodoros row, Repeats + Sound
+  row, tag row, mono summary footer
+- [x] **Delete** action in edit mode — present in the design, absent from the 5.5 composer
+- [x] Migration `0004` adds `note`, `repeat`, `track_id`, `quiet` to `day_block`
+
+#### Why the reversal
+The inline composer put an editing surface inside a row whose height encodes duration, so the form
+had to be floored at 150px and the row it displaced no longer read as proportional. The modal
+decouples form size from block duration. This is a UI-shape change only: auto-scheduling, the
+shutdown gate, free-form time parsing and the 30-minute duration grid are untouched.
+
+#### Preserved from 5.5, deliberately
+The design shows duration as three presets (30/60/90). Shipping only those would have dropped
+`parseDuration` ("1h30", "1.5h") and every non-preset length, so the presets are rendered as chips
+**beside** the free-text field rather than replacing it. Same for Start: the design draws a static
+mono box; it is a real input so `parseClock` ("5pm", "17:30") survives. The shutdown gate's
+**"Add to This Week"** hand-off is intact — that path is why a block that cannot fit today becomes
+a task instead of being lost.
+
+#### Kind and the Eisenhower flags
+The design's tag row is Deep / Shallow / Important / Urgent / No notifications. Taken literally,
+break and ritual blocks would have become uncreatable while the timeline still renders both, so
+the row carries **four** exclusive kind chips (Deep · Shallow · Break · Ritual) plus three
+independent toggles.
+
+`important`/`urgent` live on `task`, not `day_block`. Rather than duplicating them, the chips
+write through to a backing task — `resolveTaskAction(taskId, important, urgent)` returns
+`edit` (block already linked), `create` (no link, a flag is set), or `none`. A created task's id is
+attached to the block, which is why `addTask` and `addBlock` now return `Promise<number | null>`.
+Consequence: a block tagged Important appears in This Week's matrix automatically, and the two
+views cannot disagree.
+
+#### Defects found in verification
+- [x] **`editBlock`'s persist whitelist silently dropped the new fields.** It forwarded only
+  title/kind/startMin/durationMin/pomodoros/completed, so `taskId`, `note`, `repeat`, `trackId` and
+  `quiet` would have updated in memory and vanished on reload. Found by inspection before the UI
+  landed. This is the third variant of the same class in this project — a mutation path that
+  type-checks because the patch type is `Partial<…>` but persists a hand-maintained subset.
+- [x] **`archive.ts` keeps a second, hand-rolled `DayBlock` row mapping** used by `dayRecord()`.
+  It broke at `tsc -b` when `DayBlock` gained four fields and was extended identically. Not
+  deduplicated in this pass — flagged below.
+
+#### Verified, not taken on the sub-agents' reports
+Both agents reported all gates passing while the other was still editing the tree, so their
+figures were snapshots of a moving target and were re-run from scratch.
+
+| Check | Result |
+| --- | --- |
+| `oxlint` | exit 0, zero warnings |
+| `tsc -b` + `tsc -p tsconfig.test.json` | pass |
+| `vitest run` | 456 tests, 19 files (437 before) |
+| `vite build` | pass |
+| `cargo fmt --all -- --check` / `cargo clippy --all-targets -- -D warnings` | pass |
+| New hex literals in `chrome.css` | zero |
+| Dangling `DRAFT_BLOCK_ID` / `BlockEditor` refs | zero |
+| Migration `0004` on `node:sqlite` | applies clean; `CHECK` on the added `repeat` column **is** enforced; pre-existing rows backfill to `''`/`'once'`/`NULL`/`0` |
+| Modal dismiss semantics | scrim click closes, panel `stopPropagation` — clicking inside does not dismiss |
+
+#### Known, deliberately not fixed
+- [ ] `blocks.ts` and `archive.ts` maintain two independent mappings of the same `day_block` row.
+  A future column added to one and not the other yields a field that works in Today and is missing
+  in Archive. Worth collapsing to one shared `rowToBlock` in the Phase 10 pass.
+- [ ] Still no component-level test of the composer's render path — the suite runs on `node`
+  because jsdom costs ~113s on this `/mnt/c` mount. The extracted pure helpers
+  (`composerSummary`, `initialComposerDraft`, `resolveTaskAction`, `DURATION_PRESETS`) are tested;
+  the JSX around them is not.
+- [ ] `--danger-surface` is a literal `rgba()` of `--danger` rather than being derived from it, so
+  the two can drift. `color-mix(in srgb, var(--danger) 10%, transparent)` would tie them together.
+
 ### Phase 6 — Day Templates
 - [ ] Template list + detail pane
 - [ ] Weekday repeat selector (7-bit mask)
