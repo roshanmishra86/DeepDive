@@ -9,6 +9,15 @@ import type { DayNote, Distraction } from '../types'
 interface DayNoteRow {
   day: string
   note: string
+  shutdown_min: number | null
+}
+
+function dayNoteRowToDayNote(row: DayNoteRow): DayNote {
+  return {
+    day: row.day,
+    note: row.note,
+    shutdownMin: row.shutdown_min,
+  }
 }
 
 interface DistractionRow {
@@ -34,7 +43,7 @@ export async function getDayNote(driver: SqlDriver, day: string): Promise<DayNot
     'SELECT * FROM day_note WHERE day = ?',
     [day]
   )
-  return rows.length > 0 ? rows[0] : null
+  return rows.length > 0 ? dayNoteRowToDayNote(rows[0]) : null
 }
 
 export async function setDayNote(
@@ -45,6 +54,21 @@ export async function setDayNote(
   await driver.execute(
     'INSERT INTO day_note (day, note) VALUES (?, ?) ON CONFLICT(day) DO UPDATE SET note = excluded.note',
     [day, note]
+  )
+}
+
+export async function getDayShutdown(driver: SqlDriver, day: string): Promise<number | null> {
+  const rows = await driver.select<{ shutdown_min: number | null }>(
+    'SELECT shutdown_min FROM day_note WHERE day = ?',
+    [day]
+  )
+  return rows.length > 0 ? rows[0].shutdown_min : null
+}
+
+export async function setDayShutdown(driver: SqlDriver, day: string, min: number): Promise<void> {
+  await driver.execute(
+    'INSERT INTO day_note (day, shutdown_min) VALUES (?, ?) ON CONFLICT(day) DO UPDATE SET shutdown_min = excluded.shutdown_min',
+    [day, min]
   )
 }
 

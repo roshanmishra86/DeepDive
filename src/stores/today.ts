@@ -1,8 +1,10 @@
 import { create } from 'zustand'
 import type { SqlDriver } from '../db/driver'
-import type { DayBlock } from '../db/types'
+import type { DayBlock, BlockRepeat } from '../db/types'
 import * as blocksRepo from '../db/repos/blocks'
-import { nudge, moveBlock as moveBlockPure, sortBlocks } from '../lib/today'
+import * as notesRepo from '../db/repos/notes'
+import * as settingsRepo from '../db/repos/settings'
+import { nudge, moveBlock as moveBlockPure, sortBlocks, nextFreeStart, shiftFrom } from '../lib/today'
 
 /**
  * Today's blocks store. Hydrates from the database via `day_block` table.
@@ -16,14 +18,33 @@ interface TodayState {
   blocks: DayBlock[]
   loading: boolean
   error: string | null
+  // Effective shutdown time for the loaded day (null if none configured).
+  shutdownMin: number | null
+  // true when shutdownMin came from the global 'shutdownMin' setting, false
+  // when it came from a per-day override (day_note.shutdown_min).
+  shutdownIsDefault: boolean
   hydrate: (driver: SqlDriver | null, day: string) => Promise<void>
   addBlock: (input: {
     title: string
     kind: 'deep' | 'shallow' | 'ritual' | 'break'
     durationMin: number
     startMin?: number
+    /**
+     * Current minute-of-day, supplied by the caller, used to compute a
+     * default startMin when none is given. The store must never call
+     * `new Date()` itself — a store reading the clock directly is what
+     * produced this project's past UTC-day-key defect, and it makes this
+     * action untestable. Defaults to 0 for back-compat.
+     */
+    fromMin?: number
     pomodoros?: number
-  }) => Promise<void>
+    taskId?: number | null
+    note?: string
+    repeat?: BlockRepeat
+    trackId?: number | null
+    quiet?: boolean
+  }) => Promise<number | null>
+  setShutdown: (min: number, scope: 'day' | 'default') => Promise<void>
   editBlock: (id: number, patch: Partial<Omit<DayBlock, 'id' | 'day' | 'sort'>>, ripple?: boolean) => Promise<void>
   removeBlock: (id: number) => Promise<void>
   move: (id: number, direction: -1 | 1) => Promise<void>
@@ -41,21 +62,61 @@ let nextLocalId = -1
 let persistenceDriver: SqlDriver | null = null
 let hydratedDay: string | null = null
 
+// Every DayBlock field that editBlock is allowed to persist, i.e. every
+// field except the immutable/derived ones (id, day, sort). This is an
+// exhaustively-typed key set rather than a hand-maintained list of
+// `if (patch.X !== undefined)` lines: if a field is ever added to DayBlock
+// without updating this object, `tsc -b` fails at this declaration instead
+// of silently dropping the new field on every edit (three separate
+// incidents of this exact bug class — see TASKS.md Phase 5.6).
+const PERSISTABLE_BLOCK_FIELDS: Record<keyof Omit<DayBlock, 'id' | 'day' | 'sort'>, true> = {
+  title: true,
+  kind: true,
+  startMin: true,
+  durationMin: true,
+  pomodoros: true,
+  completed: true,
+  taskId: true,
+  note: true,
+  repeat: true,
+  trackId: true,
+  quiet: true,
+}
+
 export const useTodayStore = create<TodayState>()((set, get) => ({
   day: null,
   blocks: [],
   loading: false,
   error: null,
+  shutdownMin: null,
+  shutdownIsDefault: true,
 
   hydrate: async (driver, day) => {
     persistenceDriver = driver
     hydratedDay = day
-    set({ day, loading: true, error: null })
+    set({ day, loading: true, error: null, shutdownMin: null, shutdownIsDefault: true })
 
     if (!driver) {
       // In-memory mode: keep empty state for vite dev
       set({ loading: false })
       return
+    }
+
+    // Resolve the shutdown time. This is secondary to the day's blocks, so a
+    // failure here must not abort block hydration below.
+    try {
+      const dayShutdown = await notesRepo.getDayShutdown(driver, day)
+      if (dayShutdown !== null) {
+        set({ shutdownMin: dayShutdown, shutdownIsDefault: false })
+      } else {
+        const raw = await settingsRepo.getSetting(driver, 'shutdownMin')
+        const parsed = raw !== null && raw.trim() !== '' ? Number(raw) : NaN
+        if (!Number.isNaN(parsed)) {
+          set({ shutdownMin: parsed, shutdownIsDefault: true })
+        }
+      }
+    } catch (err) {
+      console.error('Failed to hydrate shutdown time:', err)
     }
 
     try {
@@ -70,26 +131,21 @@ export const useTodayStore = create<TodayState>()((set, get) => ({
 
   addBlock: async (input) => {
     const state = get()
-    if (!state.day) return
+    if (!state.day) return null
 
     // Optimistically add to in-memory state
     const localId = nextLocalId--
     const blocks = state.blocks
-    // Default startMin: after the last block's end, or 5:00 AM if empty
+    // Default startMin: earliest free slot at or after fromMin (0 if not given)
     let startMin = input.startMin
     if (startMin === undefined) {
-      if (blocks.length > 0) {
-        const lastBlock = blocks[blocks.length - 1]
-        startMin = lastBlock.startMin + lastBlock.durationMin
-      } else {
-        startMin = 300 // 5:00 AM
-      }
+      startMin = nextFreeStart(blocks, input.fromMin ?? 0, input.durationMin)
     }
 
     const newBlock: DayBlock = {
       id: localId,
       day: state.day,
-      taskId: null,
+      taskId: input.taskId ?? null,
       title: input.title,
       kind: input.kind,
       startMin,
@@ -97,6 +153,10 @@ export const useTodayStore = create<TodayState>()((set, get) => ({
       pomodoros: input.pomodoros ?? 0,
       completed: false,
       sort: blocks.length,
+      note: input.note ?? '',
+      repeat: input.repeat ?? 'once',
+      trackId: input.trackId ?? null,
+      quiet: input.quiet ?? false,
     }
     const withNew = sortBlocks([...blocks, newBlock])
     set({ blocks: withNew })
@@ -108,68 +168,70 @@ export const useTodayStore = create<TodayState>()((set, get) => ({
         const day = hydratedDay
         const realId = await blocksRepo.createBlock(driver, {
           day,
+          taskId: input.taskId ?? null,
           title: input.title,
           kind: input.kind,
           startMin,
           durationMin: input.durationMin,
           pomodoros: input.pomodoros ?? 0,
           sort: withNew.length - 1,
+          note: input.note ?? '',
+          repeat: input.repeat ?? 'once',
+          trackId: input.trackId ?? null,
+          quiet: input.quiet ?? false,
         })
         // Update state with real id
         set((_s) => ({
           blocks: get().blocks.map((b) => (b.id === localId ? { ...b, id: realId } : b)),
         }))
+        return realId
       } catch (err) {
         set((_s) => ({ error: err instanceof Error ? err.message : 'Save failed' }))
         console.error('Failed to persist new block:', err)
         // Revert optimistic update
         set({ blocks })
+        return null
       }
     }
+
+    return localId
   },
 
   editBlock: async (id, patch, ripple = true) => {
     const state = get()
     if (!state.day) return
 
-    // For startMin or durationMin changes with ripple, apply nudge logic
-    let blocks = state.blocks
-    if (ripple && (patch.startMin !== undefined || patch.durationMin !== undefined)) {
-      if (patch.startMin !== undefined) {
-        const block = blocks.find((b) => b.id === id)
-        if (block) {
-          const delta = patch.startMin - block.startMin
-          blocks = nudge(blocks, id, delta, true)
-        }
-      } else if (patch.durationMin !== undefined) {
-        const block = blocks.find((b) => b.id === id)
-        if (block) {
-          const durationDelta = patch.durationMin - block.durationMin
-          // Ripple downstream blocks by the duration change
-          const index = blocks.findIndex((b) => b.id === id)
-          if (index !== -1 && index < blocks.length - 1) {
-            blocks = blocks.map((b, i) => {
-              if (i === index) {
-                return { ...b, durationMin: patch.durationMin! }
-              }
-              if (i > index) {
-                return { ...b, startMin: Math.max(0, b.startMin + durationDelta) }
-              }
-              return b
-            })
-          } else {
-            blocks = blocks.map((b) => (b.id === id ? { ...b, durationMin: patch.durationMin! } : b))
-          }
-        }
+    // Same "drop undefined keys" approach regardless of ripple — there is no
+    // longer a separate ripple/no-ripple path for *which fields* land on the
+    // edited block. Ripple only ever controls whether downstream blocks move.
+    const safePatch = Object.fromEntries(
+      Object.entries(patch).filter(([, v]) => v !== undefined)
+    ) as Partial<DayBlock>
+
+    // Index in the PRE-EDIT canonical order (state.blocks, always kept
+    // sorted by this store). A startMin change can move the edited block to
+    // a different canonical position, so this index must be captured before
+    // the patch is applied. Applying the patch via .map() below preserves
+    // array positions, so this index still points at the edited block (and
+    // everything after it in pre-edit order) in the patched array.
+    const preEditIndex = state.blocks.findIndex((b) => b.id === id)
+    const before = preEditIndex !== -1 ? state.blocks[preEditIndex] : null
+
+    let blocks = state.blocks.map((b) => (b.id === id ? { ...b, ...safePatch } : b))
+
+    if (ripple && before && preEditIndex < blocks.length - 1) {
+      const after = blocks[preEditIndex]
+      // Ripple on the edited block's END time so simultaneous start+duration
+      // changes shift downstream blocks correctly — this reduces to a pure
+      // start delta or pure duration delta when only one of them changes.
+      const delta = after.startMin + after.durationMin - (before.startMin + before.durationMin)
+      if (delta !== 0) {
+        blocks = shiftFrom(blocks, preEditIndex + 1, delta)
       }
-    } else {
-      // No ripple; just update this block
-      const safePatch = Object.fromEntries(
-        Object.entries(patch).filter(([, v]) => v !== undefined)
-      ) as Partial<DayBlock>
-      blocks = blocks.map((b) => (b.id === id ? { ...b, ...safePatch } : b))
     }
-    // Re-sort: startMin/durationMin changes above can change canonical order.
+
+    // Re-sort: startMin changes above (on the edited block or its ripple
+    // targets) can change canonical order.
     blocks = sortBlocks(blocks)
     set({ blocks })
 
@@ -177,16 +239,24 @@ export const useTodayStore = create<TodayState>()((set, get) => ({
     if (persistenceDriver) {
       try {
         const driver = persistenceDriver
-        // Only persist changed fields
-        const persistPatch: Partial<DayBlock> = {}
-        if (patch.title !== undefined) persistPatch.title = patch.title
-        if (patch.kind !== undefined) persistPatch.kind = patch.kind
-        if (patch.startMin !== undefined) persistPatch.startMin = patch.startMin
-        if (patch.durationMin !== undefined) persistPatch.durationMin = patch.durationMin
-        if (patch.pomodoros !== undefined) persistPatch.pomodoros = patch.pomodoros
-        if (patch.completed !== undefined) persistPatch.completed = patch.completed
+        // Only persist changed fields, restricted to the exhaustive
+        // PERSISTABLE_BLOCK_FIELDS key set (see its doc comment).
+        const persistPatch = Object.fromEntries(
+          Object.entries(safePatch).filter(([key]) => key in PERSISTABLE_BLOCK_FIELDS)
+        ) as Partial<DayBlock>
         if (Object.keys(persistPatch).length > 0) {
           await blocksRepo.updateBlock(driver, id, persistPatch)
+        }
+
+        // Persist any downstream ripple shifts, matched by id (not array
+        // position) — same pattern as move() and nudgeBlock() below.
+        const shifted = blocks.filter((b) => {
+          if (b.id === id) return false
+          const prior = state.blocks.find((sb) => sb.id === b.id)
+          return prior !== undefined && prior.startMin !== b.startMin
+        })
+        for (const block of shifted) {
+          await blocksRepo.updateBlock(driver, block.id, { startMin: block.startMin })
         }
       } catch (err) {
         set((_s) => ({ error: err instanceof Error ? err.message : 'Save failed' }))
@@ -341,6 +411,36 @@ export const useTodayStore = create<TodayState>()((set, get) => ({
         console.error('Failed to persist nudge:', err)
         // Revert optimistic update
         set({ blocks: state.blocks })
+      }
+    }
+  },
+
+  setShutdown: async (min, scope) => {
+    const state = get()
+    const prev = { shutdownMin: state.shutdownMin, shutdownIsDefault: state.shutdownIsDefault }
+
+    if (scope === 'day') {
+      if (!hydratedDay) return
+      set({ shutdownMin: min, shutdownIsDefault: false })
+      if (persistenceDriver) {
+        try {
+          await notesRepo.setDayShutdown(persistenceDriver, hydratedDay, min)
+        } catch (err) {
+          set({ error: err instanceof Error ? err.message : 'Save failed' })
+          console.error('Failed to persist day shutdown time:', err)
+          set(prev)
+        }
+      }
+    } else {
+      set({ shutdownMin: min, shutdownIsDefault: true })
+      if (persistenceDriver) {
+        try {
+          await settingsRepo.setSetting(persistenceDriver, 'shutdownMin', String(min))
+        } catch (err) {
+          set({ error: err instanceof Error ? err.message : 'Save failed' })
+          console.error('Failed to persist default shutdown time:', err)
+          set(prev)
+        }
       }
     }
   },

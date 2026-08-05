@@ -31,6 +31,27 @@ Build the application:
 pnpm tauri build
 ```
 
+### Running the gates locally
+
+CI invokes the `pnpm` scripts, and that is correct there. **Locally on the WSL2
+`/mnt/c` mount, call the binaries directly instead:**
+
+```bash
+./node_modules/.bin/oxlint                      # lint
+./node_modules/.bin/tsc -b                      # typecheck (app)
+./node_modules/.bin/tsc -p tsconfig.test.json   # typecheck (tests)
+./node_modules/.bin/vitest run                  # tests
+./node_modules/.bin/vite build                  # build
+```
+
+pnpm 11 runs a dependency-status check before every script, which spawns a
+synchronous `pnpm install`. On this 9p mount that install is glacial, and two or
+more concurrent ones deadlock on the pnpm store lock — a `pnpm lint` that would
+finish in under a second as `oxlint` instead hangs for 30+ minutes. Worse, the
+wrapper can **exit 0 without ever reaching the underlying tool**, so a "passing"
+gate may not have run at all. Always confirm you saw real tool output before
+believing a local gate. If things are already wedged: `pkill -f "bin/pnpm install"`.
+
 ## Workflows
 
 Two workflows. Everyday checks run on `main`; installers are built only at tag time.

@@ -11,8 +11,15 @@ import {
   blockState,
   blockProgress,
   sortBlocks,
+  nextFreeStart,
+  maxPomodoros,
+  minDurationFor,
+  checkShutdown,
+  composerSummary,
+  initialComposerDraft,
+  resolveTaskAction,
 } from './today'
-import type { DayBlock } from '../db/types'
+import type { DayBlock, BlockKind } from '../db/types'
 
 describe('blockHeight', () => {
   it('returns 34px minimum for short blocks', () => {
@@ -49,6 +56,10 @@ describe('gapBefore', () => {
     pomodoros: 0,
     completed: false,
     sort: 0,
+    note: '',
+    repeat: 'once',
+    trackId: null,
+    quiet: false,
   })
 
   it('returns 0 for the first block (no predecessor)', () => {
@@ -87,6 +98,10 @@ describe('layout', () => {
     pomodoros: 0,
     completed: false,
     sort: 0,
+    note: '',
+    repeat: 'once',
+    trackId: null,
+    quiet: false,
   })
 
   it('returns empty array for empty blocks', () => {
@@ -178,6 +193,10 @@ describe('shiftFrom', () => {
     pomodoros: 0,
     completed: false,
     sort: 0,
+    note: '',
+    repeat: 'once',
+    trackId: null,
+    quiet: false,
   })
 
   it('does not mutate the input', () => {
@@ -215,6 +234,10 @@ describe('nudge', () => {
     pomodoros: 0,
     completed: false,
     sort: 0,
+    note: '',
+    repeat: 'once',
+    trackId: null,
+    quiet: false,
   })
 
   it('moves one block with ripple=true by default', () => {
@@ -258,6 +281,10 @@ describe('moveBlock', () => {
     pomodoros: 0,
     completed: false,
     sort,
+    note: '',
+    repeat: 'once',
+    trackId: null,
+    quiet: false,
   })
 
   it('swaps adjacent blocks and recomputes start times', () => {
@@ -337,6 +364,10 @@ describe('sortBlocks', () => {
     pomodoros: 0,
     completed: false,
     sort,
+    note: '',
+    repeat: 'once',
+    trackId: null,
+    quiet: false,
   })
 
   it('sorts by startMin regardless of input order', () => {
@@ -371,6 +402,10 @@ describe('conflicts', () => {
     pomodoros: 0,
     completed: false,
     sort: 0,
+    note: '',
+    repeat: 'once',
+    trackId: null,
+    quiet: false,
   })
 
   it('returns empty array for well-formed days', () => {
@@ -409,6 +444,10 @@ describe('daySummary', () => {
     pomodoros: 0,
     completed: false,
     sort: 0,
+    note: '',
+    repeat: 'once',
+    trackId: null,
+    quiet: false,
   })
 
   it('returns all zeros for empty blocks', () => {
@@ -479,6 +518,10 @@ describe('blockState', () => {
     pomodoros: 0,
     completed,
     sort: 0,
+    note: '',
+    repeat: 'once',
+    trackId: null,
+    quiet: false,
   })
 
   it('returns completed when completed=true (even if active)', () => {
@@ -526,6 +569,10 @@ describe('blockProgress', () => {
     pomodoros: 0,
     completed: false,
     sort: 0,
+    note: '',
+    repeat: 'once',
+    trackId: null,
+    quiet: false,
   })
 
   it('computes progress at the start', () => {
@@ -566,5 +613,232 @@ describe('blockProgress', () => {
     expect(prog.elapsedMin).toBe(60)
     expect(prog.remainingMin).toBe(0)
     expect(prog.pct).toBe(100)
+  })
+})
+
+describe('nextFreeStart', () => {
+  const makeBlock = (id: number, startMin: number, durationMin: number): DayBlock => ({
+    id,
+    day: '2026-08-04',
+    taskId: null,
+    title: `Block ${id}`,
+    kind: 'deep',
+    startMin,
+    durationMin,
+    pomodoros: 0,
+    completed: false,
+    sort: 0,
+    note: '',
+    repeat: 'once',
+    trackId: null,
+    quiet: false,
+  })
+
+  it('returns the reference minute unchanged on an empty day', () => {
+    expect(nextFreeStart([], 617, 60)).toBe(617)
+  })
+
+  it('returns the end time of a block that is in progress', () => {
+    const blocks = [makeBlock(1, 500, 60)] // 500-560
+    expect(nextFreeStart(blocks, 530, 30)).toBe(560)
+  })
+
+  it('skips a chain of three back-to-back blocks as a unit', () => {
+    const blocks = [
+      makeBlock(1, 300, 60), // 300-360
+      makeBlock(2, 360, 60), // 360-420
+      makeBlock(3, 420, 60), // 420-480
+    ]
+    expect(nextFreeStart(blocks, 300, 60)).toBe(480)
+  })
+
+  it('uses a gap large enough for the requested duration', () => {
+    const blocks = [
+      makeBlock(1, 300, 60), // 300-360
+      makeBlock(2, 480, 60), // 480-540, 120-min gap after block 1
+    ]
+    expect(nextFreeStart(blocks, 300, 60)).toBe(360)
+  })
+
+  it('skips past a gap too small for the requested duration', () => {
+    const blocks = [
+      makeBlock(1, 300, 60), // 300-360
+      makeBlock(2, 400, 60), // 400-460, only a 40-min gap; 60-min block does not fit
+    ]
+    expect(nextFreeStart(blocks, 300, 60)).toBe(460)
+  })
+
+  it('gives the same answer for an unsorted input array as for the sorted one', () => {
+    const sorted = [
+      makeBlock(1, 300, 60),
+      makeBlock(2, 360, 60),
+      makeBlock(3, 420, 60),
+    ]
+    const unsorted = [sorted[2], sorted[0], sorted[1]]
+    expect(nextFreeStart(unsorted, 300, 60)).toBe(nextFreeStart(sorted, 300, 60))
+  })
+
+  it('does not mutate the input array or its block objects', () => {
+    const blocks = [makeBlock(1, 300, 60), makeBlock(2, 360, 60)]
+    const original = JSON.parse(JSON.stringify(blocks))
+    nextFreeStart(blocks, 300, 60)
+    expect(blocks).toEqual(original)
+  })
+
+  it('does not treat touching endpoints as a collision', () => {
+    const blocks = [makeBlock(1, 300, 60)] // ends at 360
+    expect(nextFreeStart(blocks, 360, 60)).toBe(360)
+  })
+
+  it('ignores blocks that end at or before fromMin', () => {
+    const blocks = [makeBlock(1, 100, 60)] // ends at 160, well before fromMin
+    expect(nextFreeStart(blocks, 300, 60)).toBe(300)
+  })
+})
+
+describe('maxPomodoros', () => {
+  it('computes floor(duration / 30) for various durations', () => {
+    expect(maxPomodoros(0)).toBe(0)
+    expect(maxPomodoros(29)).toBe(0)
+    expect(maxPomodoros(30)).toBe(1)
+    expect(maxPomodoros(59)).toBe(1)
+    expect(maxPomodoros(60)).toBe(2)
+    expect(maxPomodoros(90)).toBe(3)
+  })
+})
+
+describe('minDurationFor', () => {
+  it('is 30 for deep blocks', () => {
+    expect(minDurationFor('deep' as BlockKind)).toBe(30)
+  })
+
+  it('is 30 for shallow blocks', () => {
+    expect(minDurationFor('shallow' as BlockKind)).toBe(30)
+  })
+
+  it('is 5 for break blocks', () => {
+    expect(minDurationFor('break' as BlockKind)).toBe(5)
+  })
+
+  it('is 5 for ritual blocks (e.g. a 5-minute Shut Down Ritual)', () => {
+    expect(minDurationFor('ritual' as BlockKind)).toBe(5)
+  })
+})
+
+describe('checkShutdown', () => {
+  it('fits exactly when startMin + durationMin === shutdownMin', () => {
+    const result = checkShutdown(500, 60, 560)
+    expect(result).toEqual({ fits: true, overrunMin: 0, fitDurationMin: 60 })
+  })
+
+  it('reports an overrun when the block runs past shutdown', () => {
+    const result = checkShutdown(500, 90, 560)
+    expect(result.fits).toBe(false)
+    expect(result.overrunMin).toBe(30)
+    expect(result.fitDurationMin).toBe(60)
+  })
+
+  it('always fits when shutdownMin is null', () => {
+    const result = checkShutdown(500, 90, null)
+    expect(result).toEqual({ fits: true, overrunMin: 0, fitDurationMin: 90 })
+  })
+
+  it('reports fitDurationMin of 0 when the start is already past shutdown', () => {
+    const result = checkShutdown(600, 30, 560)
+    expect(result.fits).toBe(false)
+    expect(result.fitDurationMin).toBe(0)
+    expect(result.overrunMin).toBe(70)
+  })
+})
+
+describe('composerSummary', () => {
+  it('formats start–end range, duration, and a plural pomodoro count', () => {
+    expect(composerSummary(540, 90, 3)).toBe('9:00 AM – 10:30 AM · 1 h 30 m · 3 pomodoros')
+  })
+
+  it('uses the singular "pomodoro" for a count of 1', () => {
+    expect(composerSummary(540, 30, 1)).toBe('9:00 AM – 9:30 AM · 30 min · 1 pomodoro')
+  })
+
+  it('omits the pomodoro segment entirely when pomodoros is 0', () => {
+    expect(composerSummary(540, 60, 0)).toBe('9:00 AM – 10:00 AM · 1 h')
+  })
+})
+
+describe('initialComposerDraft', () => {
+  const block: DayBlock = {
+    id: 7,
+    day: '2026-08-04',
+    taskId: 42,
+    title: 'Chapter 3 — first draft',
+    kind: 'deep',
+    startMin: 540,
+    durationMin: 90,
+    pomodoros: 3,
+    completed: false,
+    sort: 0,
+    note: 'Finish the outline',
+    repeat: 'daily',
+    trackId: 5,
+    quiet: true,
+  }
+
+  it('creating (no block): defaults to a 30-min deep block at the fallback start, pomodoros pre-filled to the max', () => {
+    const draft = initialComposerDraft(null, 480, null)
+    expect(draft).toEqual({
+      title: '',
+      note: '',
+      kind: 'deep',
+      durationMin: 30,
+      startMin: 480,
+      pomodoros: 1,
+      repeat: 'once',
+      trackId: null,
+      quiet: false,
+      important: false,
+      urgent: false,
+    })
+  })
+
+  it('editing (block given): every field mirrors the block', () => {
+    const draft = initialComposerDraft(block, 0, null)
+    expect(draft.title).toBe(block.title)
+    expect(draft.note).toBe(block.note)
+    expect(draft.kind).toBe(block.kind)
+    expect(draft.durationMin).toBe(block.durationMin)
+    expect(draft.startMin).toBe(block.startMin)
+    expect(draft.pomodoros).toBe(block.pomodoros)
+    expect(draft.repeat).toBe(block.repeat)
+    expect(draft.trackId).toBe(block.trackId)
+    expect(draft.quiet).toBe(block.quiet)
+  })
+
+  it('editing with no linked task: important/urgent default to false', () => {
+    const draft = initialComposerDraft(block, 0, null)
+    expect(draft.important).toBe(false)
+    expect(draft.urgent).toBe(false)
+  })
+
+  it('editing with a linked task: important/urgent mirror the task', () => {
+    const draft = initialComposerDraft(block, 0, { important: true, urgent: false })
+    expect(draft.important).toBe(true)
+    expect(draft.urgent).toBe(false)
+  })
+})
+
+describe('resolveTaskAction', () => {
+  it('edits the linked task when the block already has a taskId, regardless of chip state', () => {
+    expect(resolveTaskAction(5, false, false)).toBe('edit')
+    expect(resolveTaskAction(5, true, true)).toBe('edit')
+  })
+
+  it('creates a task when there is no taskId but a chip is on', () => {
+    expect(resolveTaskAction(null, true, false)).toBe('create')
+    expect(resolveTaskAction(null, false, true)).toBe('create')
+    expect(resolveTaskAction(null, true, true)).toBe('create')
+  })
+
+  it('does nothing when there is no taskId and neither chip is on', () => {
+    expect(resolveTaskAction(null, false, false)).toBe('none')
   })
 })

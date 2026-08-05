@@ -4,7 +4,7 @@
  */
 
 import type { SqlDriver } from '../driver'
-import type { DayBlock, BlockKind } from '../types'
+import type { DayBlock, BlockKind, BlockRepeat } from '../types'
 
 // Internal row type matching SQL schema (0|1 for booleans)
 interface BlockRow {
@@ -18,6 +18,10 @@ interface BlockRow {
   pomodoros: number
   completed: number
   sort: number
+  note: string
+  repeat: BlockRepeat
+  track_id: number | null
+  quiet: number
 }
 
 function rowToBlock(row: BlockRow): DayBlock {
@@ -32,6 +36,10 @@ function rowToBlock(row: BlockRow): DayBlock {
     pomodoros: row.pomodoros,
     completed: row.completed === 1,
     sort: row.sort,
+    note: row.note,
+    repeat: row.repeat,
+    trackId: row.track_id,
+    quiet: row.quiet === 1,
   }
 }
 
@@ -62,10 +70,14 @@ export async function createBlock(
     durationMin: number
     pomodoros?: number
     sort?: number
+    note?: string
+    repeat?: BlockRepeat
+    trackId?: number | null
+    quiet?: boolean
   }
 ): Promise<number> {
   const result = await driver.execute(
-    'INSERT INTO day_block (day, task_id, title, kind, start_min, duration_min, pomodoros, sort) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+    'INSERT INTO day_block (day, task_id, title, kind, start_min, duration_min, pomodoros, sort, note, "repeat", track_id, quiet) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
     [
       block.day,
       block.taskId ?? null,
@@ -75,6 +87,10 @@ export async function createBlock(
       block.durationMin,
       block.pomodoros ?? 0,
       block.sort ?? 0,
+      block.note ?? '',
+      block.repeat ?? 'once',
+      block.trackId ?? null,
+      block.quiet ? 1 : 0,
     ]
   )
   return result.lastInsertId
@@ -119,6 +135,22 @@ export async function updateBlock(
   if (patch.sort !== undefined) {
     updates.push('sort = ?')
     values.push(patch.sort)
+  }
+  if (patch.note !== undefined) {
+    updates.push('note = ?')
+    values.push(patch.note)
+  }
+  if (patch.repeat !== undefined) {
+    updates.push('"repeat" = ?')
+    values.push(patch.repeat)
+  }
+  if (patch.trackId !== undefined) {
+    updates.push('track_id = ?')
+    values.push(patch.trackId)
+  }
+  if (patch.quiet !== undefined) {
+    updates.push('quiet = ?')
+    values.push(patch.quiet ? 1 : 0)
   }
 
   if (updates.length === 0) return

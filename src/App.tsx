@@ -1,6 +1,8 @@
 import { useEffect } from 'react'
 import { useAppStore } from './stores/app'
 import { useRitualsStore } from './stores/rituals'
+import { useTasksStore } from './stores/tasks'
+import { useTodayStore } from './stores/today'
 import { useTimerStore } from './stores/timer'
 import { openDatabase } from './db/index'
 import { applyAccent } from './lib/accents'
@@ -43,6 +45,8 @@ function App() {
         await Promise.all([
           useAppStore.getState().hydrate(driver),
           useRitualsStore.getState().hydrate(driver, hydrationDay),
+          useTasksStore.getState().hydrate(driver),
+          useTodayStore.getState().hydrate(driver, hydrationDay),
         ])
       } catch (err) {
         console.error('Failed to initialize database:', err)

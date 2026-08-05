@@ -8,7 +8,8 @@
  * can be confined to a single block.
  */
 
-import type { DayBlock } from '../db/types'
+import type { DayBlock, BlockKind, BlockRepeat } from '../db/types'
+import { minutesToClock, formatDuration } from './time'
 
 /**
  * Block height in pixels proportional to duration.
@@ -248,6 +249,80 @@ export function daySummary(blocks: DayBlock[]): {
 }
 
 /**
+ * Earliest free start time at or after `fromMin` for a block of length
+ * `durationMin`, i.e. the smallest `t >= fromMin` such that the half-open
+ * interval [t, t + durationMin) intersects no existing block's
+ * [b.startMin, b.startMin + b.durationMin). Touching endpoints do not count
+ * as a collision.
+ *
+ * Always re-sorts via `sortBlocks()` rather than trusting the caller's array
+ * order — see the canonical-ordering note on `sortBlocks` and the Phase 4
+ * defect list in TASKS.md ("three different orderings for one list").
+ * Returns a new value; does not mutate the input.
+ */
+export function nextFreeStart(blocks: DayBlock[], fromMin: number, durationMin: number): number {
+  const sorted = sortBlocks(blocks)
+
+  let t = fromMin
+  let i = 0
+  while (i < sorted.length) {
+    const b = sorted[i]
+    const blockEnd = b.startMin + b.durationMin
+    const collides = t < blockEnd && b.startMin < t + durationMin
+    if (collides) {
+      t = blockEnd
+      i = 0
+      continue
+    }
+    i++
+  }
+  return t
+}
+
+/**
+ * Maximum whole pomodoros (25 min focus + 5 min rest = 30 min) that fit in
+ * durationMin. Matches FOCUS_SEC/REST_SEC in src/stores/timer.ts.
+ */
+export function maxPomodoros(durationMin: number): number {
+  return Math.max(0, Math.floor(durationMin / 30))
+}
+
+/**
+ * Minimum allowed duration for a block of the given kind. Deep and shallow
+ * work blocks floor at 30 minutes; breaks and rituals floor at 5 minutes.
+ * The seeded "Maker Day" template contains a 5-minute Shut Down Ritual, so a
+ * blanket 30-minute floor would make it unrepresentable.
+ */
+export function minDurationFor(kind: BlockKind): number {
+  return kind === 'deep' || kind === 'shallow' ? 30 : 5
+}
+
+/**
+ * Result of checking whether a block fits before a shutdown time.
+ * fits: whether the block ends at or before shutdownMin (always true when
+ *   shutdownMin is null, i.e. no shutdown configured).
+ * overrunMin: minutes the block runs past shutdownMin, 0 if it fits.
+ * fitDurationMin: how long a block starting at startMin could be and still
+ *   fit before shutdownMin; 0 when startMin is already at or past shutdown.
+ */
+export interface ShutdownCheck {
+  fits: boolean
+  overrunMin: number
+  fitDurationMin: number
+}
+
+export function checkShutdown(startMin: number, durationMin: number, shutdownMin: number | null): ShutdownCheck {
+  if (shutdownMin === null) {
+    return { fits: true, overrunMin: 0, fitDurationMin: durationMin }
+  }
+  const endMin = startMin + durationMin
+  const fits = endMin <= shutdownMin
+  const overrunMin = Math.max(0, endMin - shutdownMin)
+  const fitDurationMin = Math.max(0, shutdownMin - startMin)
+  return { fits, overrunMin, fitDurationMin }
+}
+
+/**
  * Block state based on completion and timing.
  * Precedence (checked in order):
  * 1. If completed, state is 'completed' (regardless of time)
@@ -281,4 +356,106 @@ export function blockProgress(block: DayBlock, nowMin: number): {
   const remainingMin = block.durationMin - elapsedMin
   const pct = (elapsedMin / block.durationMin) * 100
   return { elapsedMin, remainingMin, pct: Math.max(0, Math.min(pct, 100)) }
+}
+
+/**
+ * Quick-pick duration chips shown in the block composer, in addition to the
+ * free-form editable duration field.
+ */
+export const DURATION_PRESETS = [30, 60, 90] as const
+
+/**
+ * Mono summary line for the composer footer, e.g.
+ * "9:00 AM – 10:30 AM · 90 min · 3 pomodoros". The pomodoro segment is
+ * omitted when pomodoros is 0 (always true for break/ritual blocks).
+ */
+export function composerSummary(startMin: number, durationMin: number, pomodoros: number): string {
+  const range = `${minutesToClock(startMin)} – ${minutesToClock(startMin + durationMin)}`
+  const parts = [range, formatDuration(durationMin)]
+  if (pomodoros > 0) {
+    parts.push(`${pomodoros} pomodoro${pomodoros === 1 ? '' : 's'}`)
+  }
+  return parts.join(' · ')
+}
+
+/**
+ * The composer's editable draft state, derived once when the composer opens
+ * and thereafter owned by the component. Kept as a plain data shape (rather
+ * than assembled ad hoc from several `useState` initializers) so the
+ * derivation itself — "editing an existing block vs. starting a new one,
+ * with the linked task's important/urgent flags folded in" — is a pure,
+ * unit-testable function instead of logic embedded in a component.
+ */
+export interface ComposerDraft {
+  title: string
+  note: string
+  kind: BlockKind
+  durationMin: number
+  startMin: number
+  pomodoros: number
+  repeat: BlockRepeat
+  trackId: number | null
+  quiet: boolean
+  important: boolean
+  urgent: boolean
+}
+
+/**
+ * Derives the composer's initial draft.
+ * - Editing (`block` non-null): every field mirrors the block, and the
+ *   important/urgent chips mirror the linked task, if any.
+ * - Creating (`block` null): defaults to a 30-minute deep work block
+ *   starting at `fallbackStartMin`, with pomodoros pre-filled to the max
+ *   that fits (matching the pre-modal composer's behavior).
+ */
+export function initialComposerDraft(
+  block: DayBlock | null,
+  fallbackStartMin: number,
+  linkedTask: { important: boolean; urgent: boolean } | null
+): ComposerDraft {
+  if (block) {
+    return {
+      title: block.title,
+      note: block.note,
+      kind: block.kind,
+      durationMin: block.durationMin,
+      startMin: block.startMin,
+      pomodoros: block.pomodoros,
+      repeat: block.repeat,
+      trackId: block.trackId,
+      quiet: block.quiet,
+      important: linkedTask?.important ?? false,
+      urgent: linkedTask?.urgent ?? false,
+    }
+  }
+  return {
+    title: '',
+    note: '',
+    kind: 'deep',
+    durationMin: 30,
+    startMin: fallbackStartMin,
+    pomodoros: maxPomodoros(30),
+    repeat: 'once',
+    trackId: null,
+    quiet: false,
+    important: false,
+    urgent: false,
+  }
+}
+
+/**
+ * What the composer should do to the linked task on save, given the
+ * block's current `taskId` and the important/urgent chip state:
+ * - 'edit': the block already links a task — always sync its flags, even if
+ *   the user turned both chips off (that's a real edit, not a no-op).
+ * - 'create': no linked task yet, but at least one chip is on — a task must
+ *   be created so the flag has somewhere to live.
+ * - 'none': no linked task and neither chip is on — nothing to do.
+ */
+export type TaskAction = 'edit' | 'create' | 'none'
+
+export function resolveTaskAction(taskId: number | null, important: boolean, urgent: boolean): TaskAction {
+  if (taskId !== null) return 'edit'
+  if (important || urgent) return 'create'
+  return 'none'
 }

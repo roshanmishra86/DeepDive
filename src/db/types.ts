@@ -7,6 +7,7 @@
 export type BlockKind = 'deep' | 'shallow' | 'ritual' | 'break'
 export type SessionPhase = 'focus' | 'rest'
 export type DayStatus = 'full' | 'part' | 'miss'
+export type BlockRepeat = 'once' | 'daily' | 'weekdays'
 
 export interface Task {
   id: number
@@ -32,6 +33,10 @@ export interface DayBlock {
   pomodoros: number
   completed: boolean
   sort: number
+  note: string
+  repeat: BlockRepeat
+  trackId: number | null
+  quiet: boolean
 }
 
 export interface Template {
@@ -78,6 +83,7 @@ export interface PomodoroSession {
 export interface DayNote {
   day: string
   note: string
+  shutdownMin: number | null
 }
 
 export interface Distraction {

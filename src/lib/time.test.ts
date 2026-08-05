@@ -9,6 +9,8 @@ import {
   minutesToClock,
   formatDuration,
   splitDeepHours,
+  parseClock,
+  parseDuration,
 } from './time'
 
 describe('formatClock', () => {
@@ -293,5 +295,123 @@ describe('splitDeepHours', () => {
   it('does not carry when the fraction genuinely rounds down', () => {
     // 1129 min = 18.8166... h -> tenths round to 188 -> 18 / .8
     expect(splitDeepHours(1129)).toEqual({ whole: 18, frac: '.8' })
+  })
+})
+
+describe('parseClock', () => {
+  it('parses a bare hour', () => {
+    expect(parseClock('5')).toBe(300) // 5:00 AM by default (referenceMin 0)
+  })
+
+  it('parses meridiem forms', () => {
+    expect(parseClock('5pm')).toBe(1020)
+    expect(parseClock('5 PM')).toBe(1020)
+    expect(parseClock('5:30pm')).toBe(1050)
+    expect(parseClock('9:05 am')).toBe(545)
+  })
+
+  it('parses 24-hour with colon', () => {
+    expect(parseClock('17:30')).toBe(1050)
+  })
+
+  it('parses 4-digit 24-hour form', () => {
+    expect(parseClock('1730')).toBe(1050)
+    expect(parseClock('0930')).toBe(570)
+  })
+
+  it('parses 12am as midnight and 12pm as noon', () => {
+    expect(parseClock('12am')).toBe(0)
+    expect(parseClock('12pm')).toBe(720)
+  })
+
+  it('resolves an ambiguous hour to the AM interpretation when it is >= referenceMin', () => {
+    // referenceMin = 100 (1:40 AM): both AM (300) and PM (1020) qualify, AM wins
+    expect(parseClock('5', 100)).toBe(300)
+  })
+
+  it('resolves an ambiguous hour to the PM interpretation when AM has already passed', () => {
+    // referenceMin = 600 (10:00 AM): AM interpretation (300) is before reference, PM (1020) qualifies
+    expect(parseClock('5', 600)).toBe(1020)
+  })
+
+  it('falls back to the AM interpretation when neither qualifies', () => {
+    // referenceMin = 1100 (after both 5 AM=300 and 5 PM=1020)
+    expect(parseClock('5', 1100)).toBe(300)
+  })
+
+  it('"17:30" is unambiguous 24-hour and bypasses the referenceMin rule', () => {
+    expect(parseClock('17:30', 2000)).toBe(1050)
+  })
+
+  it('returns null for empty or whitespace-only input', () => {
+    expect(parseClock('')).toBeNull()
+    expect(parseClock('   ')).toBeNull()
+  })
+
+  it('returns null for non-numeric junk', () => {
+    expect(parseClock('noon')).toBeNull()
+    expect(parseClock('abc')).toBeNull()
+  })
+
+  it('returns null when hour > 23', () => {
+    expect(parseClock('25:00')).toBeNull()
+  })
+
+  it('returns null when minute > 59', () => {
+    expect(parseClock('5:75')).toBeNull()
+  })
+
+  it('returns null for "13pm"', () => {
+    expect(parseClock('13pm')).toBeNull()
+  })
+
+  it('returns null for "2530"', () => {
+    expect(parseClock('2530')).toBeNull()
+  })
+})
+
+describe('parseDuration', () => {
+  it('parses a bare number as minutes', () => {
+    expect(parseDuration('90')).toBe(90)
+  })
+
+  it('parses explicit minute forms', () => {
+    expect(parseDuration('90m')).toBe(90)
+    expect(parseDuration('90 min')).toBe(90)
+    expect(parseDuration('90 minutes')).toBe(90)
+  })
+
+  it('parses hour forms', () => {
+    expect(parseDuration('2h')).toBe(120)
+    expect(parseDuration('2 hours')).toBe(120)
+  })
+
+  it('parses fractional hour forms and rounds to the nearest minute', () => {
+    expect(parseDuration('1.5h')).toBe(90)
+    expect(parseDuration('1.5 hours')).toBe(90)
+  })
+
+  it('parses combined hour+minute forms', () => {
+    expect(parseDuration('1h30')).toBe(90)
+    expect(parseDuration('1h30m')).toBe(90)
+    expect(parseDuration('1h 30m')).toBe(90)
+  })
+
+  it('returns null for empty input', () => {
+    expect(parseDuration('')).toBeNull()
+    expect(parseDuration('   ')).toBeNull()
+  })
+
+  it('returns null for junk', () => {
+    expect(parseDuration('abc')).toBeNull()
+  })
+
+  it('returns null for zero', () => {
+    expect(parseDuration('0')).toBeNull()
+    expect(parseDuration('0m')).toBeNull()
+  })
+
+  it('returns null for negative values', () => {
+    expect(parseDuration('-5')).toBeNull()
   })
 })

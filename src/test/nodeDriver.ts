@@ -5,7 +5,7 @@
  */
 
 import { DatabaseSync } from 'node:sqlite'
-import { readFileSync } from 'node:fs'
+import { readFileSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 import type { SqlDriver, SqlResult } from '../db/driver'
 
@@ -16,13 +16,17 @@ class NodeSqliteDriver implements SqlDriver {
     this.db = new DatabaseSync(':memory:')
     this.db.exec('PRAGMA foreign_keys = ON')
 
-    // Apply migrations from the real files
+    // Apply every migration from the real files, in order. This ensures tests
+    // validate against the exact schema that ships to production.
     const migrationsDir = join(import.meta.dirname, '../../src-tauri/migrations')
-    const init = readFileSync(join(migrationsDir, '0001_init.sql'), 'utf-8')
-    const seed = readFileSync(join(migrationsDir, '0002_seed.sql'), 'utf-8')
+    const migrationFiles = readdirSync(migrationsDir)
+      .filter((name) => name.endsWith('.sql'))
+      .sort()
 
-    this.db.exec(init)
-    this.db.exec(seed)
+    for (const file of migrationFiles) {
+      const sql = readFileSync(join(migrationsDir, file), 'utf-8')
+      this.db.exec(sql)
+    }
   }
 
   execute(sql: string, params?: unknown[]): Promise<SqlResult> {

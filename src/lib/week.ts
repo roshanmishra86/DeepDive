@@ -1,0 +1,329 @@
+/**
+ * Pure functions for This Week view logic. All functions are deterministic and
+ * testable without DOM or React, using the node environment.
+ *
+ * Eisenhower matrix groups tasks by importance and urgency.
+ * Deadline buckets organize tasks by when they're due.
+ * All functions read-only; no mutations.
+ */
+
+import type { Task } from '../db/types'
+import { startOfWeek, formatDuration } from './time'
+
+/**
+ * Composes a `dueAt` ISO instant from a `YYYY-MM-DD` date (from
+ * `<input type="date">`) and an `HH:MM` time (from `<input type="time">`),
+ * both interpreted as local wall-clock. Returns `null` for a blank date.
+ * A blank time defaults to 17:00. This is the single place `dueAt` is
+ * serialized — callers must never hand-build the string.
+ */
+export function composeDueAt(dateStr: string, timeStr: string): string | null {
+  if (!dateStr || !dateStr.trim()) return null
+  const [year, month, day] = dateStr.split('-').map(Number)
+  const time = timeStr && timeStr.trim() ? timeStr : '17:00'
+  const [hh, mm] = time.split(':').map(Number)
+  return new Date(year, month - 1, day, hh, mm, 0, 0).toISOString()
+}
+
+/**
+ * Inverse of `composeDueAt`: decomposes a `dueAt` ISO instant back into a
+ * local `YYYY-MM-DD` date and `HH:MM` time for populating form fields.
+ * Returns `{ date: '', time: '17:00' }` for an invalid/unparseable input.
+ */
+export function decomposeDueAt(iso: string): { date: string; time: string } {
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return { date: '', time: '17:00' }
+  const year = d.getFullYear()
+  const month = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  const hours = String(d.getHours()).padStart(2, '0')
+  const minutes = String(d.getMinutes()).padStart(2, '0')
+  return { date: `${year}-${month}-${day}`, time: `${hours}:${minutes}` }
+}
+
+/**
+ * The single canonical ordering for tasks: incomplete before done,
+ * then by dueAt ascending (nulls last), then by id ascending for stability.
+ * Every consumer that needs "the order tasks appear in" must use this
+ * same function. Returns a new array; does not mutate the input.
+ */
+export function sortTasks(tasks: Task[]): Task[] {
+  return [...tasks].sort((a, b) => {
+    // Incomplete before done
+    if (a.done !== b.done) return a.done ? 1 : -1
+    // By dueAt ascending, nulls last
+    if ((a.dueAt === null) !== (b.dueAt === null)) return a.dueAt === null ? 1 : -1
+    if (a.dueAt !== null && b.dueAt !== null && a.dueAt !== b.dueAt) {
+      return a.dueAt.localeCompare(b.dueAt)
+    }
+    // By id ascending for stability
+    return a.id - b.id
+  })
+}
+
+export type Quadrant = 'do' | 'plan' | 'delegate' | 'drop'
+
+/**
+ * Maps a task to its Eisenhower quadrant.
+ * do: important && urgent
+ * plan: important && !urgent
+ * delegate: !important && urgent
+ * drop: !important && !urgent
+ */
+export function quadrantOf(task: Task): Quadrant {
+  if (task.important && task.urgent) return 'do'
+  if (task.important && !task.urgent) return 'plan'
+  if (!task.important && task.urgent) return 'delegate'
+  return 'drop'
+}
+
+export interface QuadrantMeta {
+  quadrant: Quadrant
+  label: string
+  dot: string
+}
+
+export const QUADRANTS: QuadrantMeta[] = [
+  { quadrant: 'do', label: 'Urgent & important — do now', dot: 'var(--danger)' },
+  { quadrant: 'plan', label: 'Important, not urgent — block time', dot: 'var(--accent)' },
+  { quadrant: 'delegate', label: 'Urgent, not important — batch or delegate', dot: 'var(--warn)' },
+  { quadrant: 'drop', label: 'Neither — drop for now', dot: 'var(--border-strong)' },
+]
+
+export type DeadlineBucket = 'soon' | 'week' | 'later' | 'none'
+
+/**
+ * Maps a task to a deadline bucket.
+ * soon: dueAt instant <= now + 48 hours (including overdue/past)
+ * week: dueAt instant <= end of current week (Sunday 23:59:59.999 local)
+ * later: dueAt beyond this week
+ * none: no dueAt, or an unparseable dueAt
+ *
+ * Compares the full instant (date and time-of-day), never a date floored
+ * to midnight. Week starts Monday, ends Sunday at local midnight.
+ */
+export function deadlineBucket(task: Task, now: Date): DeadlineBucket {
+  if (!task.dueAt) return 'none'
+
+  const due = new Date(task.dueAt)
+  if (Number.isNaN(due.getTime())) return 'none'
+
+  // 48 hours from now
+  const inTwoDays = new Date(now.getTime() + 48 * 60 * 60 * 1000)
+
+  if (due.getTime() <= inTwoDays.getTime()) return 'soon'
+
+  // End of the current week (Sunday 23:59:59.999 local)
+  const monday = startOfWeek(now)
+  const endOfWeek = new Date(monday)
+  endOfWeek.setDate(endOfWeek.getDate() + 7) // Next Monday at 00:00
+  endOfWeek.setMilliseconds(-1) // 23:59:59.999 of Sunday
+
+  if (due.getTime() <= endOfWeek.getTime()) return 'week'
+
+  return 'later'
+}
+
+export interface DeadlineMeta {
+  bucket: DeadlineBucket
+  label: string
+  dot: string
+}
+
+export const DEADLINE_BUCKETS: DeadlineMeta[] = [
+  { bucket: 'soon', label: 'Due in 48 hours', dot: 'var(--danger)' },
+  { bucket: 'week', label: 'Later this week', dot: 'var(--warn)' },
+  { bucket: 'later', label: 'Beyond this week', dot: 'var(--text-faint)' },
+  { bucket: 'none', label: 'No deadline', dot: 'var(--border-strong)' },
+]
+
+/**
+ * Groups tasks by Eisenhower quadrant.
+ * Always returns all 4 groups in QUADRANTS order (callers decide whether to
+ * render empty ones). Each group's tasks are sorted via sortTasks.
+ */
+export function groupByMatrix(tasks: Task[]): Array<{ quadrant: Quadrant; tasks: Task[] }> {
+  const sorted = sortTasks(tasks)
+  const groups = new Map<Quadrant, Task[]>()
+  for (const q of QUADRANTS.map((m) => m.quadrant)) {
+    groups.set(q, [])
+  }
+  for (const task of sorted) {
+    const q = quadrantOf(task)
+    groups.get(q)!.push(task)
+  }
+  return QUADRANTS.map((m) => ({ quadrant: m.quadrant, tasks: groups.get(m.quadrant)! }))
+}
+
+/**
+ * Groups tasks by deadline bucket.
+ * Always returns all 4 groups in DEADLINE_BUCKETS order. Each group's
+ * tasks are sorted via sortTasks.
+ */
+export function groupByDeadline(
+  tasks: Task[],
+  now: Date
+): Array<{ bucket: DeadlineBucket; tasks: Task[] }> {
+  const sorted = sortTasks(tasks)
+  const groups = new Map<DeadlineBucket, Task[]>()
+  for (const m of DEADLINE_BUCKETS) {
+    groups.set(m.bucket, [])
+  }
+  for (const task of sorted) {
+    const b = deadlineBucket(task, now)
+    groups.get(b)!.push(task)
+  }
+  return DEADLINE_BUCKETS.map((m) => ({ bucket: m.bucket, tasks: groups.get(m.bucket)! }))
+}
+
+/**
+ * Formats a due date for display.
+ * Invalid/unparseable dueAt: "" (empty — caller omits the due segment)
+ * Overdue/past: "overdue"
+ * Same local day: "today, h:mm AM/PM"
+ * Next local day: "tomorrow, h:mm AM/PM"
+ * Within 7 days: "Fri" (3-letter weekday abbreviation)
+ * Beyond 7 days: "12 Mar" (date and month)
+ *
+ * Parses dueAt as a full ISO instant and reads it back with local getters,
+ * never UTC.
+ */
+export function formatDueLabel(dueAt: string, now: Date): string {
+  const due = new Date(dueAt)
+  if (Number.isNaN(due.getTime())) return ''
+
+  const dueDate = new Date(due.getFullYear(), due.getMonth(), due.getDate())
+  const dueHours = due.getHours()
+  const dueMinutes = due.getMinutes()
+
+  const nowDate = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+  const tomorrow = new Date(nowDate)
+  tomorrow.setDate(tomorrow.getDate() + 1)
+
+  // Check if overdue (compare the full instant)
+  if (due.getTime() < now.getTime()) {
+    return 'overdue'
+  }
+
+  // Same day
+  if (
+    dueDate.getFullYear() === nowDate.getFullYear() &&
+    dueDate.getMonth() === nowDate.getMonth() &&
+    dueDate.getDate() === nowDate.getDate()
+  ) {
+    const hours = dueHours % 12 === 0 ? 12 : dueHours % 12
+    const period = dueHours < 12 ? 'AM' : 'PM'
+    const minStr = String(dueMinutes).padStart(2, '0')
+    return `today, ${hours}:${minStr} ${period}`
+  }
+
+  // Next day
+  if (
+    dueDate.getFullYear() === tomorrow.getFullYear() &&
+    dueDate.getMonth() === tomorrow.getMonth() &&
+    dueDate.getDate() === tomorrow.getDate()
+  ) {
+    const hours = dueHours % 12 === 0 ? 12 : dueHours % 12
+    const period = dueHours < 12 ? 'AM' : 'PM'
+    const minStr = String(dueMinutes).padStart(2, '0')
+    return `tomorrow, ${hours}:${minStr} ${period}`
+  }
+
+  // Within 7 days
+  const daysDiff = Math.floor((dueDate.getTime() - nowDate.getTime()) / (1000 * 60 * 60 * 24))
+  if (daysDiff <= 7) {
+    const weekdays = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+    return weekdays[dueDate.getDay()]
+  }
+
+  // Beyond 7 days
+  const monthNames = [
+    'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+    'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+  ]
+  return `${dueDate.getDate()} ${monthNames[dueDate.getMonth()]}`
+}
+
+/**
+ * Formats task metadata as a single line joined by " · ".
+ * Includes estimate as "≈{formatDuration}..." when set, and
+ * "due {formatDueLabel}" when dueAt is set. Returns null when
+ * both are absent.
+ */
+export function taskMeta(task: Task, now: Date): string | null {
+  const parts: string[] = []
+
+  if (task.estimateMin) {
+    parts.push(`≈${formatDuration(task.estimateMin)} left`)
+  }
+
+  if (task.dueAt) {
+    const label = formatDueLabel(task.dueAt, now)
+    if (label) parts.push(`due ${label}`)
+  }
+
+  return parts.length > 0 ? parts.join(' · ') : null
+}
+
+/**
+ * Creates a block draft from a task for "Plan today".
+ * title: task.title
+ * kind: "deep" if task.important, else "shallow"
+ * durationMin: task.estimateMin or 60, clamped to minimum 5
+ * pomodoros: for deep, Math.max(1, Math.round(durationMin / 30)); for shallow, 0
+ * taskId: task.id
+ */
+export function blockDraftFromTask(task: Task): {
+  title: string
+  kind: 'deep' | 'shallow'
+  durationMin: number
+  pomodoros: number
+  taskId: number
+} {
+  const durationMin = Math.max(5, task.estimateMin ?? 60)
+  const kind = task.important ? 'deep' : 'shallow'
+  const pomodoros = kind === 'deep' ? Math.max(1, Math.round(durationMin / 30)) : 0
+
+  return {
+    title: task.title,
+    kind,
+    durationMin,
+    pomodoros,
+    taskId: task.id,
+  }
+}
+
+/**
+ * Upcoming tasks for the right rail.
+ * Incomplete tasks only, ranked by quadrant priority (do, plan, delegate, drop)
+ * then by sortTasks within each quadrant, capped at limit (default 5).
+ * Returns array of { task, rankColor } where rankColor is the quadrant's dot token.
+ */
+export function upcomingTasks(
+  tasks: Task[],
+  _now: Date,
+  limit: number = 5
+): Array<{ task: Task; rankColor: string }> {
+  const incomplete = tasks.filter((t) => !t.done)
+  const quadrantMeta = new Map(QUADRANTS.map((m) => [m.quadrant, m.dot]))
+
+  // Sort by quadrant priority, then within each quadrant
+  const sorted = incomplete.sort((a, b) => {
+    const quadrantOrder = { do: 0, plan: 1, delegate: 2, drop: 3 }
+    const quadA = quadrantOf(a)
+    const quadB = quadrantOf(b)
+    const orderA = quadrantOrder[quadA]
+    const orderB = quadrantOrder[quadB]
+
+    if (orderA !== orderB) return orderA - orderB
+
+    // Within same quadrant, use sortTasks
+    const sorted = sortTasks([a, b])
+    return sorted[0].id === a.id ? -1 : 1
+  })
+
+  return sorted.slice(0, limit).map((task) => ({
+    task,
+    rankColor: quadrantMeta.get(quadrantOf(task))!,
+  }))
+}
