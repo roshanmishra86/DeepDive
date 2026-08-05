@@ -4,7 +4,7 @@ import type { DayBlock, BlockRepeat } from '../db/types'
 import * as blocksRepo from '../db/repos/blocks'
 import * as notesRepo from '../db/repos/notes'
 import * as settingsRepo from '../db/repos/settings'
-import { nudge, moveBlock as moveBlockPure, sortBlocks, nextFreeStart } from '../lib/today'
+import { nudge, moveBlock as moveBlockPure, sortBlocks, nextFreeStart, shiftFrom } from '../lib/today'
 
 /**
  * Today's blocks store. Hydrates from the database via `day_block` table.
@@ -61,6 +61,27 @@ interface TodayState {
 let nextLocalId = -1
 let persistenceDriver: SqlDriver | null = null
 let hydratedDay: string | null = null
+
+// Every DayBlock field that editBlock is allowed to persist, i.e. every
+// field except the immutable/derived ones (id, day, sort). This is an
+// exhaustively-typed key set rather than a hand-maintained list of
+// `if (patch.X !== undefined)` lines: if a field is ever added to DayBlock
+// without updating this object, `tsc -b` fails at this declaration instead
+// of silently dropping the new field on every edit (three separate
+// incidents of this exact bug class — see TASKS.md Phase 5.6).
+const PERSISTABLE_BLOCK_FIELDS: Record<keyof Omit<DayBlock, 'id' | 'day' | 'sort'>, true> = {
+  title: true,
+  kind: true,
+  startMin: true,
+  durationMin: true,
+  pomodoros: true,
+  completed: true,
+  taskId: true,
+  note: true,
+  repeat: true,
+  trackId: true,
+  quiet: true,
+}
 
 export const useTodayStore = create<TodayState>()((set, get) => ({
   day: null,
@@ -180,44 +201,37 @@ export const useTodayStore = create<TodayState>()((set, get) => ({
     const state = get()
     if (!state.day) return
 
-    // For startMin or durationMin changes with ripple, apply nudge logic
-    let blocks = state.blocks
-    if (ripple && (patch.startMin !== undefined || patch.durationMin !== undefined)) {
-      if (patch.startMin !== undefined) {
-        const block = blocks.find((b) => b.id === id)
-        if (block) {
-          const delta = patch.startMin - block.startMin
-          blocks = nudge(blocks, id, delta, true)
-        }
-      } else if (patch.durationMin !== undefined) {
-        const block = blocks.find((b) => b.id === id)
-        if (block) {
-          const durationDelta = patch.durationMin - block.durationMin
-          // Ripple downstream blocks by the duration change
-          const index = blocks.findIndex((b) => b.id === id)
-          if (index !== -1 && index < blocks.length - 1) {
-            blocks = blocks.map((b, i) => {
-              if (i === index) {
-                return { ...b, durationMin: patch.durationMin! }
-              }
-              if (i > index) {
-                return { ...b, startMin: Math.max(0, b.startMin + durationDelta) }
-              }
-              return b
-            })
-          } else {
-            blocks = blocks.map((b) => (b.id === id ? { ...b, durationMin: patch.durationMin! } : b))
-          }
-        }
+    // Same "drop undefined keys" approach regardless of ripple — there is no
+    // longer a separate ripple/no-ripple path for *which fields* land on the
+    // edited block. Ripple only ever controls whether downstream blocks move.
+    const safePatch = Object.fromEntries(
+      Object.entries(patch).filter(([, v]) => v !== undefined)
+    ) as Partial<DayBlock>
+
+    // Index in the PRE-EDIT canonical order (state.blocks, always kept
+    // sorted by this store). A startMin change can move the edited block to
+    // a different canonical position, so this index must be captured before
+    // the patch is applied. Applying the patch via .map() below preserves
+    // array positions, so this index still points at the edited block (and
+    // everything after it in pre-edit order) in the patched array.
+    const preEditIndex = state.blocks.findIndex((b) => b.id === id)
+    const before = preEditIndex !== -1 ? state.blocks[preEditIndex] : null
+
+    let blocks = state.blocks.map((b) => (b.id === id ? { ...b, ...safePatch } : b))
+
+    if (ripple && before && preEditIndex < blocks.length - 1) {
+      const after = blocks[preEditIndex]
+      // Ripple on the edited block's END time so simultaneous start+duration
+      // changes shift downstream blocks correctly — this reduces to a pure
+      // start delta or pure duration delta when only one of them changes.
+      const delta = after.startMin + after.durationMin - (before.startMin + before.durationMin)
+      if (delta !== 0) {
+        blocks = shiftFrom(blocks, preEditIndex + 1, delta)
       }
-    } else {
-      // No ripple; just update this block
-      const safePatch = Object.fromEntries(
-        Object.entries(patch).filter(([, v]) => v !== undefined)
-      ) as Partial<DayBlock>
-      blocks = blocks.map((b) => (b.id === id ? { ...b, ...safePatch } : b))
     }
-    // Re-sort: startMin/durationMin changes above can change canonical order.
+
+    // Re-sort: startMin changes above (on the edited block or its ripple
+    // targets) can change canonical order.
     blocks = sortBlocks(blocks)
     set({ blocks })
 
@@ -225,21 +239,24 @@ export const useTodayStore = create<TodayState>()((set, get) => ({
     if (persistenceDriver) {
       try {
         const driver = persistenceDriver
-        // Only persist changed fields
-        const persistPatch: Partial<DayBlock> = {}
-        if (patch.title !== undefined) persistPatch.title = patch.title
-        if (patch.kind !== undefined) persistPatch.kind = patch.kind
-        if (patch.startMin !== undefined) persistPatch.startMin = patch.startMin
-        if (patch.durationMin !== undefined) persistPatch.durationMin = patch.durationMin
-        if (patch.pomodoros !== undefined) persistPatch.pomodoros = patch.pomodoros
-        if (patch.completed !== undefined) persistPatch.completed = patch.completed
-        if (patch.taskId !== undefined) persistPatch.taskId = patch.taskId
-        if (patch.note !== undefined) persistPatch.note = patch.note
-        if (patch.repeat !== undefined) persistPatch.repeat = patch.repeat
-        if (patch.trackId !== undefined) persistPatch.trackId = patch.trackId
-        if (patch.quiet !== undefined) persistPatch.quiet = patch.quiet
+        // Only persist changed fields, restricted to the exhaustive
+        // PERSISTABLE_BLOCK_FIELDS key set (see its doc comment).
+        const persistPatch = Object.fromEntries(
+          Object.entries(safePatch).filter(([key]) => key in PERSISTABLE_BLOCK_FIELDS)
+        ) as Partial<DayBlock>
         if (Object.keys(persistPatch).length > 0) {
           await blocksRepo.updateBlock(driver, id, persistPatch)
+        }
+
+        // Persist any downstream ripple shifts, matched by id (not array
+        // position) — same pattern as move() and nudgeBlock() below.
+        const shifted = blocks.filter((b) => {
+          if (b.id === id) return false
+          const prior = state.blocks.find((sb) => sb.id === b.id)
+          return prior !== undefined && prior.startMin !== b.startMin
+        })
+        for (const block of shifted) {
+          await blocksRepo.updateBlock(driver, block.id, { startMin: block.startMin })
         }
       } catch (err) {
         set((_s) => ({ error: err instanceof Error ? err.message : 'Save failed' }))

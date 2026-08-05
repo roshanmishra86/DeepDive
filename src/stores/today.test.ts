@@ -228,6 +228,153 @@ describe('today store', () => {
     expect(persistedC?.durationMin).toBe(60)
   })
 
+  it('ripple edit applies every changed field to in-memory state, not just startMin (defect 1)', async () => {
+    // Mirrors BlockComposer.doSave, which always sends both startMin and
+    // durationMin and lets ripple default to true.
+    const day = '2026-08-04'
+    await useTodayStore.getState().hydrate(driver, day)
+
+    const taskId = await tasksRepo.createTask(driver, {
+      title: 'Linked task',
+      createdAt: new Date().toISOString(),
+    })
+    const trackId = await driver.execute(
+      'INSERT INTO track (path, display_name, category) VALUES (?, ?, ?)',
+      ['/music/x.mp3', 'X', 'ambient']
+    )
+
+    await useTodayStore.getState().addBlock({
+      title: 'Original',
+      kind: 'deep',
+      durationMin: 60,
+      startMin: 300,
+    })
+    const blockId = useTodayStore.getState().blocks[0].id
+
+    await useTodayStore.getState().editBlock(blockId, {
+      title: 'Renamed',
+      note: 'A note',
+      kind: 'shallow',
+      quiet: true,
+      repeat: 'daily',
+      trackId: trackId.lastInsertId,
+      pomodoros: 2,
+      taskId,
+      startMin: 300,
+      durationMin: 60,
+    })
+
+    const block = useTodayStore.getState().blocks.find((b) => b.id === blockId)
+    expect(block?.title).toBe('Renamed')
+    expect(block?.note).toBe('A note')
+    expect(block?.kind).toBe('shallow')
+    expect(block?.quiet).toBe(true)
+    expect(block?.repeat).toBe('daily')
+    expect(block?.trackId).toBe(trackId.lastInsertId)
+    expect(block?.pomodoros).toBe(2)
+    expect(block?.taskId).toBe(taskId)
+  })
+
+  it('ripple edit applies durationMin in-memory even when startMin is also patched (defect 2)', async () => {
+    const day = '2026-08-04'
+    await useTodayStore.getState().hydrate(driver, day)
+
+    await useTodayStore.getState().addBlock({
+      title: 'A',
+      kind: 'deep',
+      durationMin: 60,
+      startMin: 300,
+    })
+    const blockId = useTodayStore.getState().blocks[0].id
+
+    await useTodayStore.getState().editBlock(blockId, { startMin: 300, durationMin: 90 })
+
+    const block = useTodayStore.getState().blocks.find((b) => b.id === blockId)
+    expect(block?.durationMin).toBe(90)
+  })
+
+  it('ripple edit with start and duration changed together shifts downstream by the combined end-delta (defect 3)', async () => {
+    const day = '2026-08-04'
+    await useTodayStore.getState().hydrate(driver, day)
+
+    // A: 300..360, B: 360..390, C: 390..450
+    await useTodayStore.getState().addBlock({ title: 'A', kind: 'deep', durationMin: 60, startMin: 300 })
+    await useTodayStore.getState().addBlock({ title: 'B', kind: 'shallow', durationMin: 30, startMin: 360 })
+    await useTodayStore.getState().addBlock({ title: 'C', kind: 'break', durationMin: 60, startMin: 390 })
+
+    const blockA = useTodayStore.getState().blocks.find((b) => b.title === 'A')
+    expect(blockA).toBeDefined()
+    if (blockA) {
+      // A's start moves +10 and duration moves +30 -> end moves from 360 to 400, a +40 delta.
+      await useTodayStore.getState().editBlock(blockA.id, { startMin: 310, durationMin: 90 })
+    }
+
+    const state = useTodayStore.getState()
+    const updatedA = state.blocks.find((b) => b.title === 'A')
+    const updatedB = state.blocks.find((b) => b.title === 'B')
+    const updatedC = state.blocks.find((b) => b.title === 'C')
+    expect(updatedA?.startMin).toBe(310)
+    expect(updatedA?.durationMin).toBe(90)
+    expect(updatedB?.startMin).toBe(400) // 360 + 40 combined end-delta
+    expect(updatedC?.startMin).toBe(430) // 390 + 40
+  })
+
+  it('ripple edit persists downstream shifts to the database, not just in-memory state (defect 3, persistence)', async () => {
+    const day = '2026-08-04'
+    await useTodayStore.getState().hydrate(driver, day)
+
+    await useTodayStore.getState().addBlock({ title: 'A', kind: 'deep', durationMin: 60, startMin: 300 })
+    await useTodayStore.getState().addBlock({ title: 'B', kind: 'shallow', durationMin: 30, startMin: 360 })
+    await useTodayStore.getState().addBlock({ title: 'C', kind: 'break', durationMin: 60, startMin: 390 })
+
+    const blockA = useTodayStore.getState().blocks.find((b) => b.title === 'A')
+    expect(blockA).toBeDefined()
+    if (blockA) {
+      await useTodayStore.getState().editBlock(blockA.id, { startMin: 310, durationMin: 90 })
+    }
+
+    const fromDb = await blocksRepo.listBlocksForDay(driver, day)
+    const persistedA = fromDb.find((b) => b.title === 'A')
+    const persistedB = fromDb.find((b) => b.title === 'B')
+    const persistedC = fromDb.find((b) => b.title === 'C')
+    expect(persistedA?.startMin).toBe(310)
+    expect(persistedA?.durationMin).toBe(90)
+    expect(persistedB?.startMin).toBe(400)
+    expect(persistedC?.startMin).toBe(430)
+
+    // Simulate an app restart to be doubly sure disk agrees with what was on screen.
+    useTodayStore.setState({ day: null, blocks: [], loading: false, error: null })
+    await useTodayStore.getState().hydrate(driver, day)
+    const reloaded = useTodayStore.getState().blocks
+    expect(reloaded.find((b) => b.title === 'B')?.startMin).toBe(400)
+    expect(reloaded.find((b) => b.title === 'C')?.startMin).toBe(430)
+  })
+
+  it('editBlock with ripple: false leaves downstream blocks untouched even when start and duration both change', async () => {
+    const day = '2026-08-04'
+    await useTodayStore.getState().hydrate(driver, day)
+
+    await useTodayStore.getState().addBlock({ title: 'A', kind: 'deep', durationMin: 60, startMin: 300 })
+    await useTodayStore.getState().addBlock({ title: 'B', kind: 'shallow', durationMin: 30, startMin: 360 })
+    await useTodayStore.getState().addBlock({ title: 'C', kind: 'break', durationMin: 60, startMin: 390 })
+
+    const blockA = useTodayStore.getState().blocks.find((b) => b.title === 'A')
+    expect(blockA).toBeDefined()
+    if (blockA) {
+      await useTodayStore.getState().editBlock(blockA.id, { startMin: 310, durationMin: 90 }, false)
+    }
+
+    const state = useTodayStore.getState()
+    const updatedB = state.blocks.find((b) => b.title === 'B')
+    const updatedC = state.blocks.find((b) => b.title === 'C')
+    expect(updatedB?.startMin).toBe(360)
+    expect(updatedC?.startMin).toBe(390)
+
+    const fromDb = await blocksRepo.listBlocksForDay(driver, day)
+    expect(fromDb.find((b) => b.title === 'B')?.startMin).toBe(360)
+    expect(fromDb.find((b) => b.title === 'C')?.startMin).toBe(390)
+  })
+
   it('toggles block completion', async () => {
     const day = '2026-08-04'
     await useTodayStore.getState().hydrate(driver, day)
