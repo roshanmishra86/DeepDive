@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useMemo } from 'react'
 import { useTodayStore } from '../../stores/today'
 import { toDayKey } from '../../lib/time'
 import { openDatabase } from '../../db/index'
@@ -58,9 +58,14 @@ export function TodayView() {
     return () => window.clearInterval(id)
   }, [])
 
-  const summary = daySummary(blocks)
-  const conflictList = conflicts(blocks)
-  const overlapByBlockId = new Map(conflictList.map((c) => [c.blockId, c.overlapMin]))
+  // ⚡ Bolt Performance Optimization:
+  // nowMin ticks every 30s, causing this view to re-render.
+  // We useMemo here to avoid re-running these O(N) / O(N log N) day-level
+  // calculations (summary, conflicts) on every single clock tick when
+  // the underlying blocks haven't changed.
+  const summary = useMemo(() => daySummary(blocks), [blocks])
+  const conflictList = useMemo(() => conflicts(blocks), [blocks])
+  const overlapByBlockId = useMemo(() => new Map(conflictList.map((c) => [c.blockId, c.overlapMin])), [conflictList])
 
   const openNewComposer = () => {
     setComposerState({ mode: 'new', startMin: nextFreeStart(blocks, nowMin, 30) })
@@ -82,6 +87,13 @@ export function TodayView() {
     }
   }
 
+  const isEmptyAndClosed = blocks.length === 0 && composerState.mode === 'closed'
+
+  // ⚡ Bolt Performance Optimization:
+  // Same as above - only recalculate layout rows (O(N log N) due to sorting)
+  // when the blocks actually change, avoiding redundant work on time ticks.
+  const rows = useMemo(() => layout(blocks), [blocks])
+
   if (loading) {
     return (
       <div className="today-view">
@@ -101,10 +113,6 @@ export function TodayView() {
       </div>
     )
   }
-
-  const isEmptyAndClosed = blocks.length === 0 && composerState.mode === 'closed'
-
-  const rows = layout(blocks)
 
   return (
     <div className="today-view">
