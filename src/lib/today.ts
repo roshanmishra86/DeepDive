@@ -12,6 +12,19 @@ import type { DayBlock, BlockKind, BlockRepeat } from '../db/types'
 import { minutesToClock, formatDuration } from './time'
 
 /**
+ * Minimal structural interface for orderable, schedulable items.
+ * Any type with these four fields can be ordered, moved, and checked for conflicts
+ * using the generic helpers below, regardless of whether it's a DayBlock,
+ * TemplateBlock, or other scheduling primitive.
+ */
+export interface Schedulable {
+  id: number
+  startMin: number
+  durationMin: number
+  sort: number
+}
+
+/**
  * Slope and intercept for the deep/shallow block height formula (see
  * `blockHeight`). Anchored on the user's spec: the 90-minute card grows 10%
  * over the old proportional height (144 → 158.4), and the 30/60-minute
@@ -52,7 +65,7 @@ export function blockHeight(durationMin: number, kind: BlockKind): number {
  * For the first block, returns 0 (by definition).
  * Positive = buffer, 0 = contiguous, negative = overlap.
  */
-export function gapBefore(block: DayBlock, prev: DayBlock | null): number {
+export function gapBefore<T extends Schedulable>(block: T, prev: T | null): number {
   if (!prev) return 0
   return block.startMin - (prev.startMin + prev.durationMin)
 }
@@ -67,7 +80,7 @@ export function gapBefore(block: DayBlock, prev: DayBlock | null): number {
  * the wrong block; see the Phase 4 defect list in TASKS.md.
  * Returns a new array; does not mutate the input.
  */
-export function sortBlocks(blocks: DayBlock[]): DayBlock[] {
+export function sortBlocks<T extends Schedulable>(blocks: T[]): T[] {
   return [...blocks].sort((a, b) => {
     if (a.startMin !== b.startMin) return a.startMin - b.startMin
     return a.sort - b.sort
@@ -114,7 +127,7 @@ export function layout(blocks: DayBlock[]): LayoutRow[] {
  * Preserves all gaps; ripples downstream. Clamps so startMin never goes below 0.
  * Returns a new array; does not mutate the input.
  */
-export function shiftFrom(blocks: DayBlock[], fromIndex: number, deltaMin: number): DayBlock[] {
+export function shiftFrom<T extends Schedulable>(blocks: T[], fromIndex: number, deltaMin: number): T[] {
   return blocks.map((block, i) => {
     if (i < fromIndex) return block
     return {
@@ -131,7 +144,7 @@ export function shiftFrom(blocks: DayBlock[], fromIndex: number, deltaMin: numbe
  * Clamps so startMin never goes below 0.
  * Returns a new array; does not mutate the input.
  */
-export function nudge(blocks: DayBlock[], id: number, deltaMin: number, ripple: boolean = true): DayBlock[] {
+export function nudge<T extends Schedulable>(blocks: T[], id: number, deltaMin: number, ripple: boolean = true): T[] {
   const index = blocks.findIndex((b) => b.id === id)
   if (index === -1) return blocks
 
@@ -171,7 +184,7 @@ export function nudge(blocks: DayBlock[], id: number, deltaMin: number, ripple: 
  * No-op if index is at the boundary in the given direction.
  * Returns a new array; does not mutate the input.
  */
-export function moveBlock(blocks: DayBlock[], index: number, direction: -1 | 1): DayBlock[] {
+export function moveBlock<T extends Schedulable>(blocks: T[], index: number, direction: -1 | 1): T[] {
   const newIndex = index + direction
   if (newIndex < 0 || newIndex >= blocks.length) {
     return blocks // At boundary; no-op
@@ -217,11 +230,11 @@ export interface Conflict {
 /**
  * Finds all overlapping blocks. Returns an empty array if the day is well-formed.
  */
-export function conflicts(blocks: DayBlock[]): Conflict[] {
+export function conflicts<T extends Schedulable>(blocks: T[]): Conflict[] {
   const sorted = sortBlocks(blocks)
 
   const result: Conflict[] = []
-  let prev: DayBlock | null = null
+  let prev: T | null = null
 
   for (const block of sorted) {
     const gap = gapBefore(block, prev)
@@ -287,7 +300,7 @@ export function daySummary(blocks: DayBlock[]): {
  * defect list in TASKS.md ("three different orderings for one list").
  * Returns a new value; does not mutate the input.
  */
-export function nextFreeStart(blocks: DayBlock[], fromMin: number, durationMin: number): number {
+export function nextFreeStart<T extends Schedulable>(blocks: T[], fromMin: number, durationMin: number): number {
   const sorted = sortBlocks(blocks)
 
   let t = fromMin

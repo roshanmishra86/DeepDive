@@ -2600,3 +2600,400 @@ button:focus-visible {
   color: var(--text-muted);
   text-align: center;
 }
+
+/* ═══════════════════════════════════════════════════════════════════════════════
+   Templates View (Phase 6)
+═══════════════════════════════════════════════════════════════════════════════ */
+
+.tpl-view {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-window);
+}
+
+.tpl-header {
+  padding: 22px 30px 14px;
+  border-bottom: 1px solid var(--border-subtle);
+  flex: none;
+}
+
+.tpl-title {
+  font-family: var(--font-display);
+  font-size: 29px;
+  line-height: 1.05;
+  color: var(--text);
+  margin: 0;
+}
+
+.tpl-subtitle {
+  font-size: 12.5px;
+  color: var(--text-muted);
+  margin-top: 5px;
+}
+
+.tpl-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 22px 30px 30px;
+  display: flex;
+  gap: 22px;
+}
+
+.tpl-list-column {
+  width: 290px;
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.tpl-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  flex: 1;
+}
+
+.tpl-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-card);
+  padding: 14px;
+  cursor: pointer;
+  text-align: left;
+  font-family: inherit;
+  font-size: 16px;
+  color: var(--text);
+  transition: border-color 0.15s, background-color 0.15s;
+  font-weight: normal;
+  appearance: none;
+}
+
+.tpl-card:hover {
+  border-color: var(--border-strong);
+  background-color: var(--bg-window);
+}
+
+.tpl-card-active {
+  border: 1px solid var(--accent);
+  background: var(--accent-surface);
+  font-family: var(--font-display);
+  font-size: 19px;
+}
+
+.tpl-card-active:hover {
+  border-color: var(--accent);
+  background: var(--accent-surface);
+}
+
+.tpl-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: 4px;
+}
+
+.tpl-card-name {
+  font-weight: inherit;
+}
+
+.tpl-card-active .tpl-card-name {
+  font-family: var(--font-display);
+  font-size: 19px;
+}
+
+.tpl-card-duration {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-left: 8px;
+  flex: none;
+}
+
+.tpl-card-description {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-bottom: 10px;
+  line-height: 1.3;
+}
+
+.tpl-card-weekdays {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.tpl-weekday-chip {
+  font-size: 10px;
+  font-family: var(--font-mono);
+  padding: 2px 6px;
+  border-radius: 3px;
+}
+
+.tpl-weekday-active {
+  color: var(--on-accent);
+  background: var(--accent);
+}
+
+.tpl-card-active .tpl-weekday-active {
+  color: var(--on-accent);
+  background: var(--accent);
+}
+
+.tpl-weekday-inactive {
+  color: var(--text-faint);
+  background: transparent;
+}
+
+.tpl-new-btn {
+  border: 1px dashed var(--border);
+  border-radius: 6px;
+  padding: 12px;
+  text-align: center;
+  font-size: 12.5px;
+  color: var(--text-muted);
+  cursor: pointer;
+  background: transparent;
+  font-family: inherit;
+  appearance: none;
+  transition: background-color 0.15s;
+  margin-top: auto;
+}
+
+.tpl-new-btn:hover {
+  background: var(--bg-chrome);
+}
+
+.tpl-empty-state {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-card);
+  min-width: 0;
+}
+
+.tpl-detail-pane {
+  flex: 1;
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-card);
+  padding: 20px 22px;
+  display: flex;
+  flex-direction: column;
+}
+
+.tpl-detail-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  margin-bottom: 20px;
+}
+
+.tpl-detail-title {
+  font-family: var(--font-display);
+  font-size: 23px;
+  color: var(--text);
+  margin: 0;
+}
+
+.tpl-detail-subtitle {
+  font-size: 12.5px;
+  color: var(--text-muted);
+  margin-top: 4px;
+}
+
+.tpl-detail-section {
+  margin-bottom: 22px;
+}
+
+.tpl-section-label {
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+  margin-bottom: 9px;
+  font-weight: 500;
+}
+
+.tpl-weekday-toggles {
+  display: flex;
+  gap: 6px;
+}
+
+.tpl-weekday-toggle {
+  width: 44px;
+  height: 36px;
+  border-radius: 5px;
+  display: grid;
+  place-items: center;
+  font-size: 12.5px;
+  cursor: pointer;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-muted);
+  font-family: inherit;
+  appearance: none;
+  transition: border-color 0.15s, background-color 0.15s;
+}
+
+.tpl-weekday-toggle:hover {
+  background: var(--bg-chrome);
+}
+
+.tpl-weekday-toggle-active {
+  background: var(--accent);
+  color: var(--on-accent);
+  border-color: var(--accent);
+}
+
+.tpl-blocks-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.tpl-empty-blocks {
+  padding: 20px;
+  text-align: center;
+  color: var(--text-muted);
+}
+
+.tpl-block-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--bg-window);
+  padding: 10px 13px;
+  font-size: 14px;
+}
+
+.tpl-block-time {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--text-muted);
+  width: 64px;
+  flex: none;
+}
+
+.tpl-block-title {
+  color: var(--text);
+  flex: 1;
+  min-width: 0;
+}
+
+.tpl-block-pomodoro-pill {
+  font-size: 10.5px;
+  color: var(--text-muted);
+  background: var(--bg-panel);
+  border-radius: 20px;
+  padding: 2px 8px;
+  flex: none;
+  white-space: nowrap;
+}
+
+.tpl-block-duration {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--text-muted);
+  flex: none;
+}
+
+.tpl-block-controls {
+  display: flex;
+  gap: 4px;
+  flex: none;
+  margin-left: auto;
+}
+
+.tpl-block-control-btn {
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  appearance: none;
+  transition: border-color 0.15s, color 0.15s;
+}
+
+.tpl-block-control-btn:hover {
+  border-color: var(--border-strong);
+  color: var(--text);
+}
+
+.tpl-block-control-delete:hover {
+  color: var(--danger);
+  border-color: var(--danger);
+}
+
+.tpl-add-block-btn {
+  border: 1px dashed var(--border);
+  border-radius: 5px;
+  padding: 10px;
+  text-align: center;
+  font-size: 12.5px;
+  color: var(--text-muted);
+  cursor: pointer;
+  background: transparent;
+  font-family: inherit;
+  appearance: none;
+  transition: background-color 0.15s;
+}
+
+.tpl-add-block-btn:hover {
+  background: var(--bg-chrome);
+}
+
+.tpl-detail-footer {
+  display: flex;
+  gap: 8px;
+  margin-top: auto;
+  padding-top: 16px;
+  border-top: 1px solid var(--border-subtle);
+}
+
+/* Additional button classes for template modals */
+.btn-danger {
+  background: var(--danger);
+  color: white;
+  padding: 8px 14px;
+  border-radius: 5px;
+  font-size: 12.5px;
+  border: none;
+  cursor: pointer;
+  font-family: inherit;
+  appearance: none;
+  transition: background-color 0.15s;
+}
+
+.btn-danger:hover:not(:disabled) {
+  background: var(--close);
+}
+
+.btn-danger:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.btn-danger:focus-visible {
+  outline: 2px solid var(--danger);
+  outline-offset: 2px;
+}

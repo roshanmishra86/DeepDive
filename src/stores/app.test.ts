@@ -242,6 +242,7 @@ describe('useAppStore', () => {
       const throwingDriver: SqlDriver = {
         execute: () => Promise.reject(new Error('boom')),
         select: () => Promise.reject(new Error('boom')),
+        transaction: () => Promise.reject(new Error('boom')),
       }
       useAppStore.setState({ accent: 'blue', timerStyle: 'numeric', repeatStyle: 'icon' })
 

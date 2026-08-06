@@ -232,15 +232,68 @@ export async function reorderTemplateBlocks(
   }
 }
 
+// Phase 6 F1 (TASKS.md): moveBlock used to persist changed startMin values
+// and the sort renumbering as two separate awaited round trips — if the
+// second failed, SQLite kept the first's write with no way to revert it,
+// corrupting the persisted order while only in-memory state got rolled
+// back. This writes both in ONE `driver.transaction()` call so either both
+// land or neither does.
+export async function moveTemplateBlocksAtomic(
+  driver: SqlDriver,
+  templateId: number,
+  changedStarts: { id: number; startMin: number }[],
+  orderedIds: number[]
+): Promise<void> {
+  const statements = [
+    ...changedStarts.map((c) => ({
+      sql: 'UPDATE template_block SET start_min = ? WHERE id = ?',
+      params: [c.startMin, c.id],
+    })),
+    ...orderedIds.map((id, i) => ({
+      sql: 'UPDATE template_block SET sort = ? WHERE id = ? AND template_id = ?',
+      params: [i, id, templateId],
+    })),
+  ]
+  await driver.transaction(statements)
+}
+
+// Phase 6 F1 (TASKS.md): removeBlock had the same non-atomic shape as
+// moveBlock — delete then a separate reorder round trip. One transaction
+// for both.
+export async function removeTemplateBlockAtomic(
+  driver: SqlDriver,
+  blockId: number,
+  templateId: number,
+  remainingOrderedIds: number[]
+): Promise<void> {
+  const statements = [
+    { sql: 'DELETE FROM template_block WHERE id = ?', params: [blockId] },
+    ...remainingOrderedIds.map((id, i) => ({
+      sql: 'UPDATE template_block SET sort = ? WHERE id = ? AND template_id = ?',
+      params: [i, id, templateId],
+    })),
+  ]
+  await driver.transaction(statements)
+}
+
+
 export async function saveDayAsTemplate(
   driver: SqlDriver,
   day: string,
-  name: string
+  name: string,
+  description?: string
 ): Promise<number> {
+  // Derive start_min from the day's earliest block; fall back to 300
+  const blockRows = await driver.select<{ start_min: number }>(
+    'SELECT MIN(start_min) as start_min FROM day_block WHERE day = ?',
+    [day]
+  )
+  const startMin = blockRows.length > 0 && blockRows[0].start_min !== null ? blockRows[0].start_min : 300
+
   // Create template
   const templateResult = await driver.execute(
     'INSERT INTO template (name, description, start_min, weekdays) VALUES (?, ?, ?, ?)',
-    [name, '', 300, 0]
+    [name, description ?? '', startMin, 0]
   )
   const templateId = templateResult.lastInsertId
 

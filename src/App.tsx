@@ -3,6 +3,7 @@ import { useAppStore } from './stores/app'
 import { useRitualsStore } from './stores/rituals'
 import { useTasksStore } from './stores/tasks'
 import { useTodayStore } from './stores/today'
+import { useTemplatesStore } from './stores/templates'
 import { useTimerStore } from './stores/timer'
 import { openDatabase } from './db/index'
 import { applyAccent } from './lib/accents'
@@ -47,6 +48,7 @@ function App() {
           useRitualsStore.getState().hydrate(driver, hydrationDay),
           useTasksStore.getState().hydrate(driver),
           useTodayStore.getState().hydrate(driver, hydrationDay),
+          useTemplatesStore.getState().hydrate(driver),
         ])
       } catch (err) {
         console.error('Failed to initialize database:', err)

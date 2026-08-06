@@ -7,6 +7,7 @@ import { formatDuration, minutesToClock, parseClock } from '../../lib/time'
 import { TimelineBlock } from '../today/TimelineBlock'
 import { BlockComposer } from '../today/BlockComposer'
 import { ApplyTemplateMenu } from '../today/ApplyTemplateMenu'
+import { SaveTemplateModal } from '../templates/SaveTemplateModal'
 
 type ComposerState =
   | { mode: 'closed' }
@@ -28,6 +29,7 @@ export function TodayView() {
 
   const [composerState, setComposerState] = useState<ComposerState>({ mode: 'closed' })
   const [templateMenuOpen, setTemplateMenuOpen] = useState(false)
+  const [saveTemplateOpen, setSaveTemplateOpen] = useState(false)
   const [shutdownEditing, setShutdownEditing] = useState(false)
   const [shutdownText, setShutdownText] = useState('')
 
@@ -163,6 +165,14 @@ export function TodayView() {
         <div className="today-actions">
           <button
             className="btn-secondary"
+            onClick={() => setSaveTemplateOpen(true)}
+            disabled={blocks.length === 0}
+            aria-label="Save today as template"
+          >
+            Save as template
+          </button>
+          <button
+            className="btn-secondary"
             onClick={() => setTemplateMenuOpen(true)}
             aria-label="Apply template to today"
           >
@@ -277,6 +287,13 @@ export function TodayView() {
           blockId={composerState.mode === 'edit' ? composerState.blockId : null}
           startMin={composerState.mode === 'new' ? composerState.startMin : 0}
           onDone={closeComposer}
+        />
+      )}
+
+      {/* Save as template modal */}
+      {saveTemplateOpen && (
+        <SaveTemplateModal
+          onClose={() => setSaveTemplateOpen(false)}
         />
       )}
     </div>
