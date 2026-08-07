@@ -43,6 +43,29 @@ class NodeSqliteDriver implements SqlDriver {
     const rows = stmt.all(...((params ?? []) as Parameters<typeof stmt.all>)) as T[]
     return Promise.resolve(rows)
   }
+
+  // Real BEGIN/ROLLBACK/COMMIT on the single node:sqlite handle. Unlike
+  // TauriDriver (which cannot guarantee rollback — see the comment above
+  // `TauriDriver.transaction`), this driver owns one connection directly,
+  // so a failure genuinely undoes every statement already applied in this
+  // call, verified by src/test/nodeDriver.test.ts's PROBE case reading back
+  // via a fresh select().
+  transaction(statements: { sql: string; params?: unknown[] }[]): Promise<void> {
+    if (statements.length === 0) return Promise.resolve()
+
+    this.db.exec('BEGIN')
+    try {
+      for (const { sql, params } of statements) {
+        const stmt = this.db.prepare(sql)
+        stmt.run(...((params ?? []) as Parameters<typeof stmt.run>))
+      }
+      this.db.exec('COMMIT')
+      return Promise.resolve()
+    } catch (err) {
+      this.db.exec('ROLLBACK')
+      return Promise.reject(err instanceof Error ? err : new Error(String(err)))
+    }
+  }
 }
 
 export function createTestDb(): { driver: SqlDriver; close(): void } {

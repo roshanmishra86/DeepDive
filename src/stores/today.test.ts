@@ -643,6 +643,27 @@ describe('today store', () => {
     expect(state.blocks.map((b) => b.title)).toEqual(fromDb.map((b) => b.title))
   })
 
+  // --- P2-A (PR review): applyTemplate reports success/failure via its
+  // return value rather than throwing, so a caller (TemplateDetailPane) can
+  // gate navigation on it. -----------------------------------------------
+
+  it('applyTemplate returns true on success and false on failure, and never throws (P2-A)', async () => {
+    const day = '2026-08-04'
+    await useTodayStore.getState().hydrate(driver, day)
+    const templates = await templatesRepo.listTemplates(driver)
+    const makerDay = templates[0]
+
+    const ok = await useTodayStore.getState().applyTemplate(makerDay.id)
+    expect(ok).toBe(true)
+
+    // Failure path: no persistence driver at all (matches the existing
+    // "No database connection" branch this store already had).
+    await useTodayStore.getState().hydrate(null, day)
+    const failed = await useTodayStore.getState().applyTemplate(makerDay.id)
+    expect(failed).toBe(false)
+    expect(useTodayStore.getState().error).toBe('No database connection')
+  })
+
   it('clamps nudge startMin to 0', async () => {
     const day = '2026-08-04'
     await useTodayStore.getState().hydrate(driver, day)

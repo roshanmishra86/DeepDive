@@ -41,8 +41,17 @@ CI invokes the `pnpm` scripts, and that is correct there. **Locally on the WSL2
 ./node_modules/.bin/tsc -b                      # typecheck (app)
 ./node_modules/.bin/tsc -p tsconfig.test.json   # typecheck (tests)
 ./node_modules/.bin/vitest run                  # tests
+node scripts/check-css-classes.mjs              # CSS class resolution
 ./node_modules/.bin/vite build                  # build
 ```
+
+`check-css-classes.mjs` fails if any class referenced in `src/components/`
+has no rule in `src/styles/`. It exists because three components shipped
+referencing classes that were never written, and every other gate passed on
+all three: unstyled markup is valid TypeScript, valid CSS, and renders
+without error. It reads static, template-literal and string-expression
+`className` forms. Add genuinely style-free classes to the allowlist at the
+top of the script, with a reason.
 
 pnpm 11 runs a dependency-status check before every script, which spawns a
 synchronous `pnpm install`. On this 9p mount that install is glacial, and two or
@@ -56,7 +65,7 @@ believing a local gate. If things are already wedged: `pkill -f "bin/pnpm instal
 
 Two workflows. Everyday checks run on `main`; installers are built only at tag time.
 
-- **CI** (`.github/workflows/ci.yml`) — push to `main` or `release`, PRs targeting either, plus manual dispatch. Runs `pnpm lint`, `pnpm typecheck`, `pnpm test`, `pnpm build`, then `cargo fmt --check` and `cargo clippy -D warnings`. Ubuntu only; does not bundle the app.
+- **CI** (`.github/workflows/ci.yml`) — push to `main` or `release`, PRs targeting either, plus manual dispatch. Runs `pnpm lint`, `pnpm typecheck`, `pnpm test`, `pnpm check:css`, `pnpm build`, then `cargo fmt --check` and `cargo clippy -D warnings`. Ubuntu only; does not bundle the app.
 - **Release** (`.github/workflows/release.yml`) — push of a tag matching `v*`. Builds on `windows-latest` and `ubuntu-22.04`, then publishes a **draft** GitHub Release with the installers attached. The matrix sets `fail-fast: false` so one platform failing cannot cancel the other and leave a half-populated release.
 
 Because bundling only happens on a tag, a cross-platform packaging break will not

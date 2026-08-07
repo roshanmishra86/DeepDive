@@ -145,9 +145,9 @@ export function TaskEditor({ taskId, onClose }: TaskEditorProps) {
   }
 
   return (
-    <div className="modal-backdrop" onClick={onClose}>
+    <div className="modal-overlay" onClick={onClose}>
       <div
-        className="modal task-editor"
+        className="modal-panel"
         role="dialog"
         aria-modal="true"
         aria-labelledby="task-editor-title"
@@ -161,7 +161,7 @@ export function TaskEditor({ taskId, onClose }: TaskEditorProps) {
           </h2>
           <button
             type="button"
-            className="modal-close"
+            className="btn-icon"
             onClick={onClose}
             aria-label="Close task editor"
           >

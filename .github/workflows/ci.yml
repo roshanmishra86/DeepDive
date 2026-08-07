@@ -41,6 +41,8 @@ jobs:
 
       - run: pnpm test
 
+      - run: pnpm check:css
+
       - run: pnpm build
 
       - run: cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check

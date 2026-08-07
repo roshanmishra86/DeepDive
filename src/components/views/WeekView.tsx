@@ -57,16 +57,26 @@ export function WeekView() {
 
   if (loading) {
     return (
-      <div className="view-placeholder">
-        <div className="view-placeholder-text">Loading tasks…</div>
+      <div className="week-view">
+        <div className="week-body">
+          <div className="view-empty">
+            <div className="view-empty-title">Loading tasks…</div>
+          </div>
+        </div>
       </div>
     )
   }
 
   if (error) {
     return (
-      <div className="view-placeholder view-placeholder-error">
-        <div className="view-placeholder-text">Error: {error}</div>
+      <div className="week-view">
+        <div className="week-body">
+          <div className="view-empty">
+            <div className="view-empty-title" style={{ color: 'var(--danger)' }}>
+              Error: {error}
+            </div>
+          </div>
+        </div>
       </div>
     )
   }

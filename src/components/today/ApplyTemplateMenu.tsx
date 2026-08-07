@@ -40,11 +40,11 @@ export function ApplyTemplateMenu({ onClose }: ApplyTemplateMenuProps) {
 
   const handleApply = async () => {
     if (!selectedId) return
-    try {
-      await applyTemplate(selectedId)
+    const ok = await applyTemplate(selectedId)
+    if (ok) {
       onClose()
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to apply template')
+    } else {
+      setError(useTodayStore.getState().error ?? 'Failed to apply template')
     }
   }
 

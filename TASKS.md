@@ -656,12 +656,259 @@ figures were snapshots of a moving target and were re-run from scratch.
 - [ ] `--danger-surface` is a literal `rgba()` of `--danger` rather than being derived from it, so
   the two can drift. `color-mix(in srgb, var(--danger) 10%, transparent)` would tie them together.
 
-### Phase 6 — Day Templates
-- [ ] Template list + detail pane
-- [ ] Weekday repeat selector (7-bit mask)
-- [ ] Add / edit / reorder / delete template blocks
-- [ ] "Apply to today"
-- [ ] "Save today as template" (entry point lives in Archive)
+### Phase 6 — Day Templates *(owner: Haiku sub-agents, fixes by Sonnet, verified by Sonnet + main session)*
+- [x] Template list + detail pane — `TemplatesView` (290px list column + flex detail pane, per the mockup)
+- [x] Weekday repeat selector (7-bit mask) — `WEEKDAYS` / `toggleWeekday` in `lib/templates.ts`, Mon = bit 0
+- [x] Add / edit / reorder / delete template blocks — `BlockModal` + `TemplateDetailPane` row controls
+- [x] "Apply to today" — behind a confirm step naming how many blocks will be lost
+- [x] "Save today as template" — **entry point is the Today header, not Archive; see the deviation below**
+
+#### The repo layer already existed
+Phase 3 shipped `db/repos/templates.ts` with full CRUD, `reorderTemplateBlocks` and `saveDayAsTemplate`.
+Phase 6 is therefore store + UI, not schema — no migration was needed.
+
+#### Deliberate deviation — where "Save today as template" lives
+The checklist places this entry point in Archive. **Archive is still a Phase 7 `ViewPlaceholder`**, so
+shipping it there would have produced a feature nothing could reach — the Phase 4 "logic plus tests plus
+CSS is not a feature until something renders a button" defect, committed deliberately. The button lives in
+`TodayView`'s `.today-actions` group instead, disabled when the day has no blocks. Phase 7's Archive should
+call the same `saveDayAsTemplate` store action rather than growing a second implementation.
+
+#### One ordering, now generic
+Template blocks need exactly the day-block ordering semantics. Rather than a fourth copy of it —
+the defect class that produced the worst bugs in Phases 4 and 5 — `sortBlocks`, `gapBefore`,
+`shiftFrom`, `nudge`, `moveBlock`, `conflicts` and `nextFreeStart` in `lib/today.ts` are now generic
+over a structural `Schedulable { id, startMin, durationMin, sort }`. `DayBlock` and `TemplateBlock`
+both satisfy it. Verified no call site widened its type and no cast was introduced; `layout`,
+`blockState` and `blockProgress` stay `DayBlock`-specific because they read `kind`/`completed`.
+
+#### `SqlDriver.transaction()` — new, and why it is shaped the way it is
+Added to the driver interface and implemented on both drivers. The Tauri implementation folds every
+statement into **one** `execute()` call (`BEGIN; …; COMMIT`, params flattened in statement order).
+That is forced by the stack, not a style choice — verified by reading the dependency sources directly:
+
+| Fact | Source |
+| --- | --- |
+| The plugin runs `sqlx::query(&query)` with all values bound positionally, on **one** pooled connection per `execute()` call | `tauri-plugin-sql-2.4.0/src/wrapper.rs` |
+| sqlx-sqlite prepares statements one at a time via `prepare_next` and binds arguments with a running `args_used` offset, so one multi-statement string with `?` placeholders binds correctly | `sqlx-sqlite-0.8.6/src/connection/execute.rs` |
+| sqlx does **not** roll back on pool release — `in_transaction` is consulted only inside sqlx's own `Transaction::begin`; the on-release `ping()` does not clear it | `sqlx-core-0.8.6/src/pool/connection.rs` |
+
+Separate `execute()` calls for BEGIN/COMMIT would be wrong: the pool may hand them different connections.
+
+- [ ] **Known residual limitation.** If a statement fails mid-string, `COMMIT` never runs and the
+  already-applied statements sit in an uncommitted transaction on that pooled connection. This is
+  strictly better than the bug it replaces — the partial write never commits, so it cannot corrupt
+  persisted order — but it can leave a connection stuck mid-transaction. Mitigated with a best-effort
+  `ROLLBACK` in the catch, swallowed if it fails. Revisit in the Phase 10 pass.
+
+Note the Tauri-side test necessarily mocks `Database.load`, so it proves only that the driver folds
+statements into a single call with correctly flattened params. **Real atomicity on the Tauri path is
+established by the source reading above, not by that test.** The node driver's rollback *is* proven
+directly, by a probe that reads the row back after a mid-transaction failure.
+
+#### Defects found in verification and fixed
+As in every prior phase, all of these were found **after** the implementing sub-agents reported every
+checklist item complete with all gates passing. The gates did pass and could not see any of it.
+
+**Found in the foundation, before the UI was built on it:**
+- [x] **Template list stats went stale.** `totalMin`/`blockCount` come from the `listTemplates` SQL
+  aggregate at hydrate time; every block mutation updated `detail.blocks` and never the matching list
+  row, so after adding a block the card kept rendering the old "6 h 30 m" until remount. Fixed with
+  `syncListStats()`, deriving from `templateTotals()` after every mutation including rollback paths.
+- [x] **`TemplateWithStats` / `TemplateDetail` re-declared in the store** while already exported
+  identically from the repo. Two sources of truth for one shape.
+- [x] **Helpers written, then not used.** `addBlock` inlined `nextTemplateBlockStart()`'s rule and
+  `setWeekday` inlined `toggleWeekday()` — both written by the same agent in the same change.
+- [x] **`templateSubtitle` did not match the mockup** — missing the "Applies on" prefix the design renders.
+- [x] `setWeekday` silently no-opped when the list row was missing; `deleteTemplate` briefly assigned the
+  deleted template's detail to the new selection; `removeBlock` left a sparse `sort` sequence while a
+  later `reorderTemplateBlocks` wrote a dense one (the shape of the Phase 4 divergence); `hydrate` did
+  not refresh an already-selected detail.
+- [x] **`saveDayAsTemplate` hardcoded `start_min = 300`** regardless of the day, so a template saved from
+  a 9:00 AM day rendered "starts 5:00 AM". Now derives from the day's earliest block, 300 only as the
+  empty-day fallback.
+
+**Found in verification of the finished phase:**
+- [x] **Non-atomic reorder corrupted the database while the rollback hid it.** `moveBlock` persisted the
+  swapped `startMin` values and the `sort` renumbering as two separate awaited round trips. If the second
+  failed, the catch reverted only *in-memory* state — the screen looked correct while SQLite kept swapped
+  starts with stale sort. Since `getTemplate()` reads `ORDER BY sort`, the next reload rendered a timeline
+  **running backwards**, with no error shown. `removeBlock` had the same shape. Proven by probe before
+  being fixed: seed A(300,sort 0)/B(360,sort 1), move B up, fail the sort write, reload → `times[0] > times[1]`.
+  Both now go through `moveTemplateBlocksAtomic` / `removeTemplateBlockAtomic`, one transaction each.
+- [x] **Two delete paths that disagreed.** The block row's ✕ called `removeBlock` with **no confirmation**
+  — a silent irreversible delete — while the identical call inside `BlockModal` sat behind a native
+  `window.confirm`, which nothing else in this app uses. Both now route through one shared
+  `ConfirmDeleteBlockModal`.
+- [x] **Ten identical accessible names** on the block rows ("Move up" / "Edit block" / "Delete block") —
+  the Phase 4 defect repeating, and inconsistent *within this phase*, since the weekday toggles and
+  `TemplateListCard` in the same change already included the name. All now include `block.title`.
+- [x] **One modal gated by two independent booleans** (`blockModalOpen`, `editingBlockId`). Not
+  exploitable through the UI, but able to stack two dialogs if either were ever set programmatically.
+  Collapsed to a `BlockModalState` discriminated union, matching `ComposerState` in `TodayView`.
+
+#### Checked and found correct (each proven by probe, not by inspection)
+Weekday bit order end-to-end (Mon+Wed persists as `0b101`, matching schema and render); the
+`saveDayAsTemplate` derived start and its empty-day fallback; the reorder happy path against a fresh
+`getTemplate()` read; the `Schedulable` generalization; and `lib/templates-ui.ts`, which delegates to
+`minDurationFor`/`maxPomodoros` rather than being a fourth duration formatter.
+
+#### Process note — an agent stalled mid-proof and left the tree broken
+The fix agent implemented the F1 transaction work, reverted it to prove the regression test could fail,
+then stalled before restoring. The tree was left with three test files calling `driver.transaction()`
+and **no implementation of it anywhere**. Recorded because the failability discipline this project
+relies on has a real failure mode: a revert that is never undone. Restore before reporting, and check
+the tree state rather than the agent's summary.
+
+#### Post-phase defect — components referencing CSS classes that were never written
+
+Found only when the user screenshotted the Templates block dialog and asked why it looked nothing like
+Today's. It was not styled *differently*; it was not styled *at all*. `BlockModal` referenced
+`.modal-field/-label/-input/-hint/-segmented*/-chip-btn*`, none of which existed, so the kind buttons
+rendered as the run-together text `DeepShallowBreakRitual` and the duration presets as `306090`.
+
+Sweeping the whole tree found **three** components shipped this way, across two phases:
+
+| Component | Undefined classes | Symptom |
+| --- | --- | --- |
+| `templates/BlockModal` (Phase 6) | `.modal-field/-label/-input/-hint/-segmented*/-chip-btn*` | bare labels, buttons run together |
+| `week/TaskEditor` (Phase 5) | `.modal-backdrop`, `.modal`, `.modal-close` | no overlay, no positioning, no panel chrome |
+| `views/WeekView` (Phase 5) | `.view-placeholder`, `-text`, `-error` | loading and error states as unstyled bare text |
+
+**All three passed every gate, in every phase, every time.** Unstyled markup is valid TypeScript, valid
+CSS, and renders without error. The Phase 6 acceptance table below checked that the CSS diff added no
+new hex literals — but never that the classes components reference actually *resolve*. That is how a
+dialog nobody could read was recorded as independently verified.
+
+Fixed by pointing all three at classes that already exist and already work, adding no new design
+language: `BlockModal` onto the Today composer's `composer-*` family (so template block editing is the
+same visual component family as Today's, not a lookalike), `TaskEditor` onto
+`.modal-overlay`/`.modal-panel`/`.btn-icon`, and `WeekView` onto `.view-empty*`, matching `TodayView`'s
+handling of the same two states. The five `.modal-*` form rules were still added for the sibling
+New/Edit/SaveTemplateModal, which had the same bug. The orphaned `.task-editor` rule was deleted.
+
+Four further defects surfaced while reviewing the `BlockModal` rewrite:
+
+- [x] **Duration field became untypeable** (regression introduced by the restyle). The rewrite collapsed
+  the composer's raw-text and committed-number state into one field, so the clamp wrote back into the
+  input: with `minDurationFor('deep') === 30`, typing `90` went `9` → `"30"` → `"300"`. Fixed with
+  `nextDurationTextState()`, the pure core of the separation `BlockComposer` already had.
+- [x] **A new Break block could persist `NaN` duration** — `durationValid` is unconditionally true for
+  breaks, save did `parseInt('', 10)`, and the guard `NaN < minDurationFor('break')` is `false`, so
+  nothing caught it. **Pre-existing since Phase 6**, not caused by the restyle. Closed at source
+  (`breakDurationOnKindSwitch`) and defended at save (`resolveBreakDurationMin`).
+- [x] **Footer summary claimed a 12:00 AM start** when start time was left blank, which is legal in
+  templates. `composerSummaryNoStart()` omits the range.
+- [x] **A mount focus effect silently overrode `autoFocus`**, landing focus on Close instead of the title.
+
+Both substantive fixes proven red-then-green. New logic went into shared helpers in `lib/today.ts` built
+on the existing `nearestBreakDuration`; `pomodoroLabel` was extracted out of `composerSummary` to remove
+a duplicated pluralization literal.
+
+**A sixth gate now exists because of this:** `pnpm check:css` (`scripts/check-css-classes.mjs`) fails if
+any class referenced in `src/components/` has no rule in `src/styles/`. It handles static, template
+literal and string-expression `className` forms, and runs in CI between `test` and `build`. Proven able
+to fail on both a static `className` and a string inside a template-literal ternary — the form most
+likely to hide one. One allowlisted exception: `.settings-entry` on `Sidebar`, an inert modifier beside
+`.nav-item`, which carries all the styling.
+
+The lesson generalizes past CSS: **every gate here checks that code is well-formed, and none check that
+its references resolve.** Worth asking, each phase, what else is silently unresolvable.
+
+#### External PR review — findings, all confirmed and fixed
+
+An external review of PR #6 requested changes and was **correct on every checkable claim**. It found
+defects that four gate runs and two internal verification passes did not.
+
+- [x] **[P1] `editBlock` never re-stamped or persisted `sort`.** It re-sorted the in-memory array but
+  — unlike `removeBlock` and `moveBlock` — never renumbered `sort` or persisted it, and `select()`
+  assigned `getTemplate()`'s `ORDER BY sort` result verbatim. Reload showed the old order with new
+  start times. **This is the same defect class as the F1 reorder bug fixed earlier in this same phase:
+  one instance was fixed and its sibling in the adjacent function was left.** Fixed with a new
+  `editTemplateBlockAtomic()` writing patch + renumbering in one `driver.transaction()`, plus
+  `sortBlocks()` normalization in `select()` as defence in depth.
+- [x] **[P1] Confirm-delete backdrop click closed the parent modal**, discarding the in-progress block
+  edit. `ConfirmDeleteBlockModal`'s overlay `onClick={onCancel}` did not `stopPropagation`, and it
+  renders inside `BlockModal`'s overlay. The Escape path *was* guarded — the click path was simply
+  missed. Fixed at the source so it is safe wherever nested.
+- [x] **[P1] A new standalone `.btn-danger` rule restyled pre-existing buttons on two untouched
+  screens.** Equal specificity `(0,1,0)` to `.btn-icon` and later in source, so it won `background`,
+  `color`, `padding`, and `border` on every `btn-icon btn-danger` in `TimelineBlock` and `TaskRow` —
+  solid red at rest, no border, `8px 14px` padding on a 28×28 button, and hover feedback dead.
+  Renamed to `.btn-danger-solid`.
+- [x] **[P2] Store actions swallowed errors while five component paths assumed they threw** — failed
+  create/save/delete/apply closed modals and navigated as if successful. Resolved by extending the
+  `id | null` convention the store already used: `updateTemplate`, `deleteTemplate` and `applyTemplate`
+  now return `boolean`, and every call site checks it. A sub-agent correctly **rejected** the
+  main-session suggestion to make these throw, on the evidence that no mutator anywhere in this app
+  rejects; rethrowing would have invented a third contract.
+- [x] **[P2] `select()` had no stale-response guard** — out-of-order resolution could leave `detail`
+  holding template A's blocks while `selectedId` was B, after which `addBlock` would persist a row
+  under B with a `startMin` computed from A.
+- [x] **[P3]** `deleteTemplate` partial rollback; dead `templateId` prop; untrimmed template name;
+  unclassed loading state; inline styles where siblings use classes; dead `templates-ui.ts` (whose
+  validator already *disagreed* with the live `BlockModal` rules) and dead `templates.ts` exports.
+
+**A defect introduced by the fix round itself, found in review of the fix:** `editTemplateBlockAtomic`
+duplicated the six-branch column mapping from `updateTemplateBlock` verbatim — the project's signature
+failure mode, reintroduced while fixing a bug of the same family. Extracted to one
+`TEMPLATE_BLOCK_COLUMNS` table typed `Record<keyof Omit<TemplateBlock, 'id' | 'templateId'>, string>`,
+matching the existing `PERSISTABLE_BLOCK_FIELDS` convention. Exhaustiveness proven by adding a probe
+field and observing `tsc -b` fail with TS2741.
+
+**Two mock-up deviations**, both fixed: weekday chips rendered accent on every list card because
+`.tpl-card-active .tpl-weekday-active` was byte-identical to the base rule — a dead rule that was also
+a visible bug. Sat/Sun were left toggleable rather than given the mock-up's disabled treatment: the
+7-bit mask supports weekends and a weekend template is legitimate.
+
+**One review claim corrected, on evidence:** `DEFAULT_TEMPLATE_START_MIN` was described as a second
+source of truth for the 300 default. It was already dead at `HEAD` — `TemplatesView` hardcoded
+`startMin: 300` and never imported it. Deleting it removed misleading dead code; the two real magic
+`300`s (`NewTemplateModal`, `saveDayAsTemplate`) predate this PR and are worth consolidating later.
+
+**What the gates could not see, again.** Every one of these passed `oxlint`, `tsc`, the suite,
+`check:css` and `vite build`. `check:css` verifies that referenced classes *resolve*; it cannot see a
+CSS collision between two rules that both exist, styling that was never a class, or a
+verification claim stated more strongly than its check supports — the "zero new colour literals" grep
+used `#` and `rgb` and so missed a `color: white` in the very rule causing the P1 collision. The colour
+grep now includes named colours.
+
+#### Process note — a second agent revert destroyed uncommitted work
+The agent that wrote `check-css-classes.mjs` proved it could fail by planting a bad class in a
+component, then cleaned up with a tree-wide `git` revert rather than restoring just that file. It wiped
+four uncommitted documentation edits in the process. The code changes survived only because they had
+already been committed. This is the same failure mode as the Phase 6 stall recorded above, and the
+second time a revert-based proof has damaged the tree: **commit or stash before handing a tree to an
+agent that will revert anything, and require agents to restore by file, never tree-wide.**
+
+**Phase 6 acceptance — MET (independently verified, not taken on the sub-agents' reports):**
+
+| Check | Result |
+| --- | --- |
+| `oxlint` | clean, zero warnings |
+| `tsc -b` + `tsc -p tsconfig.test.json` | pass |
+| `vitest run` | 573 tests, 24 files (456 at phase start) |
+| `vite build` | pass — 368.7 KB JS / 52.6 KB CSS (gzip 104.8 / 8.5) |
+| `cargo fmt --all -- --check` | pass |
+| `cargo clippy --all-targets -- -D warnings` | pass |
+| New hex literals in `chrome.css` | zero |
+| Every class referenced in components resolves to a CSS rule | **not checked at the time — three components were broken.** Added afterwards as `pnpm check:css`; now passes |
+| Every templates-store action reachable from a component | pass — all 11 wired |
+| `window.confirm` remaining in components | zero |
+| Regression test proven able to fail | pass — atomic repo fns reverted to the two-round-trip shape, suite went red (`expected 999 to be 300`), fix restored, 573 green |
+| Node-driver rollback proven by read-back probe | pass |
+| `tauri dev` launches on WSLg | pass — 189 MB RSS, 0 panics, 0 Rust errors, Vite HTTP 200, Phase 6 icon set bundled |
+
+Note: the WSLg `libEGL` / `MESA ZINK` / `gdk_seat_get_keyboard` warnings from Phases 1–5 persist —
+software-rendering noise, not app faults. A transient `EACCES` renaming `node_modules/.vite/deps` on the
+`/mnt/c` 9p mount appeared once and resolved on retry; it is a filesystem artifact, not an app fault.
+
+#### Known, deliberately not fixed
+- [ ] No component-level test of the Templates render path. The suite runs on the `node` environment
+  because jsdom costs ~113s on this `/mnt/c` mount (Phase 2). Pure helpers are tested; the JSX is not.
+  Same standing exception as Phases 5.5 and 5.6.
+- [ ] The Tauri-side `transaction()` test mocks the plugin and so cannot prove real atomicity — see the
+  driver note above.
 
 ### Phase 7 — Archive
 - [ ] Month calendar with per-day status dots (full / partial / missed)
