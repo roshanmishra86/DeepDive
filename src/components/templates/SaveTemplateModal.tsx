@@ -4,13 +4,14 @@ import { useAppStore } from '../../stores/app'
 import { toDayKey } from '../../lib/time'
 
 interface SaveTemplateModalProps {
+  day?: string // Day to save as template. Defaults to today if not provided.
   onClose: () => void
 }
 
 const FOCUSABLE_SELECTOR =
   'button:not(:disabled), [href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])'
 
-export function SaveTemplateModal({ onClose }: SaveTemplateModalProps) {
+export function SaveTemplateModal({ day, onClose }: SaveTemplateModalProps) {
   const saveDayAsTemplate = useTemplatesStore((s) => s.saveDayAsTemplate)
   const setView = useAppStore((s) => s.setView)
 
@@ -61,8 +62,8 @@ export function SaveTemplateModal({ onClose }: SaveTemplateModalProps) {
     // did nothing on `null` — reachable in the no-driver dev path, which
     // resolves to null with "No database connection" — leaving the modal
     // open with no feedback at all. Surface the store's error instead.
-    const day = toDayKey(new Date())
-    const templateId = await saveDayAsTemplate(day, name.trim())
+    const dayToSave = day ?? toDayKey(new Date())
+    const templateId = await saveDayAsTemplate(dayToSave, name.trim())
     if (templateId) {
       setView('templates')
       onClose()

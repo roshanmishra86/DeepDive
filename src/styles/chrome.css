@@ -3032,3 +3032,461 @@ button:focus-visible {
   outline: 2px solid var(--danger);
   outline-offset: 2px;
 }
+
+/* ═══════════════════════════════════════════════════════════════════════════════
+   Archive View Styles
+   Calendar month view, deep hours histogram, and day record pane
+═══════════════════════════════════════════════════════════════════════════════ */
+
+.arc-view {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.arc-header {
+  padding: 22px 30px 14px;
+  border-bottom: 1px solid var(--border-subtle);
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 20px;
+}
+
+.arc-title {
+  font-family: var(--font-display);
+  font-size: 29px;
+  line-height: 1.05;
+  color: var(--text);
+}
+
+.arc-subtitle {
+  font-size: 12.5px;
+  color: var(--text-muted);
+  margin-top: 5px;
+}
+
+.arc-headline {
+  display: flex;
+  gap: 22px;
+  flex: none;
+}
+
+.arc-stat {
+  text-align: right;
+}
+
+.arc-stat-value {
+  font-family: var(--font-display);
+  font-size: 26px;
+  line-height: 1;
+  color: var(--text);
+}
+
+.arc-stat-pct {
+  font-size: 15px;
+  color: var(--text-muted);
+}
+
+.arc-stat-label {
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+  margin-top: 3px;
+}
+
+.arc-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 22px 30px 30px;
+  display: flex;
+  gap: 22px;
+}
+
+.arc-left-column {
+  width: 352px;
+  flex: none;
+}
+
+.arc-card {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-card);
+  padding: 16px 18px 18px;
+}
+
+.arc-calendar-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.arc-nav-btn {
+  width: 26px;
+  height: 26px;
+  border-radius: 4px;
+  border: none;
+  background: transparent;
+  color: var(--text-faint);
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+  font-family: inherit;
+  appearance: none;
+  transition: background-color 0.15s;
+}
+
+.arc-nav-btn:hover {
+  background: var(--bg-window);
+}
+
+.arc-nav-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.arc-month-label {
+  font-family: var(--font-display);
+  font-size: 18px;
+  color: var(--text);
+}
+
+.arc-calendar-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 2px;
+  margin-top: 14px;
+}
+
+.arc-weekday-label {
+  text-align: center;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+  padding-bottom: 6px;
+}
+
+.arc-calendar-day {
+  height: 42px;
+  border-radius: 5px;
+  border: 1px solid transparent;
+  background: transparent;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  cursor: default;
+  font-family: inherit;
+  appearance: none;
+  transition: background-color 0.15s, border-color 0.15s;
+}
+
+.arc-calendar-day:not(:disabled):not(.arc-outside-month) {
+  cursor: pointer;
+}
+
+.arc-calendar-day:hover:not(:disabled):not(.arc-outside-month) {
+  background: var(--bg-window);
+}
+
+.arc-calendar-day.arc-outside-month {
+  color: var(--border-strong);
+}
+
+.arc-calendar-day.arc-outside-month .arc-day-number {
+  color: var(--border-strong);
+}
+
+.arc-calendar-day.arc-selected {
+  background: var(--accent-surface);
+  border-color: var(--accent);
+}
+
+.arc-calendar-day:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.arc-calendar-day:disabled {
+  cursor: default;
+}
+
+.arc-day-number {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text);
+}
+
+.arc-day-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+}
+
+.arc-calendar-legend {
+  display: flex;
+  gap: 14px;
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border-subtle);
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.arc-legend-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.arc-legend-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  display: block;
+  flex: none;
+}
+
+.arc-histogram-title {
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+.arc-histogram-bars {
+  display: flex;
+  gap: 3px;
+  align-items: flex-end;
+  height: 56px;
+  margin-top: 12px;
+}
+
+.arc-bar-container {
+  flex: 1;
+  height: 100%;
+  display: flex;
+  align-items: flex-end;
+}
+
+.arc-bar {
+  width: 100%;
+  border-radius: 2px;
+  flex: 1;
+  transition: background-color 0.15s;
+}
+
+.arc-bar-tier-0 {
+  background: color-mix(in srgb, var(--accent) 25%, var(--border));
+}
+
+.arc-bar-tier-1 {
+  background: color-mix(in srgb, var(--accent) 50%, var(--border));
+}
+
+.arc-bar-tier-2 {
+  background: color-mix(in srgb, var(--accent) 75%, var(--border));
+}
+
+.arc-bar-tier-3 {
+  background: var(--accent);
+}
+
+.arc-histogram-footer {
+  display: flex;
+  justify-content: space-between;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-faint);
+  margin-top: 7px;
+}
+
+.arc-record-pane {
+  flex: 1;
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-card);
+  padding: 20px 22px;
+}
+
+.arc-record-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.arc-record-title {
+  font-family: var(--font-display);
+  font-size: 23px;
+  color: var(--text);
+}
+
+.arc-record-meta {
+  font-size: 12.5px;
+  color: var(--text-muted);
+  margin-top: 4px;
+}
+
+.arc-save-template-btn {
+  padding: 7px 13px;
+  border: 1px solid var(--border-strong);
+  border-radius: 5px;
+  font-size: 12.5px;
+  color: var(--text);
+  cursor: pointer;
+  background: var(--bg-panel);
+  font-family: inherit;
+  appearance: none;
+  flex: none;
+  transition: background-color 0.15s;
+}
+
+.arc-save-template-btn:hover {
+  background: var(--bg-window);
+}
+
+.arc-save-template-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.arc-record-stats {
+  display: flex;
+  gap: 10px;
+  margin-top: 18px;
+}
+
+.arc-record-stat {
+  flex: 1;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--bg-window);
+  padding: 12px 14px;
+}
+
+.arc-record-stat-value {
+  font-family: var(--font-display);
+  font-size: 22px;
+  color: var(--text);
+}
+
+.arc-record-stat-label {
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+  margin-top: 2px;
+}
+
+.arc-record-section {
+  margin-top: 22px;
+}
+
+.arc-record-section-label {
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+  margin-bottom: 10px;
+}
+
+.arc-blocks-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.arc-empty-blocks {
+  padding: 20px;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 12.5px;
+}
+
+.arc-block-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--bg-window);
+  padding: 11px 13px;
+}
+
+.arc-block-status {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  flex: none;
+  display: grid;
+  place-items: center;
+  font-size: 9px;
+  line-height: 1;
+}
+
+.arc-block-status-done {
+  background: var(--accent);
+  color: var(--bg-card);
+  border: 1.4px solid var(--accent);
+}
+
+.arc-block-status-pending {
+  background: transparent;
+  border: 1.4px solid var(--border);
+}
+
+.arc-block-time {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--text-muted);
+  width: 64px;
+  flex: none;
+}
+
+.arc-block-title {
+  font-size: 14px;
+  color: var(--text);
+  flex: 1;
+  min-width: 0;
+}
+
+.arc-block-kind {
+  font-size: 10.5px;
+  color: var(--text-muted);
+  background: var(--bg-panel);
+  border-radius: 20px;
+  padding: 2px 8px;
+  flex: none;
+  white-space: nowrap;
+}
+
+.arc-block-duration {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--text-muted);
+  flex: none;
+}
+
+.arc-record-note {
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--bg-window);
+  padding: 13px 15px;
+  font-family: var(--font-display);
+  font-size: 15px;
+  line-height: 1.6;
+  color: var(--text);
+  font-style: italic;
+}
+
+.arc-no-note {
+  color: var(--text-muted);
+  font-style: italic;
+}

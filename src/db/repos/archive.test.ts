@@ -268,4 +268,151 @@ describe('archive repository', () => {
     expect(minutes[0]).toBe(90)
     expect(minutes[1]).toBe(0)
   })
+
+  it('dayRecord returns a record for a zero-block day with a shut-down note', async () => {
+    // Phase 7 requirement: a day with a note but no blocks should return a record
+    const day = '2026-08-15'
+
+    // Create only a note, no blocks
+    await driver.execute(
+      'INSERT INTO day_note (day, note) VALUES (?, ?)',
+      [day, 'Rest day. Needed time off.']
+    )
+
+    const record = await archive.dayRecord(driver, day)
+    expect(record).not.toBeNull()
+    expect(record?.day).toBe(day)
+    expect(record?.blockCount).toBe(0)
+    expect(record?.completedCount).toBe(0)
+    expect(record?.note).toBe('Rest day. Needed time off.')
+    // A zero-block day with a note is 'note', never 'miss' — 'miss' asserts
+    // blocks were planned and none landed, which is false here: nothing was
+    // planned at all. See the Phase 7 review in TASKS.md.
+    expect(record?.status).toBe('note')
+  })
+
+  it('dayStatuses agrees with dayRecord on status for every day-kind: full, part, miss, note-only, zero-block-no-note', async () => {
+    // dayStatuses and dayRecord are two independent SQL implementations of
+    // "what is this day's status" — the project's documented recurring
+    // defect class is exactly this kind of two-sources-of-truth drift.
+    const fullDay = '2026-09-01'
+    const partDay = '2026-09-02'
+    const missDay = '2026-09-03'
+    const noteDay = '2026-09-04'
+    const emptyDay = '2026-09-05'
+
+    // full: all blocks completed
+    const fullId = await blocks.createBlock(driver, {
+      day: fullDay,
+      title: 'Full',
+      kind: 'deep',
+      startMin: 300,
+      durationMin: 60,
+    })
+    await blocks.setBlockCompleted(driver, fullId, true)
+
+    // part: one completed, one not
+    const partId1 = await blocks.createBlock(driver, {
+      day: partDay,
+      title: 'Part 1',
+      kind: 'deep',
+      startMin: 300,
+      durationMin: 60,
+    })
+    await blocks.createBlock(driver, {
+      day: partDay,
+      title: 'Part 2',
+      kind: 'deep',
+      startMin: 400,
+      durationMin: 60,
+    })
+    await blocks.setBlockCompleted(driver, partId1, true)
+
+    // miss: blocks exist, none completed
+    await blocks.createBlock(driver, {
+      day: missDay,
+      title: 'Miss',
+      kind: 'deep',
+      startMin: 300,
+      durationMin: 60,
+    })
+
+    // note-only: zero blocks, a shut-down note
+    await driver.execute('INSERT INTO day_note (day, note) VALUES (?, ?)', [noteDay, 'Off today.'])
+
+    // emptyDay: nothing at all -> dayRecord returns null, dayStatuses has no entry
+
+    const statuses = await archive.dayStatuses(driver, fullDay, emptyDay)
+
+    const fullRecord = await archive.dayRecord(driver, fullDay)
+    const partRecord = await archive.dayRecord(driver, partDay)
+    const missRecord = await archive.dayRecord(driver, missDay)
+    const noteRecord = await archive.dayRecord(driver, noteDay)
+    const emptyRecord = await archive.dayRecord(driver, emptyDay)
+
+    expect(statuses[fullDay]).toBe('full')
+    expect(fullRecord?.status).toBe('full')
+
+    expect(statuses[partDay]).toBe('part')
+    expect(partRecord?.status).toBe('part')
+
+    expect(statuses[missDay]).toBe('miss')
+    expect(missRecord?.status).toBe('miss')
+
+    expect(statuses[noteDay]).toBe('note')
+    expect(noteRecord?.status).toBe('note')
+
+    expect(statuses[emptyDay]).toBeUndefined()
+    expect(emptyRecord).toBeNull()
+  })
+
+  it('dayRecord returns null for a day with no blocks and no note', async () => {
+    const day = '2026-08-20'
+    const record = await archive.dayRecord(driver, day)
+    expect(record).toBeNull()
+  })
+
+  it('dayRecord orders blocks by sortBlocks (startMin, then sort)', async () => {
+    const day = '2026-08-25'
+
+    // Create blocks out of chronological order
+    // Block 2: starts at 390 (7:30 AM), sort = 0
+    await blocks.createBlock(driver, {
+      day,
+      title: 'Block 2',
+      kind: 'deep',
+      startMin: 390,
+      durationMin: 60,
+      sort: 0,
+    })
+
+    // Block 1: starts at 300 (5:00 AM), sort = 0
+    await blocks.createBlock(driver, {
+      day,
+      title: 'Block 1',
+      kind: 'deep',
+      startMin: 300,
+      durationMin: 60,
+      sort: 0,
+    })
+
+    // Block 3: starts at 300 (5:00 AM), sort = 1 (should come after Block 1)
+    await blocks.createBlock(driver, {
+      day,
+      title: 'Block 3',
+      kind: 'deep',
+      startMin: 300,
+      durationMin: 60,
+      sort: 1,
+    })
+
+    const record = await archive.dayRecord(driver, day)
+    expect(record).not.toBeNull()
+    expect(record?.blocks.length).toBe(3)
+
+    // Verify order: Block 1 (300, sort 0), Block 3 (300, sort 1), Block 2 (390, sort 0)
+    expect(record?.blocks[0].title).toBe('Block 1')
+    expect(record?.blocks[1].title).toBe('Block 3')
+    expect(record?.blocks[2].title).toBe('Block 2')
+  })
 })
