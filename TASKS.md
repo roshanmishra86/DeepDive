@@ -760,6 +760,69 @@ and **no implementation of it anywhere**. Recorded because the failability disci
 relies on has a real failure mode: a revert that is never undone. Restore before reporting, and check
 the tree state rather than the agent's summary.
 
+#### Post-phase defect — components referencing CSS classes that were never written
+
+Found only when the user screenshotted the Templates block dialog and asked why it looked nothing like
+Today's. It was not styled *differently*; it was not styled *at all*. `BlockModal` referenced
+`.modal-field/-label/-input/-hint/-segmented*/-chip-btn*`, none of which existed, so the kind buttons
+rendered as the run-together text `DeepShallowBreakRitual` and the duration presets as `306090`.
+
+Sweeping the whole tree found **three** components shipped this way, across two phases:
+
+| Component | Undefined classes | Symptom |
+| --- | --- | --- |
+| `templates/BlockModal` (Phase 6) | `.modal-field/-label/-input/-hint/-segmented*/-chip-btn*` | bare labels, buttons run together |
+| `week/TaskEditor` (Phase 5) | `.modal-backdrop`, `.modal`, `.modal-close` | no overlay, no positioning, no panel chrome |
+| `views/WeekView` (Phase 5) | `.view-placeholder`, `-text`, `-error` | loading and error states as unstyled bare text |
+
+**All three passed every gate, in every phase, every time.** Unstyled markup is valid TypeScript, valid
+CSS, and renders without error. The Phase 6 acceptance table below checked that the CSS diff added no
+new hex literals — but never that the classes components reference actually *resolve*. That is how a
+dialog nobody could read was recorded as independently verified.
+
+Fixed by pointing all three at classes that already exist and already work, adding no new design
+language: `BlockModal` onto the Today composer's `composer-*` family (so template block editing is the
+same visual component family as Today's, not a lookalike), `TaskEditor` onto
+`.modal-overlay`/`.modal-panel`/`.btn-icon`, and `WeekView` onto `.view-empty*`, matching `TodayView`'s
+handling of the same two states. The five `.modal-*` form rules were still added for the sibling
+New/Edit/SaveTemplateModal, which had the same bug. The orphaned `.task-editor` rule was deleted.
+
+Four further defects surfaced while reviewing the `BlockModal` rewrite:
+
+- [x] **Duration field became untypeable** (regression introduced by the restyle). The rewrite collapsed
+  the composer's raw-text and committed-number state into one field, so the clamp wrote back into the
+  input: with `minDurationFor('deep') === 30`, typing `90` went `9` → `"30"` → `"300"`. Fixed with
+  `nextDurationTextState()`, the pure core of the separation `BlockComposer` already had.
+- [x] **A new Break block could persist `NaN` duration** — `durationValid` is unconditionally true for
+  breaks, save did `parseInt('', 10)`, and the guard `NaN < minDurationFor('break')` is `false`, so
+  nothing caught it. **Pre-existing since Phase 6**, not caused by the restyle. Closed at source
+  (`breakDurationOnKindSwitch`) and defended at save (`resolveBreakDurationMin`).
+- [x] **Footer summary claimed a 12:00 AM start** when start time was left blank, which is legal in
+  templates. `composerSummaryNoStart()` omits the range.
+- [x] **A mount focus effect silently overrode `autoFocus`**, landing focus on Close instead of the title.
+
+Both substantive fixes proven red-then-green. New logic went into shared helpers in `lib/today.ts` built
+on the existing `nearestBreakDuration`; `pomodoroLabel` was extracted out of `composerSummary` to remove
+a duplicated pluralization literal.
+
+**A sixth gate now exists because of this:** `pnpm check:css` (`scripts/check-css-classes.mjs`) fails if
+any class referenced in `src/components/` has no rule in `src/styles/`. It handles static, template
+literal and string-expression `className` forms, and runs in CI between `test` and `build`. Proven able
+to fail on both a static `className` and a string inside a template-literal ternary — the form most
+likely to hide one. One allowlisted exception: `.settings-entry` on `Sidebar`, an inert modifier beside
+`.nav-item`, which carries all the styling.
+
+The lesson generalizes past CSS: **every gate here checks that code is well-formed, and none check that
+its references resolve.** Worth asking, each phase, what else is silently unresolvable.
+
+#### Process note — a second agent revert destroyed uncommitted work
+The agent that wrote `check-css-classes.mjs` proved it could fail by planting a bad class in a
+component, then cleaned up with a tree-wide `git` revert rather than restoring just that file. It wiped
+four uncommitted documentation edits in the process. The code changes survived only because they had
+already been committed. This is the same failure mode as the Phase 6 stall recorded above, and the
+second time a revert-based proof has damaged the tree: **commit or stash before handing a tree to an
+agent that will revert anything, and require agents to restore by file, never tree-wide.**
+
 **Phase 6 acceptance — MET (independently verified, not taken on the sub-agents' reports):**
 
 | Check | Result |
@@ -771,6 +834,7 @@ the tree state rather than the agent's summary.
 | `cargo fmt --all -- --check` | pass |
 | `cargo clippy --all-targets -- -D warnings` | pass |
 | New hex literals in `chrome.css` | zero |
+| Every class referenced in components resolves to a CSS rule | **not checked at the time — three components were broken.** Added afterwards as `pnpm check:css`; now passes |
 | Every templates-store action reachable from a component | pass — all 11 wired |
 | `window.confirm` remaining in components | zero |
 | Regression test proven able to fail | pass — atomic repo fns reverted to the two-round-trip shape, suite went red (`expected 999 to be 300`), fix restored, 573 green |
