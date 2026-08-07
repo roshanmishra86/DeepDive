@@ -16,11 +16,15 @@ import {
   minDurationFor,
   checkShutdown,
   composerSummary,
+  composerSummaryNoStart,
   initialComposerDraft,
   resolveTaskAction,
   resolveBlockTitle,
   durationPresetsFor,
   nearestBreakDuration,
+  nextDurationTextState,
+  resolveBreakDurationMin,
+  breakDurationOnKindSwitch,
   DURATION_PRESETS,
   BREAK_DURATION_PRESETS,
 } from './today'
@@ -958,5 +962,79 @@ describe('nearestBreakDuration', () => {
 
   it('a brand-new block defaulted to 30 min snaps to 15 when switched to break', () => {
     expect(nearestBreakDuration(30)).toBe(15)
+  })
+})
+
+describe('composerSummaryNoStart', () => {
+  it('formats duration and a plural pomodoro count, with no start–end range', () => {
+    expect(composerSummaryNoStart(90, 3)).toBe('1 h 30 m · 3 pomodoros')
+  })
+
+  it('uses the singular "pomodoro" for a count of 1', () => {
+    expect(composerSummaryNoStart(30, 1)).toBe('30 min · 1 pomodoro')
+  })
+
+  it('omits the pomodoro segment entirely when pomodoros is 0', () => {
+    expect(composerSummaryNoStart(60, 0)).toBe('1 h')
+  })
+})
+
+describe('nextDurationTextState', () => {
+  // Regression guard for a real bug: BlockModal's handleDurationTextChange
+  // used to write the clamped numeric value back into the duration text
+  // input the user was actively typing into. For a deep block
+  // (minDurationFor('deep') === 30), typing "90" one keystroke at a time
+  // produced "9" -> clamped to 30 -> field becomes "30" -> next keystroke
+  // gives "300": the user could never type a two-digit duration. The fix is
+  // that the returned durationText must always equal the raw input,
+  // verbatim, regardless of clamping.
+  it('never rewrites the raw text, even when the parsed value is below the kind minimum', () => {
+    const result = nextDurationTextState('9', 'deep', 3)
+    expect(result.durationText).toBe('9')
+  })
+
+  it('clamps the derived pomodoros to fit the clamped duration, without touching the text', () => {
+    // parsed = 9, clamped to minDurationFor('deep') = 30, maxPomodoros(30) = 1
+    const result = nextDurationTextState('9', 'deep', 3)
+    expect(result.pomodoros).toBe(1)
+  })
+
+  it('leaves pomodoros untouched when the parsed duration already exceeds the minimum', () => {
+    const result = nextDurationTextState('90', 'deep', 3)
+    expect(result.durationText).toBe('90')
+    expect(result.pomodoros).toBe(3)
+  })
+
+  it('leaves pomodoros untouched while the text does not yet parse (e.g. mid-type)', () => {
+    const result = nextDurationTextState('', 'deep', 2)
+    expect(result.durationText).toBe('')
+    expect(result.pomodoros).toBe(2)
+  })
+})
+
+describe('resolveBreakDurationMin', () => {
+  // Regression guard: a break block's duration field has no free-text
+  // entry, so a brand-new break block where the user never clicks a chip
+  // has durationText === ''. parseInt('', 10) is NaN, and a naive
+  // `NaN < minDurationFor('break')` guard is false, so NaN used to reach
+  // addBlock/editBlock and persist. This must never return NaN.
+  it('falls back to a sensible preset instead of NaN when durationText is empty', () => {
+    const result = resolveBreakDurationMin('')
+    expect(Number.isNaN(result)).toBe(false)
+    expect(result).toBe(5)
+  })
+
+  it('parses a valid duration string as-is', () => {
+    expect(resolveBreakDurationMin('15')).toBe(15)
+  })
+})
+
+describe('breakDurationOnKindSwitch', () => {
+  it('snaps an out-of-range duration (e.g. a 90-min deep block) to the nearest break preset', () => {
+    expect(breakDurationOnKindSwitch('90')).toBe(15)
+  })
+
+  it('falls back to the break minimum when there is nothing to snap from', () => {
+    expect(breakDurationOnKindSwitch('')).toBe(5)
   })
 })

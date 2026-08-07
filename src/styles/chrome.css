@@ -2032,6 +2032,46 @@ div.timeline-block-meta + .timeline-conflict-badge,
   line-height: 1.5;
 }
 
+.modal-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 16px;
+}
+
+.modal-label {
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+.modal-input {
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--bg-window);
+  padding: 9px 11px;
+  font-family: inherit;
+  font-size: 13px;
+  color: var(--text);
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.modal-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.modal-hint {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.modal-hint-error {
+  color: var(--danger);
+}
+
 .template-list {
   display: flex;
   flex-direction: column;
@@ -2506,11 +2546,6 @@ button:focus-visible {
 }
 
 /* Task Editor Modal */
-.task-editor {
-  width: 100%;
-  max-width: 450px;
-}
-
 .task-editor-error {
   background: var(--danger);
   color: white;

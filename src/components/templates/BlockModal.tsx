@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef } from 'react'
 import { useTemplatesStore } from '../../stores/templates'
 import { minutesToClock, parseClock, parseDuration } from '../../lib/time'
 import {
@@ -6,6 +6,11 @@ import {
   maxPomodoros,
   durationPresetsFor,
   resolveBlockTitle,
+  composerSummary,
+  composerSummaryNoStart,
+  nextDurationTextState,
+  resolveBreakDurationMin,
+  breakDurationOnKindSwitch,
 } from '../../lib/today'
 import type { BlockKind } from '../../db/types'
 import { ConfirmDeleteBlockModal } from './ConfirmDeleteBlockModal'
@@ -46,14 +51,56 @@ export function BlockModal({ editingBlockId, onClose }: BlockModalProps) {
   // uses the native dialog. See the Phase 6 F2 defect in TASKS.md.
   const [confirmingDelete, setConfirmingDelete] = useState(false)
 
-  useEffect(() => {
-    const first = modalRef.current?.querySelector<HTMLElement>(FOCUSABLE_SELECTOR)
-    first?.focus()
-  }, [])
-
+  // Initial focus is handled by `autoFocus` on the title input below — no
+  // mount-time effect here. A `querySelector(FOCUSABLE_SELECTOR)` effect
+  // previously raced with that `autoFocus`: in DOM order the header Close
+  // button is the first focusable element, and effects run after the
+  // initial render, so the effect always won and silently focused Close
+  // instead of the title field. BlockComposer (the reference
+  // implementation) has no such effect and relies on `autoFocus` alone —
+  // matched here for the same reason: focusing the title input on open is
+  // what's wanted. The Tab/Shift-Tab focus trap in handleKeyDown is
+  // unaffected; it only matters once the user starts tabbing.
   const startValid = startText === '' || parseClock(startText, 0) !== null
   const durationValid = kind === 'break' || parseDuration(durationText) !== null
   const showPomodoros = kind !== 'break' && kind !== 'ritual'
+
+  const handleStartTextChange = (raw: string) => {
+    setStartText(raw)
+  }
+
+  const handleDurationTextChange = (raw: string) => {
+    const next = nextDurationTextState(raw, kind, pomodoros)
+    setDurationText(next.durationText)
+    setPomodoros(next.pomodoros)
+  }
+
+  const applyDurationPreset = (preset: number) => {
+    const next = Math.max(minDurationFor(kind), preset)
+    setDurationText(String(next))
+    setPomodoros(Math.min(pomodoros, maxPomodoros(next)))
+  }
+
+  const stepPomodoros = (delta: number) => {
+    if (!showPomodoros) return
+    const durationParsed = parseDuration(durationText)
+    const max = durationParsed ? maxPomodoros(durationParsed) : maxPomodoros(30)
+    const next = Math.max(0, Math.min(max, pomodoros + delta))
+    setPomodoros(next)
+  }
+
+  const handleKindChange = (newKind: BlockKind) => {
+    if (newKind === 'break' && kind !== 'break') {
+      // Switching TO break is a deliberate action — snap the duration to a
+      // sensible break preset rather than keeping an out-of-range value
+      // (e.g. a 90-minute deep block staying 90 minutes as a break), and
+      // this also guarantees durationText is never empty for a break block,
+      // closing off the NaN-duration path in handleSave. See
+      // breakDurationOnKindSwitch in lib/today.ts.
+      setDurationText(String(breakDurationOnKindSwitch(durationText)))
+    }
+    setKind(newKind)
+  }
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Escape') {
@@ -97,7 +144,7 @@ export function BlockModal({ editingBlockId, onClose }: BlockModalProps) {
 
     try {
       const startMin = startText === '' ? undefined : parseClock(startText, 0) ?? undefined
-      const durationMin = kind === 'break' ? parseInt(durationText, 10) : parseDuration(durationText)!
+      const durationMin = kind === 'break' ? resolveBreakDurationMin(durationText) : parseDuration(durationText)!
 
       if (durationMin < minDurationFor(kind)) {
         setError(`Minimum duration for ${kind} blocks is ${minDurationFor(kind)} min`)
@@ -139,11 +186,12 @@ export function BlockModal({ editingBlockId, onClose }: BlockModalProps) {
 
   const durationParsed = parseDuration(durationText)
   const maxPoms = durationParsed ? maxPomodoros(durationParsed) : maxPomodoros(30)
+  const startParsed = startText === '' ? undefined : parseClock(startText, 0) ?? undefined
 
   return (
-    <div className="modal-overlay" onClick={onClose}>
+    <div className="composer-overlay" onClick={onClose}>
       <div
-        className="modal-panel"
+        className="composer-panel"
         ref={modalRef}
         role="dialog"
         aria-modal="true"
@@ -151,141 +199,158 @@ export function BlockModal({ editingBlockId, onClose }: BlockModalProps) {
         onClick={(e) => e.stopPropagation()}
         onKeyDown={handleKeyDown}
       >
-        <div className="modal-header">
-          <h2 className="modal-title">{editingBlock ? 'Edit block' : 'New block'}</h2>
-          <button className="btn-icon" onClick={onClose} aria-label="Close" type="button">
-            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.2">
-              <path d="M2 14l12-12M14 14L2 2" />
+        <div className="composer-header">
+          <div className="composer-header-left">
+            <span className="composer-header-icon">
+              <svg width="13" height="13" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.4">
+                <rect x="2" y="2.6" width="10" height="9.2" rx="1.4" />
+                <path d="M4.6 6.4h4.8M4.6 8.8h3" />
+              </svg>
+            </span>
+            <span className="composer-header-title">{editingBlock ? 'Edit block' : 'New block'}</span>
+          </div>
+          <button type="button" className="composer-close" onClick={onClose} aria-label="Close">
+            <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.3">
+              <path d="M2 2l8 8M10 2l-8 8" />
             </svg>
           </button>
         </div>
 
-        <div className="modal-body">
-          {error && <div className="modal-error">{error}</div>}
+        <div className="composer-name-block">
+          <input
+            type="text"
+            className="composer-name-input"
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            placeholder={kind === 'break' ? 'Optional — what kind of break?' : 'What is this block for?'}
+            autoFocus
+          />
+          {error && <div className="composer-hint composer-hint-error" role="alert">{error}</div>}
+        </div>
 
-          {/* Kind selector */}
-          <div className="modal-field">
-            <label className="modal-label">Type</label>
-            <div className="modal-segmented">
-              {KIND_OPTIONS.map((opt) => (
-                <button
-                  key={opt.value}
-                  type="button"
-                  className={`modal-segmented-btn ${kind === opt.value ? 'modal-segmented-btn-active' : ''}`}
-                  onClick={() => setKind(opt.value)}
-                >
-                  {opt.label}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* Title input */}
-          {kind !== 'break' && (
-            <div className="modal-field">
-              <label htmlFor="block-title" className="modal-label">
-                Title
-              </label>
-              <input
-                id="block-title"
-                type="text"
-                className="modal-input"
-                value={title}
-                onChange={(e) => setTitle(e.target.value)}
-                placeholder="What is this block for?"
-              />
-            </div>
-          )}
-
-          {/* Start time */}
-          <div className="modal-field">
-            <label htmlFor="block-start" className="modal-label">
-              Start time (optional)
-            </label>
+        <div className="composer-grid-3">
+          <div className="composer-field">
+            <span className="composer-field-label">Start</span>
             <input
-              id="block-start"
+              id="composer-start"
               type="text"
-              className="modal-input"
+              className="composer-mono-input"
               value={startText}
-              onChange={(e) => setStartText(e.target.value)}
-              placeholder="5:00 AM"
+              onChange={(e) => handleStartTextChange(e.target.value)}
+              placeholder="5pm"
             />
-            {startText !== '' && !startValid && (
-              <span className="modal-hint modal-hint-error">Try 5pm, 17:30, or 9:05 am</span>
+            {startText !== '' && startValid ? (
+              <span className="composer-resolved">{minutesToClock(parseClock(startText, 0)!)}</span>
+            ) : startText !== '' ? (
+              <span className="composer-hint composer-hint-error">Try 5pm, 17:30, or 9:05 am</span>
+            ) : (
+              <span className="composer-hint">Optional</span>
             )}
           </div>
 
-          {/* Duration */}
-          <div className="modal-field">
-            <label htmlFor="block-duration" className="modal-label">
-              Duration
-            </label>
-            <div className="modal-duration-chips">
+          <div className="composer-field">
+            <span className="composer-field-label">Duration</span>
+            <div className="composer-duration-chips">
               {durationPresetsFor(kind).map((preset) => (
                 <button
                   key={preset}
                   type="button"
-                  className={`modal-chip-btn ${durationText === String(preset) ? 'modal-chip-btn-active' : ''}`}
-                  onClick={() => setDurationText(String(preset))}
+                  className={`composer-chip-btn${durationText === String(preset) ? ' composer-chip-btn-active' : ''}`}
+                  onClick={() => applyDurationPreset(preset)}
                 >
                   {preset}
                 </button>
               ))}
             </div>
-            {kind !== 'break' && (
-              <input
-                id="block-duration"
-                type="text"
-                className="modal-input"
-                value={durationText}
-                onChange={(e) => setDurationText(e.target.value)}
-                placeholder="90"
-              />
-            )}
-            {!durationValid && (
-              <span className="modal-hint modal-hint-error">Try 90, 1.5h, or 1h30</span>
+            {kind === 'break' ? (
+              !(durationPresetsFor(kind) as readonly number[]).includes(parseInt(durationText, 10)) && durationText && (
+                <span className="composer-hint">{durationText} min (kept as-is; pick a chip to change)</span>
+              )
+            ) : (
+              <>
+                <input
+                  type="text"
+                  className="composer-mono-input"
+                  value={durationText}
+                  onChange={(e) => handleDurationTextChange(e.target.value)}
+                  placeholder="90"
+                />
+                {!durationValid && (
+                  <span className="composer-hint composer-hint-error">Try 90, 1.5h, or 1h30</span>
+                )}
+              </>
             )}
           </div>
 
-          {/* Pomodoros */}
-          {showPomodoros && (
-            <div className="modal-field">
-              <label htmlFor="block-pomodoros" className="modal-label">
-                Pomodoros
-              </label>
-              <select
-                id="block-pomodoros"
-                className="modal-input"
-                value={pomodoros}
-                onChange={(e) => setPomodoros(Math.min(maxPoms, parseInt(e.target.value, 10)))}
+          <div className="composer-field">
+            <span className="composer-field-label" id="composer-pomodoros-label">
+              Pomodoros
+            </span>
+            <div className="composer-pomodoro-stepper">
+              <button
+                type="button"
+                className="composer-stepper-btn"
+                aria-label="Decrease pomodoros"
+                disabled={!showPomodoros}
+                onClick={() => stepPomodoros(-1)}
               >
-                {Array.from({ length: maxPoms + 1 }, (_, i) => (
-                  <option key={i} value={i}>
-                    {i === 0 ? 'None' : i}
-                  </option>
-                ))}
-              </select>
+                −
+              </button>
+              <span className="composer-stepper-label" aria-labelledby="composer-pomodoros-label">
+                {showPomodoros ? Math.min(pomodoros, maxPoms) : 0}
+              </span>
+              <button
+                type="button"
+                className="composer-stepper-btn"
+                aria-label="Increase pomodoros"
+                disabled={!showPomodoros}
+                onClick={() => stepPomodoros(1)}
+              >
+                +
+              </button>
             </div>
-          )}
+            <span className="composer-hint">
+              {showPomodoros ? `max ${maxPoms}` : 'not for this type'}
+            </span>
+          </div>
         </div>
 
-        <div className="modal-footer">
-          {editingBlock && (
-            <button
-              className="btn-danger"
-              onClick={() => setConfirmingDelete(true)}
-              type="button"
-            >
-              Delete
+        <div className="composer-tags-row">
+          <span className="composer-tags-label">Type</span>
+          <div className="composer-tags">
+            {KIND_OPTIONS.map((opt) => (
+              <button
+                key={opt.value}
+                type="button"
+                className={`composer-tag${kind === opt.value ? ' composer-tag-active' : ''}`}
+                aria-pressed={kind === opt.value}
+                onClick={() => handleKindChange(opt.value)}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="composer-footer">
+          <span className="composer-summary">
+            {startParsed !== undefined
+              ? composerSummary(startParsed, durationParsed ?? 0, showPomodoros ? pomodoros : 0)
+              : composerSummaryNoStart(durationParsed ?? 0, showPomodoros ? pomodoros : 0)}
+          </span>
+          <div className="composer-footer-actions">
+            {editingBlock && (
+              <button type="button" className="composer-delete-btn" onClick={() => setConfirmingDelete(true)}>
+                Delete
+              </button>
+            )}
+            <button type="button" className="btn-secondary" onClick={onClose}>
+              Cancel
             </button>
-          )}
-          <div style={{ flex: 1 }} />
-          <button className="btn-secondary" onClick={onClose} type="button">
-            Cancel
-          </button>
-          <button className="btn-primary" onClick={() => void handleSave()} type="button">
-            {editingBlock ? 'Save' : 'Add'}
-          </button>
+            <button type="button" className="btn-primary" onClick={() => void handleSave()}>
+              {editingBlock ? 'Save' : 'Add'}
+            </button>
+          </div>
         </div>
       </div>
 

@@ -9,7 +9,7 @@
  */
 
 import type { DayBlock, BlockKind, BlockRepeat } from '../db/types'
-import { minutesToClock, formatDuration } from './time'
+import { minutesToClock, formatDuration, parseDuration } from './time'
 
 /**
  * Minimal structural interface for orderable, schedulable items.
@@ -443,6 +443,66 @@ export function nearestBreakDuration(durationMin: number): number {
 }
 
 /**
+ * Given the raw text a user is actively typing into a duration field, and
+ * the kind the field applies to, returns the text to display (always the
+ * raw input, verbatim — a duration field must never rewrite what the user
+ * is mid-typing) plus pomodoros re-clamped to whatever duration would
+ * actually be committed if that raw text parses.
+ *
+ * This exists to prevent a specific regression: writing the clamped numeric
+ * value back into the text input. If minDurationFor(kind) is 30 and the
+ * user types "90" one keystroke at a time, clamping "9" up to "30" and
+ * echoing that into the field turns the next keystroke into "300" — the
+ * user can never type a two-digit duration. BlockComposer avoids this by
+ * keeping raw text and a committed numeric value as separate state; this
+ * helper is the pure core of that separation for callers (like BlockModal)
+ * that don't otherwise keep a committed-duration field.
+ */
+export function nextDurationTextState(
+  raw: string,
+  kind: BlockKind,
+  currentPomodoros: number
+): { durationText: string; pomodoros: number } {
+  const parsed = parseDuration(raw)
+  if (parsed === null) {
+    return { durationText: raw, pomodoros: currentPomodoros }
+  }
+  const clamped = Math.max(minDurationFor(kind), parsed)
+  return { durationText: raw, pomodoros: Math.min(currentPomodoros, maxPomodoros(clamped)) }
+}
+
+/**
+ * Resolves the duration (in minutes) to persist for a break block from its
+ * raw duration text. Break blocks have no free-text duration entry — their
+ * duration comes only from preset chips or a kind-switch snap — so
+ * `durationText` should always already hold a valid integer by the time
+ * this is called. It exists as a last-line defense: if a break block is
+ * ever saved before any chip was picked (durationText === ''),
+ * `parseInt('', 10)` is `NaN`, and `NaN < minDurationFor('break')` is
+ * `false`, so a naive minimum-duration guard silently lets `NaN` through to
+ * persistence. This falls back to the smallest break preset instead of ever
+ * returning NaN.
+ */
+export function resolveBreakDurationMin(durationText: string): number {
+  const parsed = parseInt(durationText, 10)
+  return Number.isNaN(parsed) ? nearestBreakDuration(minDurationFor('break')) : parsed
+}
+
+/**
+ * Resolves the duration (in minutes) to switch a duration text field to
+ * when the user deliberately changes a block's kind to 'break'. Snaps
+ * whatever duration was already entered (or the break minimum, if nothing
+ * parses) to the nearest break preset — matching BlockComposer's
+ * handleKindChange, which treats switching to break as a deliberate action
+ * deserving a sensible default rather than silently keeping an out-of-range
+ * value (e.g. a 90-minute deep block staying 90 minutes as a break).
+ */
+export function breakDurationOnKindSwitch(currentDurationText: string): number {
+  const parsed = parseDuration(currentDurationText)
+  return nearestBreakDuration(parsed ?? minDurationFor('break'))
+}
+
+/**
  * Resolves the title to persist for a block. `day_block.title` is
  * `TEXT NOT NULL`, so a break with an empty title (breaks are the only kind
  * where an empty title is allowed — see `canSave` in BlockComposer) persists
@@ -458,6 +518,10 @@ export function resolveBlockTitle(title: string, kind: BlockKind): string {
   return trimmed
 }
 
+function pomodoroLabel(pomodoros: number): string {
+  return `${pomodoros} pomodoro${pomodoros === 1 ? '' : 's'}`
+}
+
 /**
  * Mono summary line for the composer footer, e.g.
  * "9:00 AM – 10:30 AM · 90 min · 3 pomodoros". The pomodoro segment is
@@ -467,7 +531,22 @@ export function composerSummary(startMin: number, durationMin: number, pomodoros
   const range = `${minutesToClock(startMin)} – ${minutesToClock(startMin + durationMin)}`
   const parts = [range, formatDuration(durationMin)]
   if (pomodoros > 0) {
-    parts.push(`${pomodoros} pomodoro${pomodoros === 1 ? '' : 's'}`)
+    parts.push(pomodoroLabel(pomodoros))
+  }
+  return parts.join(' · ')
+}
+
+/**
+ * Same summary line as composerSummary, but without a start-time range.
+ * For callers where a start time is optional (e.g. template blocks) and
+ * none has been entered yet — computing a range would fall back to some
+ * placeholder minute (typically 0) and read as a misleading "starts at
+ * 12:00 AM" claim the user never made.
+ */
+export function composerSummaryNoStart(durationMin: number, pomodoros: number): string {
+  const parts = [formatDuration(durationMin)]
+  if (pomodoros > 0) {
+    parts.push(pomodoroLabel(pomodoros))
   }
   return parts.join(' · ')
 }
