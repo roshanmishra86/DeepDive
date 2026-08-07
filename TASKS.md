@@ -815,6 +815,64 @@ likely to hide one. One allowlisted exception: `.settings-entry` on `Sidebar`, a
 The lesson generalizes past CSS: **every gate here checks that code is well-formed, and none check that
 its references resolve.** Worth asking, each phase, what else is silently unresolvable.
 
+#### External PR review — findings, all confirmed and fixed
+
+An external review of PR #6 requested changes and was **correct on every checkable claim**. It found
+defects that four gate runs and two internal verification passes did not.
+
+- [x] **[P1] `editBlock` never re-stamped or persisted `sort`.** It re-sorted the in-memory array but
+  — unlike `removeBlock` and `moveBlock` — never renumbered `sort` or persisted it, and `select()`
+  assigned `getTemplate()`'s `ORDER BY sort` result verbatim. Reload showed the old order with new
+  start times. **This is the same defect class as the F1 reorder bug fixed earlier in this same phase:
+  one instance was fixed and its sibling in the adjacent function was left.** Fixed with a new
+  `editTemplateBlockAtomic()` writing patch + renumbering in one `driver.transaction()`, plus
+  `sortBlocks()` normalization in `select()` as defence in depth.
+- [x] **[P1] Confirm-delete backdrop click closed the parent modal**, discarding the in-progress block
+  edit. `ConfirmDeleteBlockModal`'s overlay `onClick={onCancel}` did not `stopPropagation`, and it
+  renders inside `BlockModal`'s overlay. The Escape path *was* guarded — the click path was simply
+  missed. Fixed at the source so it is safe wherever nested.
+- [x] **[P1] A new standalone `.btn-danger` rule restyled pre-existing buttons on two untouched
+  screens.** Equal specificity `(0,1,0)` to `.btn-icon` and later in source, so it won `background`,
+  `color`, `padding`, and `border` on every `btn-icon btn-danger` in `TimelineBlock` and `TaskRow` —
+  solid red at rest, no border, `8px 14px` padding on a 28×28 button, and hover feedback dead.
+  Renamed to `.btn-danger-solid`.
+- [x] **[P2] Store actions swallowed errors while five component paths assumed they threw** — failed
+  create/save/delete/apply closed modals and navigated as if successful. Resolved by extending the
+  `id | null` convention the store already used: `updateTemplate`, `deleteTemplate` and `applyTemplate`
+  now return `boolean`, and every call site checks it. A sub-agent correctly **rejected** the
+  main-session suggestion to make these throw, on the evidence that no mutator anywhere in this app
+  rejects; rethrowing would have invented a third contract.
+- [x] **[P2] `select()` had no stale-response guard** — out-of-order resolution could leave `detail`
+  holding template A's blocks while `selectedId` was B, after which `addBlock` would persist a row
+  under B with a `startMin` computed from A.
+- [x] **[P3]** `deleteTemplate` partial rollback; dead `templateId` prop; untrimmed template name;
+  unclassed loading state; inline styles where siblings use classes; dead `templates-ui.ts` (whose
+  validator already *disagreed* with the live `BlockModal` rules) and dead `templates.ts` exports.
+
+**A defect introduced by the fix round itself, found in review of the fix:** `editTemplateBlockAtomic`
+duplicated the six-branch column mapping from `updateTemplateBlock` verbatim — the project's signature
+failure mode, reintroduced while fixing a bug of the same family. Extracted to one
+`TEMPLATE_BLOCK_COLUMNS` table typed `Record<keyof Omit<TemplateBlock, 'id' | 'templateId'>, string>`,
+matching the existing `PERSISTABLE_BLOCK_FIELDS` convention. Exhaustiveness proven by adding a probe
+field and observing `tsc -b` fail with TS2741.
+
+**Two mock-up deviations**, both fixed: weekday chips rendered accent on every list card because
+`.tpl-card-active .tpl-weekday-active` was byte-identical to the base rule — a dead rule that was also
+a visible bug. Sat/Sun were left toggleable rather than given the mock-up's disabled treatment: the
+7-bit mask supports weekends and a weekend template is legitimate.
+
+**One review claim corrected, on evidence:** `DEFAULT_TEMPLATE_START_MIN` was described as a second
+source of truth for the 300 default. It was already dead at `HEAD` — `TemplatesView` hardcoded
+`startMin: 300` and never imported it. Deleting it removed misleading dead code; the two real magic
+`300`s (`NewTemplateModal`, `saveDayAsTemplate`) predate this PR and are worth consolidating later.
+
+**What the gates could not see, again.** Every one of these passed `oxlint`, `tsc`, the suite,
+`check:css` and `vite build`. `check:css` verifies that referenced classes *resolve*; it cannot see a
+CSS collision between two rules that both exist, styling that was never a class, or a
+verification claim stated more strongly than its check supports — the "zero new colour literals" grep
+used `#` and `rgb` and so missed a `color: white` in the very rule causing the P1 collision. The colour
+grep now includes named colours.
+
 #### Process note — a second agent revert destroyed uncommitted work
 The agent that wrote `check-css-classes.mjs` proved it could fail by planting a bad class in a
 component, then cleaned up with a tree-wide `git` revert rather than restoring just that file. It wiped

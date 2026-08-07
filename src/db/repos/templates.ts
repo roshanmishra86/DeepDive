@@ -173,44 +173,56 @@ export async function addTemplateBlock(
   return result.lastInsertId
 }
 
+// Column mapping for every persistable TemplateBlock field (i.e. every field
+// except the immutable/derived ones, id and templateId). Typed as
+// Record<keyof Omit<TemplateBlock, 'id' | 'templateId'>, string> — the same
+// exhaustive-key convention as PERSISTABLE_BLOCK_FIELDS in stores/templates.ts
+// and stores/today.ts — so adding a field to TemplateBlock without adding it
+// here fails `tsc -b` instead of the new field being silently dropped on
+// persist by whichever caller forgets to handle it.
+const TEMPLATE_BLOCK_COLUMNS: Record<keyof Omit<TemplateBlock, 'id' | 'templateId'>, string> = {
+  title: 'title',
+  kind: 'kind',
+  startMin: 'start_min',
+  durationMin: 'duration_min',
+  pomodoros: 'pomodoros',
+  sort: 'sort',
+}
+
+// Single source of truth for mapping a TemplateBlock patch to SQL `SET`
+// fragments + params. Shared by updateTemplateBlock (single driver.execute)
+// and editTemplateBlockAtomic (contributes to a driver.transaction()
+// alongside the sort renumbering) so the two can never drift out of sync —
+// see the doc comment on TEMPLATE_BLOCK_COLUMNS above.
+function buildTemplateBlockUpdate(
+  patch: Partial<Omit<TemplateBlock, 'id' | 'templateId'>>
+): { setClauses: string[]; values: unknown[] } {
+  const setClauses: string[] = []
+  const values: unknown[] = []
+
+  for (const key of Object.keys(TEMPLATE_BLOCK_COLUMNS) as (keyof typeof TEMPLATE_BLOCK_COLUMNS)[]) {
+    const value = patch[key]
+    if (value !== undefined) {
+      setClauses.push(`${TEMPLATE_BLOCK_COLUMNS[key]} = ?`)
+      values.push(value)
+    }
+  }
+
+  return { setClauses, values }
+}
+
 export async function updateTemplateBlock(
   driver: SqlDriver,
   id: number,
   patch: Partial<Omit<TemplateBlock, 'id' | 'templateId'>>
 ): Promise<void> {
-  const updates: string[] = []
-  const values: unknown[] = []
+  const { setClauses, values } = buildTemplateBlockUpdate(patch)
 
-  if (patch.title !== undefined) {
-    updates.push('title = ?')
-    values.push(patch.title)
-  }
-  if (patch.kind !== undefined) {
-    updates.push('kind = ?')
-    values.push(patch.kind)
-  }
-  if (patch.startMin !== undefined) {
-    updates.push('start_min = ?')
-    values.push(patch.startMin)
-  }
-  if (patch.durationMin !== undefined) {
-    updates.push('duration_min = ?')
-    values.push(patch.durationMin)
-  }
-  if (patch.pomodoros !== undefined) {
-    updates.push('pomodoros = ?')
-    values.push(patch.pomodoros)
-  }
-  if (patch.sort !== undefined) {
-    updates.push('sort = ?')
-    values.push(patch.sort)
-  }
-
-  if (updates.length === 0) return
+  if (setClauses.length === 0) return
 
   values.push(id)
   await driver.execute(
-    `UPDATE template_block SET ${updates.join(', ')} WHERE id = ?`,
+    `UPDATE template_block SET ${setClauses.join(', ')} WHERE id = ?`,
     values
   )
 }
@@ -254,6 +266,43 @@ export async function moveTemplateBlocksAtomic(
       params: [i, id, templateId],
     })),
   ]
+  await driver.transaction(statements)
+}
+
+// PR-review P1-A fix: editBlock used to patch the edited block's fields and
+// then, separately, re-sort the in-memory array and stop — it never
+// persisted the renumbered `sort` at all, so a startMin change that altered
+// canonical order left the database's `sort` column pointing at the OLD
+// order while `start_min` said otherwise. `getTemplate()` reads
+// `ORDER BY sort`, so a reload rendered blocks in the wrong order — the same
+// "timeline runs backwards, silently" defect class as F1. This writes the
+// field patch AND the renumbered sort sequence in ONE `driver.transaction()`
+// call, matching moveTemplateBlocksAtomic/removeTemplateBlockAtomic above,
+// so a failure partway through can never leave the field patch persisted
+// with a stale sort order (or vice versa).
+export async function editTemplateBlockAtomic(
+  driver: SqlDriver,
+  blockId: number,
+  patch: Partial<Omit<TemplateBlock, 'id' | 'templateId' | 'sort'>>,
+  templateId: number,
+  orderedIds: number[]
+): Promise<void> {
+  const { setClauses, values } = buildTemplateBlockUpdate(patch)
+
+  const statements: { sql: string; params?: unknown[] }[] = []
+  if (setClauses.length > 0) {
+    statements.push({
+      sql: `UPDATE template_block SET ${setClauses.join(', ')} WHERE id = ?`,
+      params: [...values, blockId],
+    })
+  }
+  statements.push(
+    ...orderedIds.map((id, i) => ({
+      sql: 'UPDATE template_block SET sort = ? WHERE id = ? AND template_id = ?',
+      params: [i, id, templateId],
+    }))
+  )
+
   await driver.transaction(statements)
 }
 

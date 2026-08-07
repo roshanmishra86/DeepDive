@@ -28,6 +28,10 @@ export function TemplateDetailPane({ template }: TemplateDetailPaneProps) {
   const moveBlock = useTemplatesStore((s) => s.moveBlock)
   const applyTemplate = useTodayStore((s) => s.applyTemplate)
   const todayBlocks = useTodayStore((s) => s.blocks)
+  // P2-A: applyTemplate reports failure via the today store's `error` field
+  // (it never throws) — subscribe so a failed apply is visible instead of
+  // silently doing nothing when handleApply below declines to navigate.
+  const applyError = useTodayStore((s) => s.error)
   const setView = useAppStore((s) => s.setView)
 
   const [blockModal, setBlockModal] = useState<BlockModalState>(null)
@@ -42,11 +46,12 @@ export function TemplateDetailPane({ template }: TemplateDetailPaneProps) {
   const deleteConfirmBlock = template.blocks.find((b) => b.id === deleteConfirmBlockId) ?? null
 
   const handleApply = async () => {
-    try {
-      await applyTemplate(template.id)
+    // P2-A: applyTemplate never throws — it reports success via its return
+    // value. Only navigate to Today when the apply actually landed; a
+    // failed apply used to still navigate, hiding the failure entirely.
+    const ok = await applyTemplate(template.id)
+    if (ok) {
       setView('today')
-    } catch (err) {
-      console.error('Failed to apply template:', err)
     }
   }
 
@@ -70,6 +75,8 @@ export function TemplateDetailPane({ template }: TemplateDetailPaneProps) {
           Apply to today
         </button>
       </div>
+
+      {applyError && <div className="modal-error">{applyError}</div>}
 
       {/* Repeats on section */}
       <div className="tpl-detail-section">
@@ -96,7 +103,7 @@ export function TemplateDetailPane({ template }: TemplateDetailPaneProps) {
         <div className="tpl-blocks-list">
           {template.blocks.length === 0 ? (
             <div className="tpl-empty-blocks">
-              <div style={{ fontSize: '12.5px', color: 'var(--text-muted)' }}>
+              <div style={{ fontSize: '12.5px' }}>
                 No blocks yet — add one to get started
               </div>
             </div>
@@ -176,7 +183,6 @@ export function TemplateDetailPane({ template }: TemplateDetailPaneProps) {
       {/* Modals */}
       {blockModal && (
         <BlockModal
-          templateId={template.id}
           editingBlockId={blockModal.mode === 'edit' ? blockModal.blockId : null}
           onClose={() => setBlockModal(null)}
         />

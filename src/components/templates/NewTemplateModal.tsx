@@ -1,14 +1,16 @@
 import { useState, useRef, useEffect } from 'react'
+import { useTemplatesStore } from '../../stores/templates'
 
 interface NewTemplateModalProps {
-  onSave: (name: string) => Promise<void>
   onClose: () => void
 }
 
 const FOCUSABLE_SELECTOR =
   'button:not(:disabled), [href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])'
 
-export function NewTemplateModal({ onSave, onClose }: NewTemplateModalProps) {
+export function NewTemplateModal({ onClose }: NewTemplateModalProps) {
+  const createTemplate = useTemplatesStore((s) => s.createTemplate)
+
   const [name, setName] = useState('')
   const [error, setError] = useState('')
   const modalRef = useRef<HTMLDivElement>(null)
@@ -47,10 +49,17 @@ export function NewTemplateModal({ onSave, onClose }: NewTemplateModalProps) {
       setError('Please enter a template name')
       return
     }
-    try {
-      await onSave(name)
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to create template')
+
+    const id = await createTemplate({
+      name: name.trim(),
+      description: '',
+      startMin: 300,
+      weekdays: 0,
+    })
+    if (id !== null) {
+      onClose()
+    } else {
+      setError(useTemplatesStore.getState().error ?? 'Failed to create template')
     }
   }
 

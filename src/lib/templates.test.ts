@@ -8,8 +8,6 @@ import {
   templateSubtitle,
   templateTotals,
   nextTemplateBlockStart,
-  DEFAULT_TEMPLATE_START_MIN,
-  newTemplateDraft,
 } from './templates'
 import type { TemplateBlock, Template } from '../db/types'
 
@@ -278,32 +276,4 @@ describe('templates library', () => {
     })
   })
 
-  describe('DEFAULT_TEMPLATE_START_MIN', () => {
-    it('is 300 (5:00 AM)', () => {
-      expect(DEFAULT_TEMPLATE_START_MIN).toBe(300)
-    })
-  })
-
-  describe('newTemplateDraft', () => {
-    it('creates a blank draft with defaults', () => {
-      const draft = newTemplateDraft()
-      expect(draft.name).toBe('')
-      expect(draft.description).toBe('')
-      expect(draft.startMin).toBe(300)
-      expect(draft.weekdays).toBe(0)
-    })
-
-    it('returns a new object on each call', () => {
-      const draft1 = newTemplateDraft()
-      const draft2 = newTemplateDraft()
-      expect(draft1).not.toBe(draft2)
-    })
-
-    it('has no side effects', () => {
-      const draft = newTemplateDraft()
-      draft.name = 'Modified'
-      const draft2 = newTemplateDraft()
-      expect(draft2.name).toBe('')
-    })
-  })
 })

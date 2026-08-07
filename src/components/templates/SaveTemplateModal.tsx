@@ -55,18 +55,21 @@ export function SaveTemplateModal({ onClose }: SaveTemplateModalProps) {
     }
 
     setSaving(true)
-    try {
-      const day = toDayKey(new Date())
-      const templateId = await saveDayAsTemplate(day, name.trim())
-      if (templateId) {
-        setView('templates')
-        onClose()
-      }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to save template')
-    } finally {
-      setSaving(false)
+    // saveDayAsTemplate never throws — it catches its own persistence
+    // errors, sets the store's `error`, and returns `null` (same contract
+    // as createTemplate). This path already checked the return value, but
+    // did nothing on `null` — reachable in the no-driver dev path, which
+    // resolves to null with "No database connection" — leaving the modal
+    // open with no feedback at all. Surface the store's error instead.
+    const day = toDayKey(new Date())
+    const templateId = await saveDayAsTemplate(day, name.trim())
+    if (templateId) {
+      setView('templates')
+      onClose()
+    } else {
+      setError(useTemplatesStore.getState().error ?? 'Failed to save template')
     }
+    setSaving(false)
   }
 
   return (

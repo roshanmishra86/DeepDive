@@ -11,8 +11,11 @@ export function TemplatesView() {
   const detail = useTemplatesStore((s) => s.detail)
   const select = useTemplatesStore((s) => s.select)
   const hydrate = useTemplatesStore((s) => s.hydrate)
-  const createTemplate = useTemplatesStore((s) => s.createTemplate)
   const loading = useTemplatesStore((s) => s.loading)
+  // P2-A: createTemplate never throws — it reports failure via `null` and
+  // sets this. NewTemplateModal now subscribes to the store's `error`
+  // directly and displays it within the modal, so failed creates are visible.
+  const error = useTemplatesStore((s) => s.error)
 
   const [newTemplateOpen, setNewTemplateOpen] = useState(false)
 
@@ -33,16 +36,6 @@ export function TemplatesView() {
     }
   }, [hydrate])
 
-  const handleNewTemplate = async (name: string) => {
-    await createTemplate({
-      name,
-      description: '',
-      startMin: 300,
-      weekdays: 0,
-    })
-    setNewTemplateOpen(false)
-  }
-
   if (loading) {
     return (
       <div className="tpl-view">
@@ -53,7 +46,9 @@ export function TemplatesView() {
           </div>
         </div>
         <div className="tpl-body">
-          <div>Loading templates…</div>
+          <div className="view-empty">
+            <div className="view-empty-title">Loading templates…</div>
+          </div>
         </div>
       </div>
     )
@@ -67,6 +62,8 @@ export function TemplatesView() {
           <div className="tpl-subtitle">Repetition lives here: build a day once, apply it whenever it fits.</div>
         </div>
       </div>
+
+      {error && <div className="modal-error">{error}</div>}
 
       <div className="tpl-body">
         {/* Left column: template list */}
@@ -105,7 +102,7 @@ export function TemplatesView() {
         {/* Right column: detail pane */}
         {templates.length === 0 ? (
           <div className="tpl-empty-state">
-            <div style={{ fontSize: '14px', color: 'var(--text-muted)' }}>
+            <div className="view-empty-text">
               Create your first template to get started
             </div>
           </div>
@@ -113,7 +110,7 @@ export function TemplatesView() {
           <TemplateDetailPane template={detail} />
         ) : (
           <div className="tpl-empty-state">
-            <div style={{ fontSize: '14px', color: 'var(--text-muted)' }}>
+            <div className="view-empty-text">
               Select a template to edit
             </div>
           </div>
@@ -121,10 +118,7 @@ export function TemplatesView() {
       </div>
 
       {newTemplateOpen && (
-        <NewTemplateModal
-          onSave={handleNewTemplate}
-          onClose={() => setNewTemplateOpen(false)}
-        />
+        <NewTemplateModal onClose={() => setNewTemplateOpen(false)} />
       )}
     </div>
   )

@@ -68,25 +68,29 @@ export function EditTemplateModal({ template, onClose }: EditTemplateModalProps)
       return
     }
 
-    try {
-      const startMin = parseClock(startText, 0)!
-      await updateTemplate(template.id, {
-        name: name.trim(),
-        description: description.trim(),
-        startMin,
-      })
+    // P2-A: updateTemplate never throws — it catches its own persistence
+    // errors and reports success via its return value. Only close the
+    // modal (discarding the form) when the save actually landed; on
+    // failure, surface the store's error instead of closing over it.
+    const startMin = parseClock(startText, 0)!
+    const ok = await updateTemplate(template.id, {
+      name: name.trim(),
+      description: description.trim(),
+      startMin,
+    })
+    if (ok) {
       onClose()
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to save template')
+    } else {
+      setError(useTemplatesStore.getState().error ?? 'Failed to save template')
     }
   }
 
   const handleDelete = async () => {
-    try {
-      await deleteTemplate(template.id)
+    const ok = await deleteTemplate(template.id)
+    if (ok) {
       onClose()
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to delete template')
+    } else {
+      setError(useTemplatesStore.getState().error ?? 'Failed to delete template')
     }
   }
 
@@ -180,7 +184,7 @@ export function EditTemplateModal({ template, onClose }: EditTemplateModalProps)
                 Cancel
               </button>
               <button
-                className="btn-danger"
+                className="btn-danger-solid"
                 onClick={() => void handleDelete()}
                 type="button"
               >
@@ -190,7 +194,7 @@ export function EditTemplateModal({ template, onClose }: EditTemplateModalProps)
           ) : (
             <>
               <button
-                className="btn-danger"
+                className="btn-danger-solid"
                 onClick={() => setDeleting(true)}
                 type="button"
               >

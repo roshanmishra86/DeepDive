@@ -18,6 +18,21 @@ export type { TemplateWithStats, TemplateDetail }
  * Templates store. Hydrates templates from the database and manages CRUD operations.
  * Blocks maintain their absolute startMin values. Changes persist to the database while
  * updating state immediately for responsive UI. In-memory fallback when driver is null.
+ *
+ * Error contract (P2-A, PR review): every mutator here catches its own
+ * persistence errors, sets `error`, reverts the optimistic update, and
+ * RETURNS rather than throwing — this matches every other store in the app
+ * (`stores/today.ts`, `stores/tasks.ts`), none of which ever rejects from an
+ * action. That existing convention, not "make it throw," is what this store
+ * stays consistent with. What changed here: actions that need to report
+ * success/failure to a caller that gates a UI transition on it (closing a
+ * modal, navigating away) do so via their RETURN VALUE, generalizing the
+ * pattern `createTemplate`/`saveDayAsTemplate` already used (`number | null`)
+ * to the void-returning mutators (`updateTemplate`, `deleteTemplate` here;
+ * `applyTemplate` in `stores/today.ts`), which now return `boolean`. Callers
+ * that only need the immediate optimistic state (e.g. `setWeekday`,
+ * `addBlock`'s callers that don't need to know if the DB write landed) can
+ * still just await and ignore the return value.
  */
 interface TemplatesState {
   templates: TemplateWithStats[]
@@ -33,8 +48,12 @@ interface TemplatesState {
     startMin: number
     weekdays?: number
   }) => Promise<number | null>
-  updateTemplate: (id: number, patch: Partial<Omit<Template, 'id'>>) => Promise<void>
-  deleteTemplate: (id: number) => Promise<void>
+  // P2-A: neither of these throws (see the doc comment above the store for
+  // the chosen contract) — they return `true`/`false` so a caller that must
+  // gate a UI transition (closing a modal, navigating away) on success can
+  // do so without relying on a rejection that will never come.
+  updateTemplate: (id: number, patch: Partial<Omit<Template, 'id'>>) => Promise<boolean>
+  deleteTemplate: (id: number) => Promise<boolean>
   setWeekday: (id: number, bit: number) => Promise<void>
   addBlock: (input: {
     title: string
@@ -130,8 +149,20 @@ export const useTemplatesStore = create<TemplatesState>()((set, get) => ({
 
     try {
       const detail = await templatesRepo.getTemplate(persistenceDriver, id)
+      // P2-B: two rapid selections can resolve out of order (e.g. the Tauri
+      // SQL pool has no ordering guarantee across concurrent queries). If a
+      // later `select()` call has already moved `selectedId` on while this
+      // one's `getTemplate()` was in flight, applying this stale response
+      // would leave `detail` holding the WRONG template's blocks while
+      // `selectedId` points at the right one — and every block mutator
+      // trusts that `detail` belongs to `selectedId`. Discard it instead.
+      if (get().selectedId !== id) return
       if (detail) {
-        set({ detail })
+        // Defence in depth, matching today.ts hydrate's `sortBlocks(blocks)`
+        // on load: normalize to canonical order here too, so a `sort`
+        // column that ever drifts from `startMin` order (e.g. a bug, or a
+        // direct DB edit) can't render the detail pane backwards.
+        set({ detail: { ...detail, blocks: sortBlocks(detail.blocks) } })
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Unknown error'
@@ -142,6 +173,7 @@ export const useTemplatesStore = create<TemplatesState>()((set, get) => ({
 
   createTemplate: async (input) => {
     const state = get()
+    set({ error: null })
 
     // Optimistically add to in-memory state. A brand-new template has no
     // blocks yet, so its stats are `templateTotals([])` — computed via the
@@ -189,6 +221,7 @@ export const useTemplatesStore = create<TemplatesState>()((set, get) => ({
 
   updateTemplate: async (id, patch) => {
     const state = get()
+    set({ error: null })
 
     // Update in-memory templates list
     const templates = state.templates.map((t) => (t.id === id ? { ...t, ...patch } : t))
@@ -204,17 +237,22 @@ export const useTemplatesStore = create<TemplatesState>()((set, get) => ({
       try {
         const driver = persistenceDriver
         await templatesRepo.updateTemplate(driver, id, patch)
+        return true
       } catch (err) {
         set((_s) => ({ error: err instanceof Error ? err.message : 'Save failed' }))
         console.error('Failed to persist template update:', err)
         // Revert optimistic update
         set({ templates: state.templates, detail: state.detail })
+        return false
       }
     }
+
+    return true
   },
 
   deleteTemplate: async (id) => {
     const state = get()
+    set({ error: null })
 
     // Remove from templates list
     const templates = state.templates.filter((t) => t.id !== id)
@@ -239,13 +277,21 @@ export const useTemplatesStore = create<TemplatesState>()((set, get) => ({
       try {
         const driver = persistenceDriver
         await templatesRepo.deleteTemplate(driver, id)
+        return true
       } catch (err) {
         set((_s) => ({ error: err instanceof Error ? err.message : 'Delete failed' }))
         console.error('Failed to persist template deletion:', err)
-        // Revert optimistic update
-        set({ templates: state.templates })
+        // Revert optimistic update. P3: every other mutator restores the
+        // EXACT prior state on failure; this used to restore only
+        // `templates`, leaving `selectedId`/`detail` stuck on the
+        // optimistically-moved-to selection even though the delete that
+        // triggered the move never actually landed in the database.
+        set({ templates: state.templates, selectedId: state.selectedId, detail: state.detail })
+        return false
       }
     }
+
+    return true
   },
 
   setWeekday: async (id, bit) => {
@@ -346,24 +392,35 @@ export const useTemplatesStore = create<TemplatesState>()((set, get) => ({
 
     let blocks = state.detail.blocks.map((b) => (b.id === id ? { ...b, ...safePatch } : b))
 
-    // Re-sort: startMin changes can change canonical order
-    blocks = sortBlocks(blocks)
+    // P1-A: re-sort AND re-stamp `sort` densely to match the resulting
+    // canonical order — a startMin change can move the edited block to a
+    // different position, and unlike removeBlock/moveBlock this used to
+    // stop at re-sorting the in-memory array without ever re-stamping or
+    // persisting `sort`. getTemplate() reads `ORDER BY sort`, so a reload
+    // rendered blocks in the OLD order while startMin said otherwise (the
+    // same "timeline runs backwards, silently" defect class as F1) — and
+    // moveBlock afterward would then operate on the wrong positions.
+    blocks = sortBlocks(blocks).map((b, i) => ({ ...b, sort: i }))
     set({
       detail: { ...state.detail, blocks },
       templates: syncListStats(state.templates, state.selectedId, blocks),
     })
 
-    // Persist to database if available
+    // Persist to database if available. The field patch and the renumbered
+    // sort sequence are written as one atomic transaction (matching
+    // moveTemplateBlocksAtomic/removeTemplateBlockAtomic, Phase 6 F1) so a
+    // failure partway through can never leave the DB with the patch applied
+    // but a stale sort order, or vice versa.
     if (persistenceDriver) {
       try {
         const driver = persistenceDriver
-        // Only persist changed fields
+        // Only persist changed fields (excluding `sort`, which is always
+        // handled via the full `orderedIds` renumbering below).
         const persistPatch = Object.fromEntries(
-          Object.entries(safePatch).filter(([key]) => key in PERSISTABLE_BLOCK_FIELDS)
-        ) as Partial<TemplateBlock>
-        if (Object.keys(persistPatch).length > 0) {
-          await templatesRepo.updateTemplateBlock(driver, id, persistPatch)
-        }
+          Object.entries(safePatch).filter(([key]) => key in PERSISTABLE_BLOCK_FIELDS && key !== 'sort')
+        ) as Partial<Omit<TemplateBlock, 'id' | 'templateId' | 'sort'>>
+        const orderedIds = blocks.map((b) => b.id)
+        await templatesRepo.editTemplateBlockAtomic(driver, id, persistPatch, state.selectedId, orderedIds)
       } catch (err) {
         set((_s) => ({ error: err instanceof Error ? err.message : 'Save failed' }))
         console.error('Failed to persist block edit:', err)

@@ -49,7 +49,11 @@ interface TodayState {
   removeBlock: (id: number) => Promise<void>
   move: (id: number, direction: -1 | 1) => Promise<void>
   toggleCompleted: (id: number) => Promise<void>
-  applyTemplate: (templateId: number) => Promise<void>
+  // P2-A (PR review, stores/templates.ts): returns `true`/`false` rather
+  // than throwing — never rejects, same as every other action in this
+  // store — so TemplateDetailPane can gate its "navigate to Today" on
+  // whether the apply actually landed instead of assuming it always does.
+  applyTemplate: (templateId: number) => Promise<boolean>
   nudgeBlock: (id: number, deltaMin: number, ripple?: boolean) => Promise<void>
 }
 
@@ -362,13 +366,13 @@ export const useTodayStore = create<TodayState>()((set, get) => ({
 
   applyTemplate: async (templateId) => {
     const state = get()
-    if (!state.day) return
+    if (!state.day) return false
 
     set({ loading: true, error: null })
 
     if (!persistenceDriver || !hydratedDay) {
       set({ loading: false, error: 'No database connection' })
-      return
+      return false
     }
 
     try {
@@ -378,10 +382,12 @@ export const useTodayStore = create<TodayState>()((set, get) => ({
       // Reload blocks
       const blocks = await blocksRepo.listBlocksForDay(driver, day)
       set({ blocks: sortBlocks(blocks), loading: false })
+      return true
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Unknown error'
       set({ error: message, loading: false })
       console.error('Failed to apply template:', err)
+      return false
     }
   },
 

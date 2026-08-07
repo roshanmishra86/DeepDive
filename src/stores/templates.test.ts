@@ -531,4 +531,157 @@ describe('templates store', () => {
     expect(state.detail?.blocks.some((b) => b.title === 'Added out-of-band')).toBe(true)
   })
 
+  // --- P1-A (PR review): editBlock must re-stamp AND persist `sort` -----
+
+  it('editBlock re-stamps and persists sort so a reload reflects canonical order, not the old insertion order (P1-A)', async () => {
+    await useTemplatesStore.getState().hydrate(driver)
+    const templateId = (await useTemplatesStore.getState().createTemplate({
+      name: 'P1-A probe',
+      startMin: 300,
+    }))!
+    await useTemplatesStore.getState().select(templateId)
+
+    // Reproduce the reviewer's probe: blocks at 300/330/420/450/780.
+    const starts = [300, 330, 420, 450, 780]
+    const ids: number[] = []
+    for (const startMin of starts) {
+      const blockId = (await useTemplatesStore.getState().addBlock({
+        title: `B${startMin}`,
+        kind: 'shallow',
+        startMin,
+        durationMin: 20,
+      }))!
+      ids.push(blockId)
+    }
+    const firstId = ids[0] // the block currently at startMin 300
+
+    await useTemplatesStore.getState().editBlock(firstId, { startMin: 450 })
+
+    // Force a real DB round trip via getTemplate() (ORDER BY sort), not the
+    // in-memory `detail` the mutator itself just set — a bug here would
+    // only show up after a reload/re-select, exactly like the F1 defect.
+    useTemplatesStore.setState({ detail: null, selectedId: null })
+    await useTemplatesStore.getState().select(templateId)
+
+    const reloaded = useTemplatesStore.getState().detail!.blocks
+    // Canonical (startMin-ascending) order after the edit: 330, 420, then
+    // both 450s (edited block first, tie-broken by its original position),
+    // then 780. The defect rendered [450, 330, 420, 450, 780] — the OLD
+    // insertion order with only the edited field's value changed in place.
+    expect(reloaded.map((b) => b.startMin)).toEqual([330, 420, 450, 450, 780])
+    expect(reloaded[2].id).toBe(firstId)
+    // sort must be dense 0..n-1 and match this order, in the DB too.
+    expect(reloaded.map((b) => b.sort)).toEqual([0, 1, 2, 3, 4])
+  })
+
+  // --- P2-B: select() must discard a stale response --------------------
+
+  it('select() discards a stale response when selectedId moved on before it resolved (P2-B)', async () => {
+    await useTemplatesStore.getState().hydrate(driver)
+    const idA = useTemplatesStore.getState().templates[0].id
+    const idB = (await useTemplatesStore.getState().createTemplate({
+      name: 'P2-B second template',
+      startMin: 400,
+    }))!
+
+    // Wrap the driver so template A's own-row query resolves slower than
+    // B's — simulating two rapid selections resolving out of order (the
+    // Tauri SQL pool gives no ordering guarantee across in-flight queries).
+    const slowDriver: SqlDriver = {
+      execute: (sql, params) => driver.execute(sql, params),
+      select: async <T>(sql: string, params?: unknown[]) => {
+        if (sql.startsWith('SELECT * FROM template WHERE id') && params?.[0] === idA) {
+          await new Promise((resolve) => setTimeout(resolve, 20))
+        }
+        return driver.select<T>(sql, params)
+      },
+      transaction: (statements) => driver.transaction(statements),
+    }
+    await useTemplatesStore.getState().hydrate(slowDriver)
+
+    // Fire both without awaiting the first — A is still in flight when B is
+    // requested, and (per slowDriver above) A resolves AFTER B.
+    const p1 = useTemplatesStore.getState().select(idA)
+    const p2 = useTemplatesStore.getState().select(idB)
+    await Promise.all([p1, p2])
+
+    const state = useTemplatesStore.getState()
+    expect(state.selectedId).toBe(idB)
+    // The defect: A's stale response overwrites `detail` after landing,
+    // leaving `detail` on template A's blocks while `selectedId` says B.
+    expect(state.detail?.id).toBe(idB)
+  })
+
+  // --- P2-A: mutators report success/failure via return value ----------
+
+  it('createTemplate/updateTemplate/deleteTemplate never throw; they report failure via return value and `error` (P2-A)', async () => {
+    await useTemplatesStore.getState().hydrate(driver)
+    const templateId = useTemplatesStore.getState().templates[0].id
+
+    const failingDriver: SqlDriver = {
+      execute: async () => {
+        throw new Error('boom')
+      },
+      select: (sql, params) => driver.select(sql, params),
+      transaction: async () => {
+        throw new Error('boom')
+      },
+    }
+    await useTemplatesStore.getState().hydrate(failingDriver)
+
+    const createId = await useTemplatesStore.getState().createTemplate({
+      name: 'Will fail',
+      startMin: 300,
+    })
+    expect(createId).toBeNull()
+    expect(useTemplatesStore.getState().error).toBe('boom')
+
+    const updateOk = await useTemplatesStore.getState().updateTemplate(templateId, {
+      name: 'Will fail too',
+    })
+    expect(updateOk).toBe(false)
+    expect(useTemplatesStore.getState().error).toBe('boom')
+
+    const deleteOk = await useTemplatesStore.getState().deleteTemplate(templateId)
+    expect(deleteOk).toBe(false)
+    expect(useTemplatesStore.getState().error).toBe('boom')
+  })
+
+  // --- P3: deleteTemplate restores selectedId/detail on rollback, like --
+  // every other mutator, instead of only restoring `templates`. ---------
+
+  it('deleteTemplate restores selectedId and detail (not just templates) on persistence failure (P3)', async () => {
+    await useTemplatesStore.getState().hydrate(driver)
+    const templateId = useTemplatesStore.getState().templates[0].id
+    await useTemplatesStore.getState().select(templateId)
+
+    // Need a second template so the optimistic delete moves selectedId.
+    await useTemplatesStore.getState().createTemplate({ name: 'Second', startMin: 500 })
+    await useTemplatesStore.getState().select(templateId)
+    const priorDetail = useTemplatesStore.getState().detail
+
+    const failingDriver: SqlDriver = {
+      execute: async () => {
+        throw new Error('delete failed')
+      },
+      select: (sql, params) => driver.select(sql, params),
+      transaction: (statements) => driver.transaction(statements),
+    }
+    await useTemplatesStore.getState().hydrate(failingDriver)
+    // hydrate() re-selects the current id through the (working) select()
+    // path since only `execute` fails on this driver; restore selection.
+    await useTemplatesStore.getState().select(templateId)
+
+    const ok = await useTemplatesStore.getState().deleteTemplate(templateId)
+    expect(ok).toBe(false)
+
+    const state = useTemplatesStore.getState()
+    // The defect: templates.find(...) is restored, but selectedId/detail
+    // are left on whatever the optimistic delete moved them to.
+    expect(state.selectedId).toBe(templateId)
+    expect(state.detail?.id).toBe(templateId)
+    expect(state.detail?.blocks.length).toBe(priorDetail?.blocks.length)
+    expect(state.templates.some((t) => t.id === templateId)).toBe(true)
+  })
+
 })

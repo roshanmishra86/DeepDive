@@ -16,7 +16,6 @@ import type { BlockKind } from '../../db/types'
 import { ConfirmDeleteBlockModal } from './ConfirmDeleteBlockModal'
 
 interface BlockModalProps {
-  templateId?: number
   editingBlockId: number | null
   onClose: () => void
 }

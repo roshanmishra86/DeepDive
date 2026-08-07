@@ -55,8 +55,21 @@ export function ConfirmDeleteBlockModal({
     }
   }
 
+  // P1-B: this dialog is rendered both standalone (TemplateDetailPane) and
+  // NESTED inside BlockModal's `composer-overlay` (whose own onClick is
+  // `onClose`). A bare `onClick={onCancel}` here fires onCancel correctly
+  // but then keeps bubbling up through the DOM to the parent overlay's
+  // onClick, closing BlockModal too and discarding the in-progress edit.
+  // The Escape key path already guarded against the equivalent problem
+  // (`e.stopPropagation()` in handleKeyDown); the click path needs the same
+  // guard so this component is safe regardless of what it's nested inside.
+  const handleOverlayClick = (e: React.MouseEvent) => {
+    e.stopPropagation()
+    onCancel()
+  }
+
   return (
-    <div className="modal-overlay" onClick={onCancel}>
+    <div className="modal-overlay" onClick={handleOverlayClick}>
       <div
         className="modal-panel"
         ref={modalRef}
@@ -78,7 +91,7 @@ export function ConfirmDeleteBlockModal({
           <button className="btn-secondary" onClick={onCancel} type="button">
             Cancel
           </button>
-          <button className="btn-danger" onClick={onConfirm} type="button">
+          <button className="btn-danger-solid" onClick={onConfirm} type="button">
             Yes, delete
           </button>
         </div>

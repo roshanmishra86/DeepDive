@@ -2772,8 +2772,8 @@ button:focus-visible {
 }
 
 .tpl-weekday-active {
-  color: var(--on-accent);
-  background: var(--accent);
+  color: var(--text-muted);
+  background: var(--bg-chrome);
 }
 
 .tpl-card-active .tpl-weekday-active {
@@ -3006,9 +3006,9 @@ button:focus-visible {
 }
 
 /* Additional button classes for template modals */
-.btn-danger {
+.btn-danger-solid {
   background: var(--danger);
-  color: white;
+  color: var(--on-accent);
   padding: 8px 14px;
   border-radius: 5px;
   font-size: 12.5px;
@@ -3019,16 +3019,16 @@ button:focus-visible {
   transition: background-color 0.15s;
 }
 
-.btn-danger:hover:not(:disabled) {
+.btn-danger-solid:hover:not(:disabled) {
   background: var(--close);
 }
 
-.btn-danger:disabled {
+.btn-danger-solid:disabled {
   opacity: 0.5;
   cursor: not-allowed;
 }
 
-.btn-danger:focus-visible {
+.btn-danger-solid:focus-visible {
   outline: 2px solid var(--danger);
   outline-offset: 2px;
 }

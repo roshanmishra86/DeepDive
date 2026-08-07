@@ -116,30 +116,3 @@ export function nextTemplateBlockStart(blocks: TemplateBlock[], template: Templa
   return last.startMin + last.durationMin
 }
 
-/**
- * Default template start time: 5:00 AM (300 minutes).
- * Matches the seeded "Maker Day" template.
- */
-export const DEFAULT_TEMPLATE_START_MIN = 300
-
-/**
- * Draft state for a new template, before blocks are added.
- */
-export interface TemplateDraft {
-  name: string
-  description: string
-  startMin: number
-  weekdays: number
-}
-
-/**
- * Creates a blank template draft with sensible defaults.
- */
-export function newTemplateDraft(): TemplateDraft {
-  return {
-    name: '',
-    description: '',
-    startMin: DEFAULT_TEMPLATE_START_MIN,
-    weekdays: 0,
-  }
-}
