@@ -6,7 +6,11 @@
 
 export type BlockKind = 'deep' | 'shallow' | 'ritual' | 'break'
 export type SessionPhase = 'focus' | 'rest'
-export type DayStatus = 'full' | 'part' | 'miss'
+// 'note' is a day with a shut-down note but zero planned blocks — distinct from
+// 'miss' (which means blocks WERE planned and none were completed). Collapsing
+// the two would assert the user planned blocks they never planned. See the
+// Phase 7 review in TASKS.md.
+export type DayStatus = 'full' | 'part' | 'miss' | 'note'
 export type BlockRepeat = 'once' | 'daily' | 'weekdays'
 
 export interface Task {

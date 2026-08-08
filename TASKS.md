@@ -910,12 +910,113 @@ software-rendering noise, not app faults. A transient `EACCES` renaming `node_mo
 - [ ] The Tauri-side `transaction()` test mocks the plugin and so cannot prove real atomicity — see the
   driver note above.
 
-### Phase 7 — Archive
-- [ ] Month calendar with per-day status dots (full / partial / missed)
-- [ ] Month navigation
-- [ ] Selected-day record: completed count, deep hours, pomodoros, block list, shut-down note
-- [ ] Header stats: blocks done, completion %, day streak
-- [ ] 12-week deep-hours histogram
+### Phase 7 — Archive *(owner: Haiku sub-agent, verified and fixed by Sonnet + main session)*
+- [x] Month calendar with per-day status dots (full / partial / missed) — `MonthCalendar`, Monday-first grid
+- [x] Month navigation — prev/next, via `addMonths`
+- [x] Selected-day record: completed count, deep hours, pomodoros, block list, shut-down note — `DayRecordPane`
+- [x] Header stats: blocks done, completion %, day streak — from the existing `headlineStats`
+- [x] 12-week deep-hours histogram — `DeepHoursHistogram` over `histogramBars`
+- [x] **Beyond the checklist:** "Save as template" from a past day, reusing Phase 6's `saveDayAsTemplate`
+
+#### The repo layer already existed
+As in Phase 6, Phase 3 had already shipped `db/repos/archive.ts` with `dayStatuses`, `dayRecord`,
+`headlineStats`, `deepMinutesByWeekday` and `deepHoursLast12Weeks`. Phase 7 is store + UI + CSS —
+**no migration was needed**. Three defects in that pre-existing repo layer were fixed here, since
+Phase 7 is the first code to actually read it.
+
+#### `saveDayAsTemplate` reused, not reimplemented
+Phase 6 put "Save today as template" on the Today header because Archive was still a placeholder,
+and recorded that Archive must call the same store action. It does: `SaveTemplateModal` was
+generalized with an optional `day` prop (defaulting to today, so `TodayView`'s call site is
+unchanged) rather than being copied.
+
+#### `DayStatus` gained a fourth value — `'note'`
+A day can have a shut-down note and zero planned blocks. None of `full`/`part`/`miss` is honest for
+that: the mockup's own legend reads `miss` as "Planned, missed", which asserts blocks were planned
+and failed. `DayStatus` is now `'full' | 'part' | 'miss' | 'note'`. Blast radius checked before
+widening — the type is referenced only by `db/types.ts`, a re-export in `db/index.ts`,
+`repos/archive.ts` and `stores/archive.ts`. The calendar legend therefore carries **four** items
+against the mockup's three; a deliberate deviation, since the mockup's hardcoded Feb 2026 data never
+exercises this case.
+
+#### Defects found in verification and fixed
+As in every prior phase, all of these were found **after** the implementing sub-agent reported every
+checklist item complete with all six gates passing. The gates did pass and could not see any of it.
+The sub-agent's self-report was independently unreliable in two checkable ways: it reported the test
+delta as **+8** when it was **+28**, and it reported "Deviations from brief: None" while deviating on
+an explicit instruction (D2 below).
+
+- [x] **`monthGrid()` always returned 42 cells and appended a bogus trailing week.** The `break`
+  conditions fired only at exactly 35 cells, and when they did, a second `while (cells.length < 42)`
+  loop immediately refilled to 42 with cells hardcoded `inMonth: false` — so the 35-cell path was
+  unreachable and every month rendered a dead row. Proven by probe before being fixed:
+  `Feb2026 cells=42 last=2026-03-08` (should be 35, ending 2026-03-01) and
+  `Feb2027 cells=42 last=2027-03-14` (Feb 2027 starts on a Monday and has 28 days — should be 28
+  cells). The sub-agent's report defended 42 as correct with arithmetic that does not hold. Rewritten
+  to walk `gridStart` → `gridEnd` with no hardcoded count; now 28/35/42 naturally. Out-of-month cells
+  also now carry their real calendar day number instead of a magic `0`.
+- [x] **Two SQL sources of truth for one value, and they disagreed.** `dayRecord` stamped a
+  note-only day `'miss'` while `dayStatuses`' SQL required `COUNT(*) > 0` and silently omitted it —
+  so the calendar cell rendered disabled and unclickable while `dayRecord` simultaneously claimed the
+  day was planned and missed. **The shut-down note was unreachable dead UI**, which is the one thing
+  the Phase 7 checklist names explicitly. This is the project's signature defect class in the
+  calendar's primary data path. Both now derive the same four-way status, and a probe test asserts
+  the two functions agree across full/part/miss/note/empty days against real SQLite.
+- [x] **The `'miss'` dot was never painted.** `dotColor()` fell through to `transparent` for anything
+  but `full`/`part`, while the legend advertised a grey "Planned, missed" dot. Days with *no* record
+  at all were also mislabeled `"Planned, missed"` in their aria-label, by the same fall-through.
+- [x] **`DayRecordPane` re-implemented `splitDeepHours` inline, incorrectly** — the exact failure mode
+  that helper's own doc comment warns about. Proven by probe: at `deepMin = 1138` the duplicate
+  rendered `"18.10"` where the canonical helper gives `"19.0"`. This is the Phase 3 deep-hours defect
+  reintroduced in a new file, and the fourth instance of the duplicated-helper class.
+- [x] **`addMonths` was dead code** — exported and unit-tested, never called, while
+  `prevMonth`/`nextMonth` reimplemented month arithmetic inline. The Phase 4 "logic plus tests is not
+  a feature until something calls it" defect, plus a duplicated implementation. Now wired.
+- [x] **The grid-boundary computation was duplicated byte-for-byte** across `hydrate`, `setMonth` and
+  `monthGrid`. Collapsed to one `monthGridRange()`.
+- [x] **The stale-response guard's test proved nothing.** It awaited two calls in issue order
+  (`await p1; await p2`), which passes identically whether the guard exists or not, since with no
+  reordering the later call always resolves last. This is the Phase 3 tautological-test lesson
+  repeating — an assertion that cannot fail. Rewritten with a driver wrapper that delays the *first*
+  call's response past the second's, the only ordering that exercises the guard.
+
+#### Checked and found correct
+`addMonths` negative `n`, Dec→Jan, Jan→Dec and the Jan 31 → Feb 28 clamp (probed); the
+`SaveTemplateModal` `day` prop defaulting so `TodayView` is behaviourally unchanged; the
+`BlockRow`/`rowToBlock` extraction into `blocks.ts` (byte-identical logic, no shape change); the
+exported `MONTHS` leaving no duplicate copy (`WEEKDAYS` had no consumer outside `formatTitleDate`
+and was later made module-private); the store's P2-A error contract matching
+`stores/templates.ts`; store tests reading back through real SQLite; no `toISOString()` day keys
+anywhere in the diff; and every `lib/archive.ts` export and store action reachable from a rendered
+component (`setMonth` via `prevMonth`/`nextMonth`, which are the mockup's only affordances).
+
+**Phase 7 acceptance — MET (independently verified, not taken on the sub-agents' reports):**
+
+| Check | Result |
+| --- | --- |
+| `oxlint` | exit 0, zero warnings |
+| `tsc -b` + `tsc -p tsconfig.test.json` | exit 0 |
+| `vitest run` ×2 | 603 tests, 25 files — identical both runs, ~43s (573 at phase start) |
+| `check:css` | exit 0 — all 37 `.arc-*` classes resolve |
+| `vite build` | pass — built in 44s |
+| `cargo fmt --all -- --check` / `cargo clippy --all-targets -- -D warnings` | pass |
+| New colour literals in the diff (`#`, `rgb`, named) | zero — histogram ramp uses `color-mix()` over `var(--accent)` |
+| `monthGrid` cell counts re-probed after the fix | Feb2026 **35** (ends 2026-03-01), Feb2027 **28**, Mar/Aug/Nov 2026 **42** |
+| `dayStatuses` agrees with `dayRecord` for every day-kind | pass — probe test against real SQLite |
+| `DayStatus` widening blast radius | pass — Archive-scoped only, grepped before widening |
+| Regression tests proven able to fail | pass ×3 — grid padding restored (`expected 42 to be 35`), `dayRecord` status reverted (`expected 'miss' to be 'note'`), stale guard commented out (`expected '2026-08-10' to be '2026-08-15'`); all restored, suite green |
+
+#### Known, deliberately not fixed
+- [ ] `stores/archive.ts` initialises `year`/`month0` from `new Date()` at module scope, against the
+  Phase 3 rule that a store never reads the clock. It is inert — `hydrate(driver, today)` overwrites
+  it — but the *first* render does read it, so the rule is bent rather than merely decorated. The
+  value is correct in every timezone, so this is a convention violation, not a live defect.
+- [ ] A zero-hour week renders as a 0%-height (invisible) histogram bar. The mockup's shortest bar is
+  38%, but that is placeholder data, not a spec; flooring the bar would misrepresent a genuine
+  zero-output week. Revisit in the Phase 10 polish pass if it reads as a rendering fault.
+- [ ] Still no component-level test of the Archive render path — the suite runs on the `node`
+  environment because jsdom costs ~113s on this `/mnt/c` mount (Phase 2). Pure helpers are tested;
+  the JSX is not. Same standing exception as Phases 5.5, 5.6 and 6.
 
 ### Phase 8 — Sound library
 - [ ] "Load mp3" via dialog plugin; persist absolute path + metadata

@@ -5,8 +5,11 @@
  */
 
 import type { SqlDriver } from '../driver'
-import type { DayStatus, DayBlock, BlockKind, BlockRepeat } from '../types'
+import type { DayStatus, DayBlock } from '../types'
 import { toDayKey, fromDayKey, addDays } from '../../lib/time'
+import { sortBlocks } from '../../lib/today'
+import type { BlockRow } from './blocks'
+import { rowToBlock } from './blocks'
 
 export interface DayRecord {
   day: string
@@ -25,40 +28,49 @@ export interface HeadlineStats {
   dayStreak: number
 }
 
-// Row shape returned by `SELECT * FROM day_block`, used by dayRecord below.
-interface DayBlockRow {
-  id: number
-  day: string
-  task_id: number | null
-  title: string
-  kind: BlockKind
-  start_min: number
-  duration_min: number
-  pomodoros: number
-  completed: number
-  sort: number
-  note: string
-  repeat: BlockRepeat
-  track_id: number | null
-  quiet: number
-}
 
 export async function dayStatuses(
   driver: SqlDriver,
   fromDay: string,
   toDay: string
 ): Promise<Record<string, DayStatus>> {
+  // Two sources feed one status per day: block outcomes (full/part/miss) and
+  // notes on days with zero blocks ('note' — a shut-down note with nothing
+  // planned is not the same thing as a miss). Avoid FULL OUTER JOIN (not
+  // reliably available across the SQLite builds this app runs on — bundled
+  // sqlx in prod, node:sqlite in tests); UNION ALL + GROUP BY MAX is
+  // portable and equivalent here since a note-only placeholder row is always
+  // (0, 0), so MAX just lets real block counts win when a day has both.
+  // The note branch filters `note != ''` because a day_note row is not
+  // evidence of a note: setDayShutdown upserts rows with the schema-default
+  // empty note (per-day shutdown override on a note-less day), and dayRecord
+  // treats '' as no note and returns null. The filter keeps the two in
+  // agreement — without it such a day got a clickable 'note' dot whose
+  // record was null.
   const rows = await driver.select<{ day: string; status: DayStatus }>(
     `SELECT day,
             CASE
-              WHEN COUNT(*) > 0 AND COUNT(*) = SUM(CASE WHEN completed = 1 THEN 1 ELSE 0 END) THEN 'full'
-              WHEN COUNT(*) > 0 AND SUM(CASE WHEN completed = 1 THEN 1 ELSE 0 END) = 0 THEN 'miss'
+              WHEN blockCount = 0 THEN 'note'
+              WHEN blockCount = completedCount THEN 'full'
+              WHEN completedCount = 0 THEN 'miss'
               ELSE 'part'
             END as status
-     FROM day_block
-     WHERE day BETWEEN ? AND ?
-     GROUP BY day`,
-    [fromDay, toDay]
+     FROM (
+       SELECT day, MAX(blockCount) as blockCount, MAX(completedCount) as completedCount
+       FROM (
+         SELECT day, COUNT(*) as blockCount,
+                SUM(CASE WHEN completed = 1 THEN 1 ELSE 0 END) as completedCount
+         FROM day_block
+         WHERE day BETWEEN ? AND ?
+         GROUP BY day
+         UNION ALL
+         SELECT day, 0 as blockCount, 0 as completedCount
+         FROM day_note
+         WHERE day BETWEEN ? AND ? AND note != ''
+       )
+       GROUP BY day
+     )`,
+    [fromDay, toDay, fromDay, toDay]
   )
   const result: Record<string, DayStatus> = {}
   for (const row of rows) {
@@ -70,7 +82,7 @@ export async function dayStatuses(
 export async function dayRecord(driver: SqlDriver, day: string): Promise<DayRecord | null> {
   const rows = await driver.select<{
     blockCount: number
-    completedCount: number
+    completedCount: number | null
     deepMin: number
     pomodoros: number
   }>(
@@ -84,50 +96,46 @@ export async function dayRecord(driver: SqlDriver, day: string): Promise<DayReco
     [day]
   )
 
-  if (rows.length === 0 || rows[0].blockCount === 0) {
-    return null
-  }
-
   const stats = rows[0]
-  const status: DayStatus =
-    stats.blockCount > 0 && stats.blockCount === stats.completedCount
-      ? 'full'
-      : stats.blockCount > 0 && stats.completedCount === 0
-        ? 'miss'
-        : 'part'
+  const blockCount = stats.blockCount
+  const completedCount = stats.completedCount ?? 0
 
+  // Fetch the shut-down note — it may exist even if there are no blocks
   const noteRows = await driver.select<{ note: string }>(
     'SELECT note FROM day_note WHERE day = ?',
     [day]
   )
   const note = noteRows.length > 0 ? noteRows[0].note : ''
 
-  const blockRows = await driver.select<DayBlockRow>(
-    'SELECT * FROM day_block WHERE day = ? ORDER BY sort, start_min',
+  // If there are no blocks and no note, return null (no record on this day)
+  if (blockCount === 0 && !note) {
+    return null
+  }
+
+  // Determine status. Must agree with the SQL CASE in `dayStatuses` above —
+  // a zero-block day is 'note' (nothing was planned), never 'miss' ('miss'
+  // asserts blocks were planned and none landed).
+  const status: DayStatus =
+    blockCount === 0
+      ? 'note'
+      : blockCount === completedCount
+        ? 'full'
+        : completedCount === 0
+          ? 'miss'
+          : 'part'
+
+  // Fetch blocks and apply the canonical ordering
+  const blockRows = await driver.select<BlockRow>(
+    'SELECT * FROM day_block WHERE day = ?',
     [day]
   )
-  const blocks = blockRows.map((row) => ({
-    id: row.id,
-    day: row.day,
-    taskId: row.task_id,
-    title: row.title,
-    kind: row.kind,
-    startMin: row.start_min,
-    durationMin: row.duration_min,
-    pomodoros: row.pomodoros,
-    completed: row.completed === 1,
-    sort: row.sort,
-    note: row.note,
-    repeat: row.repeat,
-    trackId: row.track_id,
-    quiet: row.quiet === 1,
-  }))
+  const blocks = sortBlocks(blockRows.map(rowToBlock))
 
   return {
     day,
     status,
     blockCount: stats.blockCount,
-    completedCount: stats.completedCount,
+    completedCount,
     deepMin: stats.deepMin,
     pomodoros: stats.pomodoros,
     note,

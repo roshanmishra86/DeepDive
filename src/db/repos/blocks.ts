@@ -6,8 +6,9 @@
 import type { SqlDriver } from '../driver'
 import type { DayBlock, BlockKind, BlockRepeat } from '../types'
 
-// Internal row type matching SQL schema (0|1 for booleans)
-interface BlockRow {
+// Row type matching SQL schema (0|1 for booleans). Exported so archive.ts
+// can reuse it rather than maintaining a duplicate mapping.
+export interface BlockRow {
   id: number
   day: string
   task_id: number | null
@@ -24,7 +25,7 @@ interface BlockRow {
   quiet: number
 }
 
-function rowToBlock(row: BlockRow): DayBlock {
+export function rowToBlock(row: BlockRow): DayBlock {
   return {
     id: row.id,
     day: row.day,
