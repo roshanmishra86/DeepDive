@@ -781,6 +781,63 @@ describe('useTimerStore persistence', () => {
     expect(rows.length).toBe(2)
   })
 
+  it('start → pause within the same second → start resumes the SAME row (no orphan)', async () => {
+    // pause() ceils the remaining time, so a pause within the first
+    // wall-clock second leaves remainingSec === totalSec even though a row
+    // is open. start() must treat that as a resume, not a fresh start —
+    // otherwise the open row is dropped without being closed and a second
+    // row is inserted for the same run (found in Phase 9 verification).
+    vi.setSystemTime(1000000)
+    const blockId = await blocksRepo.createBlock(driver, {
+      day: '2026-08-10',
+      title: 'Deep block',
+      kind: 'deep',
+      startMin: 300,
+      durationMin: 90,
+    })
+    await useTimerStore.getState().start(makeCandidate(blockId))
+    await useTimerStore.getState().pause()
+    expect(useTimerStore.getState().remainingSec).toBe(FOCUS_SEC)
+    expect(useTimerStore.getState().openSessionId).not.toBeNull()
+
+    await useTimerStore.getState().start(makeCandidate(blockId))
+    expect(useTimerStore.getState().running).toBe(true)
+
+    const rows = await sessionsRepo.listSessionsForBlock(driver, blockId)
+    expect(rows.length).toBe(1)
+    expect(rows[0].endedAt).toBeNull()
+    expect(useTimerStore.getState().openSessionId).toBe(rows[0].id)
+  })
+
+  it('toggle on an instantly-paused rest resumes the rest (no abandon, no focus jump)', async () => {
+    // Same sub-second pause case, but in the rest phase: the paused rest is
+    // resumed rather than abandoned into a fresh focus.
+    vi.setSystemTime(1000000)
+    const blockId = await blocksRepo.createBlock(driver, {
+      day: '2026-08-10',
+      title: 'Deep block',
+      kind: 'deep',
+      startMin: 300,
+      durationMin: 90,
+    })
+    await useTimerStore.getState().start(makeCandidate(blockId))
+    await useTimerStore.getState().rest()
+    await useTimerStore.getState().pause()
+    expect(useTimerStore.getState().remainingSec).toBe(REST_SEC)
+
+    await useTimerStore.getState().toggle(null)
+    const state = useTimerStore.getState()
+    expect(state.phase).toBe('rest')
+    expect(state.running).toBe(true)
+
+    const rows = await sessionsRepo.listSessionsForBlock(driver, blockId)
+    // One abandoned focus row + ONE rest row still open.
+    expect(rows.length).toBe(2)
+    const restRow = rows.find((r) => r.phase === 'rest')!
+    expect(restRow.endedAt).toBeNull()
+    expect(state.openSessionId).toBe(restRow.id)
+  })
+
   it('reset abandons the open row and clears attachment, counter and target', async () => {
     vi.setSystemTime(1000000)
     const blockId = await blocksRepo.createBlock(driver, {

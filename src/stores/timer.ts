@@ -94,8 +94,14 @@ export const useTimerStore = create<TimerState>()((set, get) => ({
 
     // Resuming a paused timer (same phase, time left): state only, no DB
     // writes — the open row's wall-clock span simply includes the pause.
+    // The `openSessionId` clause covers a pause within the first wall-clock
+    // second of a run: pause() ceils the remaining time, so remainingSec can
+    // still equal totalSec while a row is open. Treating that as a fresh
+    // start would drop the open row's id without closing it (an orphaned,
+    // never-ended row) and insert a second row for the same run.
     const isResume =
-      state.remainingSec > 0 && state.remainingSec < state.totalSec
+      state.remainingSec > 0 &&
+      (state.remainingSec < state.totalSec || (!state.running && state.openSessionId !== null))
 
     if (isResume) {
       set({ running: true, endsAt: Date.now() + state.remainingSec * 1000 })
@@ -103,10 +109,11 @@ export const useTimerStore = create<TimerState>()((set, get) => ({
     }
 
     if (state.phase === 'rest') {
-      // Rest is over (or the user bailed on a fresh rest): begin a fresh
-      // focus with the attachment kept. The open rest row — if any — is
-      // completed here only when it already hit zero (tick handles that);
-      // a rest that never ran has no row yet when remainingSec === totalSec.
+      // Rest is over (or the user bailed on a running rest): begin a fresh
+      // focus with the attachment kept. A PAUSED rest with an open row was
+      // handled by the resume branch above, so reaching here means the rest
+      // either elapsed (tick already completed its row) or is being
+      // abandoned mid-run — the open row, if any, is closed out below.
       const openId = state.openSessionId
       set({
         phase: 'focus',
