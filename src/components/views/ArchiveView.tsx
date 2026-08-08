@@ -9,6 +9,7 @@ import { DayRecordPane } from '../archive/DayRecordPane'
 export function ArchiveView() {
   const hydrate = useArchiveStore((s) => s.hydrate)
   const loading = useArchiveStore((s) => s.loading)
+  const error = useArchiveStore((s) => s.error)
   const headline = useArchiveStore((s) => s.headline)
 
   useEffect(() => {
@@ -28,7 +29,11 @@ export function ArchiveView() {
     }
   }, [hydrate])
 
-  if (loading) {
+  // Gate on "never hydrated", not the shared loading flag: setMonth also
+  // sets loading on every prev/next click, and unmounting the whole view
+  // (nav buttons included) for one local SQLite read flashes
+  // "Loading archive…" mid-navigation. Month changes update in place.
+  if (loading && headline === null) {
     return (
       <div className="arc-view">
         <div className="arc-header">
@@ -42,6 +47,31 @@ export function ArchiveView() {
         <div className="arc-body">
           <div className="view-empty">
             <div className="view-empty-title">Loading archive…</div>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  // Same error contract as the sibling views (TodayView, WeekView): without
+  // this branch a failed hydrate/setMonth rendered as an empty archive,
+  // indistinguishable from a genuinely empty one.
+  if (error) {
+    return (
+      <div className="arc-view">
+        <div className="arc-header">
+          <div>
+            <div className="arc-title">Archive</div>
+            <div className="arc-subtitle">
+              Every day you planned blocks. A dot means the day has a record — open it to see what actually landed.
+            </div>
+          </div>
+        </div>
+        <div className="arc-body">
+          <div className="view-empty">
+            <div className="view-empty-title" style={{ color: 'var(--danger)' }}>
+              Error: {error}
+            </div>
           </div>
         </div>
       </div>

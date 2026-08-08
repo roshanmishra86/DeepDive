@@ -3,6 +3,7 @@ import { createTestDb } from '../../test/nodeDriver'
 import type { SqlDriver } from '../driver'
 import * as archive from './archive'
 import * as blocks from './blocks'
+import * as notes from './notes'
 
 describe('archive repository', () => {
   let driver: SqlDriver
@@ -364,6 +365,22 @@ describe('archive repository', () => {
 
     expect(statuses[emptyDay]).toBeUndefined()
     expect(emptyRecord).toBeNull()
+  })
+
+  it('ignores shutdown-only day_note rows (empty note): no status, null record', async () => {
+    // setDayShutdown upserts a day_note row with the schema-default empty
+    // note (0001_init.sql: note TEXT NOT NULL DEFAULT ''), so setting a
+    // per-day shutdown override on a note-less day must NOT read as a 'note'
+    // day. dayRecord treats '' as no note and returns null; dayStatuses must
+    // agree, or the calendar paints a clickable dot whose record is null.
+    const day = '2026-08-17'
+    await notes.setDayShutdown(driver, day, 1080)
+
+    const statuses = await archive.dayStatuses(driver, day, day)
+    expect(statuses[day]).toBeUndefined()
+
+    const record = await archive.dayRecord(driver, day)
+    expect(record).toBeNull()
   })
 
   it('dayRecord returns null for a day with no blocks and no note', async () => {

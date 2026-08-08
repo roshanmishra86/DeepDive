@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from 'react'
 import { useTemplatesStore } from '../../stores/templates'
 import { useAppStore } from '../../stores/app'
-import { toDayKey } from '../../lib/time'
+import { toDayKey, fromDayKey, formatTitleDate } from '../../lib/time'
 
 interface SaveTemplateModalProps {
   day?: string // Day to save as template. Defaults to today if not provided.
@@ -20,6 +20,13 @@ export function SaveTemplateModal({ day, onClose }: SaveTemplateModalProps) {
   const [saving, setSaving] = useState(false)
   const modalRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
+
+  // Title/aria-label name the actual day being saved: TodayView opens this
+  // with no `day` (today), but the archive's DayRecordPane passes an
+  // arbitrary past date, where "Save today as template" is factually wrong.
+  const title = day
+    ? `Save ${formatTitleDate(fromDayKey(day))} as template`
+    : 'Save today as template'
 
   useEffect(() => {
     inputRef.current?.focus()
@@ -80,12 +87,12 @@ export function SaveTemplateModal({ day, onClose }: SaveTemplateModalProps) {
         ref={modalRef}
         role="dialog"
         aria-modal="true"
-        aria-label="Save today as template"
+        aria-label={title}
         onClick={(e) => e.stopPropagation()}
         onKeyDown={handleKeyDown}
       >
         <div className="modal-header">
-          <h2 className="modal-title">Save today as template</h2>
+          <h2 className="modal-title">{title}</h2>
           <button className="btn-icon" onClick={onClose} aria-label="Close" type="button">
             <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.2">
               <path d="M2 14l12-12M14 14L2 2" />

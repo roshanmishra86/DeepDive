@@ -6,7 +6,11 @@ export function formatClock(totalSec: number): string {
   return `${m}:${String(s).padStart(2, '0')}`
 }
 
-export const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
+// Not exported: the only consumer is formatTitleDate below. MonthCalendar
+// renders its own single-letter Monday-first labels, and the weekday
+// repeat selector uses lib/templates.ts's separate (Monday-first, bitmask)
+// WEEKDAYS — exporting this copy had no consumer.
+const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
 export const MONTHS = [
   'January', 'February', 'March', 'April', 'May', 'June',
   'July', 'August', 'September', 'October', 'November', 'December',

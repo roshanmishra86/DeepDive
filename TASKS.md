@@ -984,7 +984,8 @@ an explicit instruction (D2 below).
 `addMonths` negative `n`, Dec→Jan, Jan→Dec and the Jan 31 → Feb 28 clamp (probed); the
 `SaveTemplateModal` `day` prop defaulting so `TodayView` is behaviourally unchanged; the
 `BlockRow`/`rowToBlock` extraction into `blocks.ts` (byte-identical logic, no shape change); the
-exported `MONTHS`/`WEEKDAYS` leaving no duplicate copy; the store's P2-A error contract matching
+exported `MONTHS` leaving no duplicate copy (`WEEKDAYS` had no consumer outside `formatTitleDate`
+and was later made module-private); the store's P2-A error contract matching
 `stores/templates.ts`; store tests reading back through real SQLite; no `toISOString()` day keys
 anywhere in the diff; and every `lib/archive.ts` export and store action reachable from a rendered
 component (`setMonth` via `prevMonth`/`nextMonth`, which are the mockup's only affordances).

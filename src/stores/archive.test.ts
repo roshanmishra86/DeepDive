@@ -247,6 +247,35 @@ describe('archive store', () => {
     expect(state.trend[0].hours).toBeGreaterThanOrEqual(0)
   })
 
+  it('anchors the 12-week trend to the week Monday when today is not a Monday', async () => {
+    // 2026-08-12 is a Wednesday; its week's Monday is 2026-08-10. The repo
+    // buckets Mon–Sun from the anchor it is given, so hydrating with a raw
+    // non-Monday `today` would weekday-anchor every bar: the final "this
+    // week" bar would sum today..today+6 (up to 6 future days) while this
+    // week's Monday–Tuesday hours shift into the previous bar.
+    const monday = '2026-08-10'
+    const wednesday = '2026-08-12'
+
+    const id = await blocks.createBlock(driver, {
+      day: monday,
+      title: 'Deep work',
+      kind: 'deep',
+      startMin: 300,
+      durationMin: 120,
+    })
+    await blocks.setBlockCompleted(driver, id, true)
+
+    await useArchiveStore.getState().hydrate(driver, wednesday)
+
+    const state = useArchiveStore.getState()
+    expect(state.trend.length).toBe(12)
+    // The final bar is the current week, starting Monday — not Wednesday.
+    expect(state.trend[11].weekStart).toBe(monday)
+    // ...and Monday's 120 completed deep minutes land in it, not in the prior bar.
+    expect(state.trend[11].hours).toBe(2.0)
+    expect(state.trend[10].hours).toBe(0)
+  })
+
   it('handles null driver gracefully (dev mode fallback)', async () => {
     const today = '2026-08-10'
 

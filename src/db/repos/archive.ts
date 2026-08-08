@@ -41,6 +41,12 @@ export async function dayStatuses(
   // sqlx in prod, node:sqlite in tests); UNION ALL + GROUP BY MAX is
   // portable and equivalent here since a note-only placeholder row is always
   // (0, 0), so MAX just lets real block counts win when a day has both.
+  // The note branch filters `note != ''` because a day_note row is not
+  // evidence of a note: setDayShutdown upserts rows with the schema-default
+  // empty note (per-day shutdown override on a note-less day), and dayRecord
+  // treats '' as no note and returns null. The filter keeps the two in
+  // agreement — without it such a day got a clickable 'note' dot whose
+  // record was null.
   const rows = await driver.select<{ day: string; status: DayStatus }>(
     `SELECT day,
             CASE
@@ -60,7 +66,7 @@ export async function dayStatuses(
          UNION ALL
          SELECT day, 0 as blockCount, 0 as completedCount
          FROM day_note
-         WHERE day BETWEEN ? AND ?
+         WHERE day BETWEEN ? AND ? AND note != ''
        )
        GROUP BY day
      )`,

@@ -3,7 +3,7 @@ import type { SqlDriver } from '../db/driver'
 import type { DayStatus } from '../db/types'
 import * as archiveRepo from '../db/repos/archive'
 import type { DayRecord, HeadlineStats } from '../db/repos/archive'
-import { toDayKey } from '../lib/time'
+import { toDayKey, fromDayKey, startOfWeek } from '../lib/time'
 import { monthGridRange, addMonths } from '../lib/archive'
 
 /**
@@ -73,8 +73,15 @@ export const useArchiveStore = create<ArchiveState>()((set, get) => ({
       // Fetch headline stats
       const headline = await archiveRepo.headlineStats(driver, today)
 
-      // Fetch 12-week trend
-      const trend = await archiveRepo.deepHoursLast12Weeks(driver, today)
+      // Fetch 12-week trend. The repo buckets Mon–Sun from the anchor it is
+      // given, so the anchor must be the Monday of today's week — the same
+      // convention as Sidebar.tsx's toDayKey(startOfWeek(new Date())).
+      // Passing `today` raw would weekday-anchor every bar and push this
+      // week's Monday-through-yesterday hours into the previous bar.
+      const trend = await archiveRepo.deepHoursLast12Weeks(
+        driver,
+        toDayKey(startOfWeek(fromDayKey(today)))
+      )
 
       // Default to current month
       const [todayYear, todayMonth, todayDay] = today.split('-').map(Number)
@@ -105,6 +112,12 @@ export const useArchiveStore = create<ArchiveState>()((set, get) => ({
         }
       }
 
+      // Load the selected day's record in the same pass and commit it in the
+      // same set — a separate post-hydrate set({ record }) could clobber a
+      // selectDay result landing in between (hydrate has no requestCounter
+      // slot), and left `record` stale when the new selection was null.
+      const record = selectedDay ? await archiveRepo.dayRecord(driver, selectedDay) : null
+
       set({
         year,
         month0,
@@ -112,14 +125,9 @@ export const useArchiveStore = create<ArchiveState>()((set, get) => ({
         headline,
         trend,
         selectedDay,
+        record,
         loading: false,
       })
-
-      // If we selected a day, load its record
-      if (selectedDay && persistenceDriver) {
-        const record = await archiveRepo.dayRecord(persistenceDriver, selectedDay)
-        set({ record })
-      }
     } catch (err) {
       console.error('Failed to hydrate archive store:', err)
       set({ error: String(err), loading: false })
