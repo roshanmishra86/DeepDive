@@ -19,6 +19,7 @@ describe('archive store', () => {
       record: null,
       headline: null,
       trend: [],
+      hasRecords: false,
       loading: false,
       error: null,
     })
@@ -274,6 +275,31 @@ describe('archive store', () => {
     // ...and Monday's 120 completed deep minutes land in it, not in the prior bar.
     expect(state.trend[11].hours).toBe(2.0)
     expect(state.trend[10].hours).toBe(0)
+  })
+
+  it('hydrate on an empty db leaves hasRecords false', async () => {
+    await useArchiveStore.getState().hydrate(driver, '2026-08-10')
+
+    const state = useArchiveStore.getState()
+    expect(state.hasRecords).toBe(false)
+    // The rest of hydrate still ran — empty archive is not an error.
+    expect(state.error).toBeNull()
+    expect(state.headline).not.toBeNull()
+  })
+
+  it('hydrate sets hasRecords true when a block row exists', async () => {
+    const id = await blocks.createBlock(driver, {
+      day: '2026-08-10',
+      title: 'Deep work',
+      kind: 'deep',
+      startMin: 300,
+      durationMin: 60,
+    })
+    await blocks.setBlockCompleted(driver, id, true)
+
+    await useArchiveStore.getState().hydrate(driver, '2026-08-10')
+
+    expect(useArchiveStore.getState().hasRecords).toBe(true)
   })
 
   it('handles null driver gracefully (dev mode fallback)', async () => {

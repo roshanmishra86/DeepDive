@@ -390,6 +390,42 @@ describe('archive repository', () => {
     expect(record).toBeNull()
   })
 
+  it('hasAnyRecords is false on an empty db', async () => {
+    expect(await archive.hasAnyRecords(driver)).toBe(false)
+  })
+
+  it('hasAnyRecords is true with a single day_block row', async () => {
+    await blocks.createBlock(driver, {
+      day: '2026-08-10',
+      title: 'Deep work',
+      kind: 'deep',
+      startMin: 300,
+      durationMin: 60,
+    })
+    expect(await archive.hasAnyRecords(driver)).toBe(true)
+  })
+
+  it('hasAnyRecords is true with a note-only day (day_note row, no blocks)', async () => {
+    // The calendar paints a dot for note-only days (dayStatuses' UNION ALL
+    // branch), so a note alone must count as "has records" — otherwise the
+    // empty state would render over a calendar that has a dot.
+    await driver.execute('INSERT INTO day_note (day, note) VALUES (?, ?)', [
+      '2026-08-10',
+      'Rest day.',
+    ])
+    expect(await archive.hasAnyRecords(driver)).toBe(true)
+  })
+
+  it('hasAnyRecords is false for a shutdown-only day_note row (empty note)', async () => {
+    // setDayShutdown upserts a row with the schema-default empty note.
+    // dayStatuses filters those out (note != ''), so such a DB renders a
+    // dotless calendar; hasAnyRecords must agree, or the empty state is
+    // hidden while the archive still reads as broken. Reachable on a fresh
+    // install: set a shutdown override before ever planning a block.
+    await notes.setDayShutdown(driver, '2026-08-17', 1080)
+    expect(await archive.hasAnyRecords(driver)).toBe(false)
+  })
+
   it('dayRecord.pomodoros counts only the day\'s completed focus sessions', async () => {
     const day = '2026-08-10'
     const otherDay = '2026-08-11'

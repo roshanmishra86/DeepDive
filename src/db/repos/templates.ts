@@ -5,6 +5,7 @@
 
 import type { SqlDriver } from '../driver'
 import type { Template, TemplateBlock, BlockKind } from '../types'
+import { DEFAULT_TEMPLATE_START_MIN } from '../../lib/templates'
 
 interface TemplateRow {
   id: number
@@ -332,12 +333,15 @@ export async function saveDayAsTemplate(
   name: string,
   description?: string
 ): Promise<number> {
-  // Derive start_min from the day's earliest block; fall back to 300
+  // Derive start_min from the day's earliest block; fall back to the default
   const blockRows = await driver.select<{ start_min: number }>(
     'SELECT MIN(start_min) as start_min FROM day_block WHERE day = ?',
     [day]
   )
-  const startMin = blockRows.length > 0 && blockRows[0].start_min !== null ? blockRows[0].start_min : 300
+  const startMin =
+    blockRows.length > 0 && blockRows[0].start_min !== null
+      ? blockRows[0].start_min
+      : DEFAULT_TEMPLATE_START_MIN
 
   // Create template
   const templateResult = await driver.execute(

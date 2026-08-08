@@ -12,11 +12,17 @@
   --border-strong: #d8d1c2;
   --border-subtle: #ece6da;
   --text: #221f19;
-  --text-muted: #8b8375;
-  --text-faint: #a09889;
+  /* Phase 10 (WCAG AA): the mockup's #8b8375 / #a09889 fail the 4.5:1 body-text
+     threshold on every panel background (3.2–3.6:1 and 2.4–2.7:1). Both tokens
+     now hold >= 4.5:1 on every surface text renders on — worst case --bg-chrome,
+     5.36:1 / 4.53:1 — with faint at the threshold and muted a visible step
+     darker so the two levels stay distinct. Deliberate mockup deviation. */
+  --text-muted: #655f55;
+  --text-faint: #716a5f;
   --warn: #b8862f;
   --danger: #a84a30;
-  --danger-surface: rgba(168, 74, 48, 0.1);
+  /* Derived from --danger so the two cannot drift (was a literal rgba). */
+  --danger-surface: color-mix(in srgb, var(--danger) 10%, transparent);
   --close: #c8493b;
   --font-display: "Newsreader Variable", "Newsreader", Georgia, "Times New Roman", serif;
   --font-ui: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;

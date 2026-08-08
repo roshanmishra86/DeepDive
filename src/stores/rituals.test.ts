@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { useRitualsStore } from './rituals'
 import { createTestDb } from '../test/nodeDriver'
+import { toDayKey } from '../lib/time'
 import type { SqlDriver } from '../db/driver'
 
 describe('useRitualsStore', () => {
@@ -358,8 +359,8 @@ describe('useRitualsStore', () => {
       expect(rows).toHaveLength(1)
       expect(rows[0].day).toBe(hydratedDay)
 
-      // And nothing was written against today's real UTC/local date instead.
-      const todayKey = new Date().toISOString().split('T')[0]
+      // And nothing was written against today's real local date instead.
+      const todayKey = toDayKey(new Date())
       if (todayKey !== hydratedDay) {
         const wrongDayRows = await driver.select<{ day: string }>(
           'SELECT day FROM ritual_log WHERE ritual_id = ? AND day = ?',

@@ -54,6 +54,10 @@ The mockup is the source of truth for *layout, palette, typography, spacing* —
 fonts: Newsreader (serif display), IBM Plex Sans (UI), IBM Plex Mono (numerals/time)
 ```
 
+> Phase 10 deviation: `--text-muted` and `--text-faint` shipped darkened
+> (`#655f55` / `#716a5f`) to meet WCAG AA — see the Phase 10 section. The
+> values above remain the record of what the mockup specified.
+
 ---
 
 ## 1. Architecture decisions
@@ -1338,13 +1342,90 @@ literal `isResume` edit as a deliberate mutation (5 red — the evidence for cor
   `toISOString().split('T')[0]` as a day key in a fixture — the Phase 3 banned pattern in test code.
   Not user-facing; flagged for the Phase 10 pass.
 
-### Phase 10 — Release
-- [ ] Real app icon set (all sizes, `.ico` + `.png` + `.icns`-optional)
-- [ ] Keyboard shortcuts (space = start/pause, Esc = exit session)
-- [ ] Empty states for every view
-- [ ] Manual QA pass on Linux (WSLg) and Windows
-- [ ] Tag `v0.1.0`, confirm CI publishes NSIS exe + deb + AppImage
-- [ ] Verify installed artifacts launch on clean Windows and Linux
+### Phase 10 — Release *(owner: main session + Haiku sub-agents, verified by Sonnet sub-agent + main session)*
+- [x] Real app icon set — the mark is the app's central motif: a cream 270° progress-ring arc with round caps on the accent-green rounded square. `scripts/generate-icon.py` (PIL, 4× supersampled, deliberately no font dependency) renders `assets/icon.png` (1024²); `tauri icon` regenerates the full set (all PNG sizes + Windows Store logos, `.ico` with 6 embedded sizes, `.icns`). Regeneration proven byte-identical (sha256); the deb's hicolor icons md5-match the set. `public/favicon.svg` is the same geometry as a vector.
+- [x] Keyboard shortcuts — space = start/pause, Esc = exit session. Model below.
+- [x] Empty states for every view — audit found **Archive was the only gap**: a fresh install rendered zeroed headline stats, a dotless calendar and an all-zero histogram — reading as broken, not empty. New `hasAnyRecords()` repo query (the same two sources `dayStatuses` derives from) gates a real empty state ("No recorded days yet" + "Plan today" CTA). Today, Week, Templates, Library, both rails and the music bar were audited and already had real empty states.
+- [x] Manual QA pass on Linux (Chromium + WSLg) — see the QA section. **Windows: not done in this environment** (WSL cannot run Windows binaries); a first-install checklist is provided below for the user's machine.
+- [ ] Tag `v0.1.0`, confirm CI publishes NSIS exe + deb + AppImage — **prepared, deliberately not pushed**: per the user's call this phase lands as a PR and the user pushes the tag after merging. Versions are already aligned (`tauri.conf.json` + `Cargo.toml` = 0.1.0; local artifacts confirmed named `Deep Work_0.1.0_*`). `release.yml` fires on `v*` and publishes a draft release.
+- [x] Verify installed artifacts launch on Linux — local `pnpm tauri build` produced the deb and AppImage; both smoke-tested (below). **Windows artifact**: built by CI at tag time; install-and-launch on a clean machine is the user's step (checklist below).
+
+#### Keyboard shortcut model
+One global `keydown` listener (`useGlobalShortcuts` in `App.tsx`) over pure, node-tested predicates in `src/lib/shortcuts.ts`:
+
+| Key | Fires only when | Action |
+| --- | --- | --- |
+| Space | target is not interactive (input/textarea/select/button/a/contentEditable), not a key repeat, no Ctrl/Meta/Alt held, and no `[role="dialog"]` exists in the DOM | `timer.toggle(activeWorkBlock(blocks, nowMin))` — the same call the widget's Start/Pause button makes, with the clock read at event time |
+| Esc | no `[role="dialog"]` open, and the session overlay is open | `exitSession()` |
+
+Consequences worth recording: the overlay's Phase 9 Escape listener was removed, so there is exactly one Escape path and a dialog's own Escape can never also close the session beneath it; space on a focused button goes through the button's native activation, never double-fired by the global handler. All ten modals carry `role="dialog"`; the overlay deliberately does not — if it did, Esc could never exit it. Considered and accepted: space with focus on the music bar's seek slider (a `role="slider"` div) toggles the timer — space has no slider semantics and the slider's own handler ignores it.
+
+#### WCAG AA resolution (user-approved deviation)
+`--text-muted` `#8b8375` → `#655f55`, `--text-faint` `#a09889` → `#716a5f`. The mockup values failed AA on every panel background (3.18–3.59:1 and 2.42–2.74:1); the new values hold ≥ 4.5:1 on every surface text renders on (worst case `--bg-chrome`: 5.36 / 4.53), recomputed independently by the verifier. Scoped honestly: this sentence covers the tokenized (light) theme — the session overlay's hardcoded dark palette needed its own audit, which the PR #11 review supplied (one failure, `.session-tag`, fixed; see the defect list). `--bg-app` (3.98:1 for faint) carries no text — body background only, fully covered by `.app-shell`. Faint sits at the threshold, muted a deliberate step darker, so the three-level text hierarchy survives. §0's table remains the mockup-extraction record; this paragraph is the shipped truth. `--danger-surface` is now `color-mix(in srgb, var(--danger) 10%, transparent)` — the exact value of the old literal, but unable to drift from it.
+
+#### Deferred items from earlier phases — dispositions
+Fixed here: `RightRail`'s double `taskMeta()` call (now once per row); the banned `toISOString` day-key fixture in `rituals.test.ts` (now `toDayKey`); the two magic `300` template-start literals (now one `DEFAULT_TEMPLATE_START_MIN` in `lib/templates.ts`, imported at both call sites). The Phase 5.6 double `day_block` row mapping was checked and found already consolidated by Phase 7 (one shared `rowToBlock`) — nothing to fix.
+
+Deliberately remaining:
+- **`pomodorosDone` is not rehydrated on relaunch** (Phase 9 candidate). Rehydrating the counter coherently requires rehydrating the whole attachment snapshot — the block may have been edited, completed or deleted, and the day may have rolled over. Completed focus rows are already counted honestly by the archive, so nothing is lost; it is a real feature with real edge cases, not a patch.
+- **`SqlDriver.transaction()` mid-string failure** (Phase 6) can leave a pooled connection mid-transaction; the partial write never commits and a best-effort ROLLBACK is attempted. No cheaper correct fix exists through the plugin (one pooled connection per `execute()` call).
+- **In-flight INSERT race** (Phase 9): closers clear `openSessionId` synchronously, so no wrong-id write is possible; a dropped late row is the worst case. A real fix needs action sequencing — a design decision.
+- **No component-level render tests** (standing exception since Phase 5.5): jsdom costs ~113s on this `/mnt/c` mount. Pure helpers and stores are tested against real SQLite; the render paths were exercised by the browser QA below instead.
+- Carried unchanged from their phases: the archive store's module-scope clock read (inert, correct in every timezone), zero-height histogram bars (an honest zero), `missing` marking only the currently-selected track (detection requires a load attempt), the seed's loop default differing from the mockup's switch position (placeholder data, not a spec), the sub-minimum duration input keeping its raw text (cosmetic).
+
+#### Defects found in verification and fixed
+As in every prior phase, the implementing sub-agents reported all items complete with all gates passing; the gates did pass and could not see any of these.
+- [x] **`hasAnyRecords` disagreed with `dayStatuses` on empty-note rows** (verifier probe). `setDayShutdown` upserts a `day_note` row with the schema-default empty note — reachable on a fresh install by setting a shutdown override before planning anything. `dayStatuses` filters `note != ''` (Phase 7); `hasAnyRecords` didn't, so the empty state was hidden while the calendar stayed dotless — the exact state the feature exists to prevent. Fixed at the query; regression test proven red-then-green (1 failed | 21 passed pre-fix), and the verifier's re-mutation of the fix kills exactly that test.
+- [x] **The empty state flashed on first Archive visit** (verifier). The store started `loading: false, hasRecords: false`, so the first paint rendered "No recorded days yet" even for users with records. The store now starts `loading: true`; the existing `loading && headline === null` gate catches the first paint, and the Phase 7 month-navigation anti-flash behavior is preserved (all five scenarios traced).
+- [x] **A failed `openDatabase()` rendered "Loading archive…" forever** — a symptom change exposed by the loading fix: ArchiveView's mount catch swallowed the error. It now feeds the store's error contract so the error branch renders. The root gap (DB-open errors reach no store; App.tsx's catch is console-only) is pre-existing and recorded here.
+- [x] **The page title was `dwscaffold` and the favicon the Tauri scaffold's purple bolt** — found in the runtime QA pass. Title is "Deep Work"; `favicon.svg` is the ring mark; the unreferenced scaffold `icons.svg` sprite is deleted.
+- [x] **The release binary installed as `/usr/bin/app`** — the scaffold's Cargo package name, caught by the deb smoke test (`Exec=app`, `Icon=app`; Windows would get `app.exe`). Crate renamed `deep-work` / `deep_work_lib`, Cargo.lock regenerated, and the bundle gained publisher/category/description metadata replacing "Maintainer: you" / "A Tauri App". Artifacts rebuilt and re-verified.
+- [x] **The AA pass missed the session overlay** (PR #11 review). The overlay is deliberately untokenized (Phase 2's fixed dark palette), so the token work never touched it — and nobody audited the literals: `.session-tag` was `#7f978d` on `#22332d` = **4.25:1 at 10px**, normal-weight text under the 4.5:1 threshold. The reviewer audited the rest of the overlay and it passes (`#8fa79d` 5.18, `#c7d5cf` 8.77, titles ≈ 12). Fixed with `#859c92` (4.54:1) — the smallest step that passes, keeping the tag visibly dimmer than the meta line's `#8fa79d`, mirroring the faint-at-threshold choice for the light theme. The lesson generalizes the Phase 2 note: "untokenized by design" is not "audited".
+
+#### One verification claim corrected, on evidence
+The verifier reported `check-css-classes.mjs` scans only `src/components/` and so misses `App.tsx`. The script appends `src/App.tsx` and `src/index.css` explicitly. Proven by planting a bogus class in `App.tsx` (gate failed, exit 1, naming the class and file), then restoring by exact string replacement (gate green, diff clean). No gate hole here — and worth recording because a wrong "the gate is blind" claim sends future phases hunting for problems that do not exist.
+
+#### Manual QA (Linux)
+Browser-driven (Playwright/Chromium against `vite dev`). **Caveat, corrected after PR #11 review:** `openDatabase()` returns null outside Tauri, and `hydrate(null)` leaves `hasRecords: false` — so the browser pass exercised the *null-driver fallthrough*, not the `hasAnyRecords() === false` path. The two render identically but are different code paths; the real evidence for the query path is the repo/store tests against real SQLite (`node:sqlite`), including the shutdown-only regression test. Recorded so a future phase does not over-trust browser QA on this.
+- Space starts the timer (25:00 → 24:51, button flips to Pause), Space pauses (holds, "Continue"), Space resumes from a non-interactive focus target.
+- Space with Settings open does NOT toggle the timer (dialog suppression observed live); Esc closes the dialog.
+- Esc with the session overlay open exits the overlay; the overlay's own listener is gone (single path).
+- All five views render their empty states; Archive's "Plan today" CTA navigates to Today. Zero console errors/warnings across the pass.
+- Screenshots in `tmp/qa-phase10/` (gitignored).
+
+Native and artifacts: see the acceptance table.
+
+**Phase 10 acceptance — MET for everything runnable in this environment (independently verified, not taken on the sub-agents' reports):**
+
+| Check | Result |
+| --- | --- |
+| `pnpm lint` | clean, zero warnings (98 files) |
+| `pnpm typecheck` | pass (`tsc -b` + `tsc -p tsconfig.test.json`) |
+| `pnpm test` | 778 tests, 30 files (751 at phase start: +21 shortcuts, +5 archive empty state, +1 verification regression, +1 fixture) |
+| `pnpm check:css` | pass — plus a planted-bogus-class probe in `App.tsx` proving the gate sees it (exit 1, restored clean) |
+| `pnpm build` | pass — 410.3 KB JS / 65.1 KB CSS (gzip 115.9 / 10.0) |
+| `cargo fmt --all -- --check` / `cargo clippy --all-targets -- -D warnings` | pass (crate renamed this phase; both re-run after) |
+| New colour literals in the diff | zero beyond the token redefinitions themselves |
+| Regression tests proven able to fail | pass ×4 — verifier mutations of the space predicate's dialogOpen and interactive-target clauses (each 1 red → restored → green); `hasAnyRecords` shutdown-only test red pre-fix (1 failed \| 21 passed), verifier re-mutation red post-fix; check:css bogus-class probe |
+| Shortcut semantics exercised at runtime | pass — space starts/pauses/resumes; dialog-open space suppressed; Esc closes dialogs and exits the overlay; single Escape path (Chromium QA) |
+| Empty states exercised at runtime | pass, scoped — all five views render them and the Archive CTA navigates, but the browser pass saw the null-driver fallthrough; the `hasAnyRecords() === false` path is evidenced by the node tests against real SQLite, not by the browser run |
+| Icon set | pass — generator reproduces `assets/icon.png` byte-identically (sha256); `.ico` embeds 6 sizes; deb hicolor icons md5-match |
+| Local release build | pass — `tauri build` produced `Deep Work_0.1.0_amd64.deb` (6.9 MB) and `.AppImage` (89.5 MB) in ~37 min on this mount |
+| deb verification | pass — installs `/usr/bin/deep-work` (not `app`), correct deps (libwebkit2gtk-4.1-0, libgtk-3-0), real maintainer/description, desktop file, bundled icon byte-identical |
+| Release binary on WSLg | **process health** — extracted deb binary healthy 1m45s, 187 MB RSS, zero panics/app errors (only the known WSLg libEGL/MESA/gdk_seat noise); opened the existing migrated DB without error. No screenshot — no capture tool on WSLg, sudo unavailable |
+| AppImage on WSLg | **process health** — runs directly (FUSE works on this WSL2), healthy, clean log |
+| `pnpm tauri dev` | skipped this phase — superseded by the release-binary run above, which is the stronger signal |
+| Windows QA + artifact launch | **not done — cannot run Windows binaries in WSL.** Handoff checklist above; the user's machine is the first clean Windows install |
+| Tag `v0.1.0` + CI release | prepared, not pushed — user pushes the tag after merging the PR (their call); versions already aligned |
+
+#### Windows QA — handoff checklist (user's machine, after CI builds at tag time)
+Not runnable in this WSL environment. On the first clean Windows install from the NSIS exe:
+1. Installer completes without admin (currentUser mode); offers the WebView2 bootstrapper if missing.
+2. App launches with the ring icon (installer + taskbar), window title "Deep Work", binary `deep-work.exe`.
+3. Space starts/pauses the timer; Esc exits the full-session overlay; neither fires while typing.
+4. Resize edges and Windows snap layouts work with the custom title bar (`decorations: false` — the §4 risk).
+5. Load an mp3, play it (WebView2 decode path), restart the app, confirm the library persisted.
+6. Plan a block, run a pomodoro to completion, confirm Archive shows the day.
 
 ---
 

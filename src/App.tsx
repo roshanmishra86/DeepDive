@@ -10,6 +10,8 @@ import { usePlayerStore } from './stores/player'
 import { openDatabase } from './db/index'
 import { applyAccent } from './lib/accents'
 import { toDayKey } from './lib/time'
+import { activeWorkBlock } from './lib/timer'
+import { spaceTogglesTimer, escapeExitsSession } from './lib/shortcuts'
 import { TitleBar } from './components/chrome/TitleBar'
 import { Sidebar } from './components/chrome/Sidebar'
 import { RightRail } from './components/chrome/RightRail'
@@ -29,6 +31,55 @@ const VIEWS = {
   archive: ArchiveView,
   library: LibraryView,
 } as const
+
+/**
+ * Owns the app's single global keydown listener. Space toggles the pomodoro
+ * timer (suppressed on interactive targets, held-key repeats, modifier
+ * chords, and while any `[role="dialog"]` modal is open); Escape exits the
+ * full-session overlay (suppressed while a dialog is open, since dialogs
+ * handle their own Escape). All branch logic lives in the pure, node-tested
+ * predicates in `lib/shortcuts.ts`; this hook only extracts the structs from
+ * the real event and dispatches.
+ */
+function useGlobalShortcuts() {
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      const el = e.target as HTMLElement | null
+      const target =
+        el && typeof el.tagName === 'string'
+          ? { tagName: el.tagName, isContentEditable: el.isContentEditable }
+          : null
+      const dialogOpen = document.querySelector('[role="dialog"]') !== null
+
+      if (
+        spaceTogglesTimer(
+          {
+            key: e.key,
+            repeat: e.repeat,
+            ctrlKey: e.ctrlKey,
+            metaKey: e.metaKey,
+            altKey: e.altKey,
+          },
+          target,
+          dialogOpen
+        )
+      ) {
+        e.preventDefault()
+        const now = new Date()
+        const nowMin = now.getHours() * 60 + now.getMinutes()
+        const candidate = activeWorkBlock(useTodayStore.getState().blocks, nowMin)
+        void useTimerStore.getState().toggle(candidate)
+        return
+      }
+
+      if (e.key === 'Escape' && escapeExitsSession(dialogOpen, useAppStore.getState().sessionOpen)) {
+        useAppStore.getState().exitSession()
+      }
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [])
+}
 
 function App() {
   const view = useAppStore((s) => s.view)
@@ -75,6 +126,8 @@ function App() {
     const id = window.setInterval(() => useTimerStore.getState().tick(), 500)
     return () => window.clearInterval(id)
   }, [])
+
+  useGlobalShortcuts()
 
   const ActiveView = VIEWS[view]
 

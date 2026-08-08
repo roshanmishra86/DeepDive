@@ -21,7 +21,8 @@ const RING_C = 829.4 // 2π · 132
  * Full-session overlay (dark focus mode). Shows the attached block (or, while
  * the cycle is still fresh, a preview of the currently-active block), the
  * countdown ring, the session tag, and a bottom row with the in-session
- * music chip and the next-block hint. Escape exits the session.
+ * music chip and the next-block hint. Escape exits the session via the
+ * global shortcut layer in App.tsx (single Escape path; not handled here).
  */
 export function SessionOverlay() {
   const exitSession = useAppStore((s) => s.exitSession)
@@ -59,14 +60,6 @@ export function SessionOverlay() {
     }, 30000)
     return () => window.clearInterval(id)
   }, [])
-
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') exitSession()
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [exitSession])
 
   const activeBlock = activeWorkBlock(blocks, nowMin)
   const fresh = isFreshCycle({ phase, running, remainingSec, totalSec, pomodorosDone })

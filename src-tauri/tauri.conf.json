@@ -34,6 +34,10 @@
   "bundle": {
     "active": true,
     "targets": ["nsis", "deb", "appimage"],
+    "publisher": "roshanmishra86",
+    "category": "Productivity",
+    "shortDescription": "A desktop app for managing deep work sessions",
+    "longDescription": "Deep Work is a desktop app for planning distraction-free work days: a proportional block timeline, pomodoro timer with a full-session focus mode, day templates, an archive of what actually landed, and a local sound library.",
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
