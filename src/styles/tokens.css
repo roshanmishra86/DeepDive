@@ -13,10 +13,10 @@
   --border-subtle: #ece6da;
   --text: #221f19;
   /* Phase 10 (WCAG AA): the mockup's #8b8375 / #a09889 fail the 4.5:1 body-text
-     threshold on every panel background (3.2–3.6:1 and 2.4–2.7:1). Darkened to
-     the lightest values that hold >= 4.5:1 on --bg-chrome, the darkest surface
-     secondary text renders on: 5.36:1 and 4.53:1 worst case, higher elsewhere.
-     Deliberate deviation from the mockup palette; the muted/faint step is kept. */
+     threshold on every panel background (3.2–3.6:1 and 2.4–2.7:1). Both tokens
+     now hold >= 4.5:1 on every surface text renders on — worst case --bg-chrome,
+     5.36:1 / 4.53:1 — with faint at the threshold and muted a visible step
+     darker so the two levels stay distinct. Deliberate mockup deviation. */
   --text-muted: #655f55;
   --text-faint: #716a5f;
   --warn: #b8862f;

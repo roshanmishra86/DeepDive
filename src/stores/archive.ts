@@ -62,7 +62,10 @@ export const useArchiveStore = create<ArchiveState>()((set, get) => ({
   headline: null,
   trend: [],
   hasRecords: false,
-  loading: false,
+  // Starts true: the view always hydrates on mount, and starting false would
+  // let the first paint fall through to the empty-state branch ("No recorded
+  // days yet") for users WITH records, one effect-cycle before hydrate runs.
+  loading: true,
   error: null,
 
   hydrate: async (driver, today) => {

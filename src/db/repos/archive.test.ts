@@ -416,6 +416,16 @@ describe('archive repository', () => {
     expect(await archive.hasAnyRecords(driver)).toBe(true)
   })
 
+  it('hasAnyRecords is false for a shutdown-only day_note row (empty note)', async () => {
+    // setDayShutdown upserts a row with the schema-default empty note.
+    // dayStatuses filters those out (note != ''), so such a DB renders a
+    // dotless calendar; hasAnyRecords must agree, or the empty state is
+    // hidden while the archive still reads as broken. Reachable on a fresh
+    // install: set a shutdown override before ever planning a block.
+    await notes.setDayShutdown(driver, '2026-08-17', 1080)
+    expect(await archive.hasAnyRecords(driver)).toBe(false)
+  })
+
   it('dayRecord.pomodoros counts only the day\'s completed focus sessions', async () => {
     const day = '2026-08-10'
     const otherDay = '2026-08-11'
