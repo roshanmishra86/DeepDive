@@ -1,10 +1,14 @@
 import { describe, it, expect } from 'vitest'
 import {
+  AUDIO_EXTENSIONS,
+  AUDIO_EXTENSIONS_LABEL,
   CATEGORIES,
+  audioFilePaths,
   defaultCategory,
   formatClockSec,
   fileNameFromPath,
   displayNameFromPath,
+  isSrcFailure,
   trackMeta,
   nextTrackId,
 } from './library'
@@ -138,5 +142,54 @@ describe('categories', () => {
   it('offers a stable category list containing the default', () => {
     expect(CATEGORIES).toContain(defaultCategory())
     expect(new Set(CATEGORIES).size).toBe(CATEGORIES.length)
+  })
+})
+
+describe('audioFilePaths', () => {
+  it('keeps only accepted audio extensions', () => {
+    expect(
+      audioFilePaths([
+        '/music/rain.mp3',
+        '/music/notes.txt',
+        '/music/cover.png',
+        'C:\\Music\\cello.FLAC',
+        '/music/tone.WAV',
+      ])
+    ).toEqual(['/music/rain.mp3', 'C:\\Music\\cello.FLAC', '/music/tone.WAV'])
+  })
+
+  it('rejects extensionless and dotfile names', () => {
+    expect(audioFilePaths(['/music/README', '/music/.mp3'])).toEqual([])
+  })
+
+  it('accepts every extension the picker offers, and the label lists them all', () => {
+    for (const ext of AUDIO_EXTENSIONS) {
+      expect(audioFilePaths([`/x/track.${ext}`])).toHaveLength(1)
+      expect(AUDIO_EXTENSIONS_LABEL).toContain(ext)
+    }
+  })
+})
+
+describe('isSrcFailure', () => {
+  it('treats autoplay-policy rejections as NOT a source failure', () => {
+    expect(isSrcFailure('NotAllowedError', null)).toBe(false)
+    // Even a MediaError code does not override an explicit autoplay cause.
+    expect(isSrcFailure('NotAllowedError', 4)).toBe(false)
+  })
+
+  it('treats NotSupportedError as a source failure', () => {
+    expect(isSrcFailure('NotSupportedError', null)).toBe(true)
+  })
+
+  it('reads the MediaError code when present: 2 and 4 fail, 1 and 3 do not', () => {
+    expect(isSrcFailure(undefined, 2)).toBe(true) // NETWORK
+    expect(isSrcFailure(undefined, 4)).toBe(true) // SRC_NOT_SUPPORTED
+    expect(isSrcFailure(undefined, 1)).toBe(false) // ABORTED
+    expect(isSrcFailure(undefined, 3)).toBe(false) // DECODE — ambiguous; the element's error event is authoritative
+  })
+
+  it('defaults unknown causes to NOT a source failure', () => {
+    expect(isSrcFailure(undefined, null)).toBe(false)
+    expect(isSrcFailure('AbortError', null)).toBe(false)
   })
 })

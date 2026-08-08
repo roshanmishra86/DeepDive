@@ -4,16 +4,18 @@ import type { SqlDriver } from '../db/driver'
 import type { Track } from '../db/types'
 import * as settingsRepo from '../db/repos/settings'
 import { isTauri } from '../lib/platform'
-import { nextTrackId, trackMeta as describeTrack } from '../lib/library'
+import { isSrcFailure, nextTrackId, trackMeta as describeTrack } from '../lib/library'
 import { useLibraryStore } from './library'
 
 /**
  * Playback store driving the music bar. Plays against ONE lazily-created
  * HTMLAudioElement; position/duration flow from the element's own events
  * (`timeupdate`/`durationchange`/`ended`/`error`), never from a polling
- * timer. A missing file is detected by the element's `error` event or a
- * rejected `play()` — the fs plugin cannot stat arbitrary absolute paths,
- * so no pre-flight existence check is possible.
+ * timer. A missing file is detected by the element's `error` event, or by a
+ * rejected `play()` whose cause points at the source (`isSrcFailure`) — an
+ * autoplay-policy rejection is not a missing file. The fs plugin cannot
+ * stat arbitrary absolute paths, so no pre-flight existence check is
+ * possible.
  *
  * The element is injectable for tests (`injectAudioElementForTests`) because
  * node has no `Audio` constructor.
@@ -129,6 +131,23 @@ export function injectAudioElementForTests(fake: HTMLAudioElement | null): void 
   audio = fake === null ? null : wireAudio(fake)
 }
 
+/**
+ * Routes a rejected `play()` by cause. Only a genuine source failure marks
+ * the track missing; an autoplay-policy (or unknown) rejection just means
+ * playback did not start, so the track stays selectable and a later
+ * user-gesture play can succeed. Never rethrows — no mutator in this app
+ * rejects.
+ */
+function handlePlayRejection(el: HTMLAudioElement, err: unknown) {
+  const errName = err instanceof DOMException ? err.name : undefined
+  const mediaErrorCode = el.error ? el.error.code : null
+  if (isSrcFailure(errName, mediaErrorCode)) {
+    usePlayerStore.getState().markMissing()
+  } else {
+    usePlayerStore.setState({ playing: false })
+  }
+}
+
 function handleEnded() {
   // `ended` only fires when `loop` is false. Advance to the next track if
   // one exists, else stop. A single-track list wraps to itself, which is
@@ -189,15 +208,18 @@ export const usePlayerStore = create<PlayerState>()((set, get) => ({
     // rather than crashing (unreachable in practice: no tracks exist
     // without the database, which only exists inside Tauri).
     el.src = isTauri() ? convertFileSrc(track.path) : track.path
-    el.currentTime = 0
+    // No `el.currentTime = 0` here: assigning src already resets the
+    // position, and setting currentTime at HAVE_NOTHING is exactly where
+    // WebKit historically threw InvalidStateError — outside the try below,
+    // that would escape the action and silently never start playback.
     const target = get().volume / 100
     el.volume = fadeInSec > 0 ? 0 : target
     try {
       await el.play()
       set({ playing: true })
       startFadeIn(el, target, fadeInSec)
-    } catch {
-      get().markMissing()
+    } catch (err) {
+      handlePlayRejection(el, err)
     }
   },
 
@@ -216,8 +238,8 @@ export const usePlayerStore = create<PlayerState>()((set, get) => ({
       el.volume = get().volume / 100
       await el.play()
       set({ playing: true })
-    } catch {
-      get().markMissing()
+    } catch (err) {
+      handlePlayRejection(el, err)
     }
   },
 

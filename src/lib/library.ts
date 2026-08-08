@@ -9,6 +9,45 @@ import type { Track } from '../db/types'
 /** Categories offered by the per-track category control. */
 export const CATEGORIES = ['ambient', 'binaural', 'classical', 'noise', 'other'] as const
 
+/** Extensions the file picker and drag-drop both accept. */
+export const AUDIO_EXTENSIONS = ['mp3', 'wav', 'flac', 'ogg', 'm4a'] as const
+
+/** Human-readable form of AUDIO_EXTENSIONS for empty-state and drop-zone copy. */
+export const AUDIO_EXTENSIONS_LABEL = 'mp3, wav, flac, ogg or m4a'
+
+/**
+ * The subset of `paths` whose extension is an accepted audio type.
+ * Case-insensitive; tolerates both `/` and `\` separators.
+ */
+export function audioFilePaths(paths: readonly string[]): string[] {
+  return paths.filter((p) => {
+    const file = fileNameFromPath(p)
+    const dot = file.lastIndexOf('.')
+    if (dot <= 0) return false
+    const ext = file.slice(dot + 1).toLowerCase()
+    return (AUDIO_EXTENSIONS as readonly string[]).includes(ext)
+  })
+}
+
+/**
+ * Decides whether a rejected `play()` means the source file is unusable.
+ * An autoplay-policy rejection (`NotAllowedError`) says nothing about the
+ * file — it fires without a user gesture even for a perfectly good file,
+ * e.g. on auto-advance from `ended`. A genuine source failure shows up as
+ * `NotSupportedError` or a MediaError with code NETWORK (2) or
+ * SRC_NOT_SUPPORTED (4). Anything unknown defaults to NOT missing: the
+ * element's own `error` event is the authoritative missing signal, and a
+ * false "File not found" on a healthy file is the worse failure.
+ */
+export function isSrcFailure(
+  errName: string | undefined,
+  mediaErrorCode: number | null
+): boolean {
+  if (errName === 'NotAllowedError') return false
+  if (mediaErrorCode !== null) return mediaErrorCode === 2 || mediaErrorCode === 4
+  return errName === 'NotSupportedError'
+}
+
 /** Category assigned to a freshly loaded track. */
 export function defaultCategory(): string {
   return 'other'

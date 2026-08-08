@@ -22,6 +22,8 @@ class FakeAudioElement {
   paused = true
   preload = ''
   playRejects = false
+  playRejectName = 'NotSupportedError'
+  error: { code: number } | null = null
   private listeners = new Map<string, Set<Listener>>()
 
   addEventListener(type: string, fn: Listener) {
@@ -38,7 +40,11 @@ class FakeAudioElement {
   }
 
   play(): Promise<void> {
-    if (this.playRejects) return Promise.reject(new Error('NotSupportedError'))
+    // A real rejection is a DOMException whose `name` carries the cause
+    // (NotAllowedError = autoplay policy, NotSupportedError = bad source).
+    if (this.playRejects) {
+      return Promise.reject(new DOMException('play failed', this.playRejectName))
+    }
     this.paused = false
     return Promise.resolve()
   }
@@ -270,6 +276,37 @@ describe('player store', () => {
     const state = usePlayerStore.getState()
     expect(state.missing).toBe(true)
     expect(state.playing).toBe(false)
+  })
+
+  it('an autoplay-policy rejection does NOT mark the track missing', async () => {
+    // NotAllowedError fires without a user gesture even for a healthy file
+    // (e.g. auto-advance from `ended`). Labelling that "File not found"
+    // accuses a good file.
+    fake.playRejects = true
+    fake.playRejectName = 'NotAllowedError'
+    await usePlayerStore.getState().playTrack(makeTrack(1))
+
+    const state = usePlayerStore.getState()
+    expect(state.trackId).toBe(1)
+    expect(state.missing).toBe(false)
+    expect(state.playing).toBe(false)
+  })
+
+  it('a rejection with MediaError code 4 marks missing even for an unknown error name', async () => {
+    fake.playRejects = true
+    fake.playRejectName = 'AbortError' // not a name isSrcFailure recognises
+    fake.error = { code: 4 } // MEDIA_ERR_SRC_NOT_SUPPORTED
+    await usePlayerStore.getState().playTrack(makeTrack(1))
+    expect(usePlayerStore.getState().missing).toBe(true)
+  })
+
+  it('a rejection with MediaError code 1 (aborted) does not mark missing', async () => {
+    fake.playRejects = true
+    fake.playRejectName = 'AbortError'
+    fake.error = { code: 1 } // MEDIA_ERR_ABORTED — the load was interrupted, not bad
+    await usePlayerStore.getState().playTrack(makeTrack(1))
+    expect(usePlayerStore.getState().missing).toBe(false)
+    expect(usePlayerStore.getState().playing).toBe(false)
   })
 
   it('an element error event marks the track missing', async () => {

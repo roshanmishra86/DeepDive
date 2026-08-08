@@ -1,14 +1,18 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { open } from '@tauri-apps/plugin-dialog'
 import { convertFileSrc } from '@tauri-apps/api/core'
+import { getCurrentWindow } from '@tauri-apps/api/window'
 import { UploadSimple } from '@phosphor-icons/react/dist/csr/UploadSimple'
 import { useLibraryStore } from '../../stores/library'
 import { isTauri } from '../../lib/platform'
-import { fileNameFromPath } from '../../lib/library'
+import {
+  AUDIO_EXTENSIONS,
+  AUDIO_EXTENSIONS_LABEL,
+  audioFilePaths,
+  fileNameFromPath,
+} from '../../lib/library'
 import { TrackCard } from '../library/TrackCard'
 import { ToggleSwitch } from '../library/ToggleSwitch'
-
-const AUDIO_EXTENSIONS = ['mp3', 'wav', 'flac', 'ogg', 'm4a']
 
 /**
  * Reads a file's duration by loading metadata on a throwaway audio element.
@@ -58,6 +62,55 @@ export function LibraryView() {
 
   const [notice, setNotice] = useState<string | null>(null)
   const [lastLoadedName, setLastLoadedName] = useState<string | null>(null)
+  const [dragHover, setDragHover] = useState(false)
+
+  const handleDropPaths = async (paths: string[]) => {
+    const audioPaths = audioFilePaths(paths)
+    if (audioPaths.length === 0) {
+      setNotice(`Only audio files (${AUDIO_EXTENSIONS_LABEL}) can be loaded.`)
+      return
+    }
+    for (const path of audioPaths) {
+      const durationSec = await readAudioDurationSec(path)
+      const id = await registerTrack(path, durationSec)
+      if (id !== null) {
+        setLastLoadedName(fileNameFromPath(path))
+        setNotice(null)
+      }
+    }
+  }
+
+  // OS drag-drop onto the webview. Tauri emits drag-drop events through the
+  // window listener (dragDropEnabled defaults to true); outside Tauri there
+  // is no drop source, so no listener is attached and the drop-zone remains
+  // click-only. The drop-zone copy promises dropping, so it must be real.
+  useEffect(() => {
+    if (!isTauri()) return
+    let unlisten: (() => void) | undefined
+    let cancelled = false
+    void getCurrentWindow()
+      .onDragDropEvent((event) => {
+        const payload = event.payload
+        if (payload.type === 'enter' || payload.type === 'over') {
+          setDragHover(true)
+        } else if (payload.type === 'leave') {
+          setDragHover(false)
+        } else if (payload.type === 'drop') {
+          setDragHover(false)
+          void handleDropPaths(payload.paths)
+        }
+      })
+      .then((fn) => {
+        // The effect may have been cleaned up while the promise was in flight.
+        if (cancelled) fn()
+        else unlisten = fn
+      })
+    return () => {
+      cancelled = true
+      unlisten?.()
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   const handlePick = async () => {
     if (!isTauri()) {
@@ -69,7 +122,7 @@ export function LibraryView() {
     try {
       const selected = await open({
         multiple: false,
-        filters: [{ name: 'Audio', extensions: AUDIO_EXTENSIONS }],
+        filters: [{ name: 'Audio', extensions: [...AUDIO_EXTENSIONS] }],
       })
       if (typeof selected !== 'string' || selected === '') return // cancelled
       const durationSec = await readAudioDurationSec(selected)
@@ -146,10 +199,14 @@ export function LibraryView() {
           </div>
         )}
 
-        <button type="button" className="lib-dropzone" onClick={() => void handlePick()}>
-          <span className="lib-dropzone-title">Drop an .mp3 here</span>
+        <button
+          type="button"
+          className={dragHover ? 'lib-dropzone lib-dropzone-hover' : 'lib-dropzone'}
+          onClick={() => void handlePick()}
+        >
+          <span className="lib-dropzone-title">Drop an .mp3 here, or click to choose</span>
           <span className="lib-dropzone-sub">
-            {lastLoadedName ?? 'No file loaded yet — mp3, wav or flac'}
+            {lastLoadedName ?? `No file loaded yet — ${AUDIO_EXTENSIONS_LABEL}`}
           </span>
         </button>
 
@@ -157,8 +214,8 @@ export function LibraryView() {
           <div className="view-empty">
             <div className="view-empty-title">No tracks yet</div>
             <div className="view-empty-text">
-              Load an mp3, wav or flac from disk — the file stays where it is; the library keeps
-              the path.
+              Load an audio file from disk ({AUDIO_EXTENSIONS_LABEL}) — the file stays where it
+              is; the library keeps the path.
             </div>
           </div>
         ) : (

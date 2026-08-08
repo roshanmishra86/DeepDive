@@ -145,9 +145,16 @@ export const useLibraryStore = create<LibraryState>()((set, get) => ({
   },
 
   setCategory: async (id, category) => {
+    // Same no-driver contract as registerTrack/removeTrack: track-data
+    // mutations bail with an error rather than silently keeping an
+    // in-memory-only change. (The session-default toggles below degrade to
+    // in-memory instead, matching the app store's settings handling.)
+    if (!persistenceDriver) {
+      set({ error: 'Editing tracks requires the desktop app.' })
+      return false
+    }
     const prev = get().tracks
     set({ tracks: prev.map((t) => (t.id === id ? { ...t, category } : t)), error: null })
-    if (!persistenceDriver) return true
     try {
       await tracksRepo.updateTrack(persistenceDriver, id, { category })
       // Re-list: changing the category changes the ORDER BY position.

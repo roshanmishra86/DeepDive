@@ -161,6 +161,26 @@ describe('library store', () => {
     expect(usePlayerStore.getState().trackId).toBe(keepId)
   })
 
+  it('setCategory without a driver bails with an error instead of keeping an in-memory-only change', async () => {
+    // No hydrate(driver): no persistence driver, no tracks. Same contract
+    // as registerTrack/removeTrack for the same condition.
+    useLibraryStore.setState({
+      tracks: [
+        { id: 1, path: '/music/rain.mp3', displayName: 'rain', category: 'other', durationSec: 60 },
+      ],
+    })
+
+    const ok = await useLibraryStore.getState().setCategory(1, 'binaural')
+
+    expect(ok).toBe(false)
+    // The exact message matters: without the explicit no-driver bail the
+    // call falls into a TypeError on the null driver, which the catch
+    // converts into the same observable shape for the wrong reason. Only
+    // the bail produces this string.
+    expect(useLibraryStore.getState().error).toBe('Editing tracks requires the desktop app.')
+    expect(useLibraryStore.getState().tracks[0].category).toBe('other')
+  })
+
   it('setCategory persists and re-lists in repo order', async () => {
     await useLibraryStore.getState().hydrate(driver)
     const id = (await useLibraryStore.getState().registerTrack('/music/rain.mp3', 60)) as number
