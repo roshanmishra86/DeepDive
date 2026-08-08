@@ -4,6 +4,7 @@ import type { SqlDriver } from '../driver'
 import * as archive from './archive'
 import * as blocks from './blocks'
 import * as notes from './notes'
+import * as sessions from './sessions'
 
 describe('archive repository', () => {
   let driver: SqlDriver
@@ -387,6 +388,112 @@ describe('archive repository', () => {
     const day = '2026-08-20'
     const record = await archive.dayRecord(driver, day)
     expect(record).toBeNull()
+  })
+
+  it('dayRecord.pomodoros counts only the day\'s completed focus sessions', async () => {
+    const day = '2026-08-10'
+    const otherDay = '2026-08-11'
+
+    const blockId = await blocks.createBlock(driver, {
+      day,
+      title: 'Deep work',
+      kind: 'deep',
+      startMin: 300,
+      durationMin: 90,
+      pomodoros: 3, // planned — must NOT inflate the record
+    })
+    const otherBlockId = await blocks.createBlock(driver, {
+      day: otherDay,
+      title: 'Other day',
+      kind: 'deep',
+      startMin: 300,
+      durationMin: 90,
+    })
+
+    // Two completed focus sessions on the day: count = 2.
+    const f1 = await sessions.startSession(driver, {
+      blockId,
+      phase: 'focus',
+      startedAt: '2026-08-10T05:30:00.000Z',
+    })
+    await sessions.finishSession(driver, f1, {
+      endedAt: '2026-08-10T05:55:00.000Z',
+      completed: true,
+    })
+    const f2 = await sessions.startSession(driver, {
+      blockId,
+      phase: 'focus',
+      startedAt: '2026-08-10T06:00:00.000Z',
+    })
+    await sessions.finishSession(driver, f2, {
+      endedAt: '2026-08-10T06:25:00.000Z',
+      completed: true,
+    })
+
+    // A completed REST row on the day: not a pomodoro.
+    const r1 = await sessions.startSession(driver, {
+      blockId,
+      phase: 'rest',
+      startedAt: '2026-08-10T05:55:00.000Z',
+    })
+    await sessions.finishSession(driver, r1, {
+      endedAt: '2026-08-10T06:00:00.000Z',
+      completed: true,
+    })
+
+    // An abandoned focus row on the day: not completed, does not count.
+    const f3 = await sessions.startSession(driver, {
+      blockId,
+      phase: 'focus',
+      startedAt: '2026-08-10T06:30:00.000Z',
+    })
+    await sessions.finishSession(driver, f3, {
+      endedAt: '2026-08-10T06:40:00.000Z',
+      completed: false,
+    })
+
+    // A completed focus row on ANOTHER day: does not count.
+    const f4 = await sessions.startSession(driver, {
+      blockId: otherBlockId,
+      phase: 'focus',
+      startedAt: '2026-08-11T05:30:00.000Z',
+    })
+    await sessions.finishSession(driver, f4, {
+      endedAt: '2026-08-11T05:55:00.000Z',
+      completed: true,
+    })
+
+    // An unattached completed focus row (block_id NULL): joins to no day.
+    const f5 = await sessions.startSession(driver, {
+      blockId: null,
+      phase: 'focus',
+      startedAt: '2026-08-10T07:00:00.000Z',
+    })
+    await sessions.finishSession(driver, f5, {
+      endedAt: '2026-08-10T07:25:00.000Z',
+      completed: true,
+    })
+
+    const record = await archive.dayRecord(driver, day)
+    expect(record?.pomodoros).toBe(2)
+
+    const otherRecord = await archive.dayRecord(driver, otherDay)
+    expect(otherRecord?.pomodoros).toBe(1)
+  })
+
+  it('dayRecord.pomodoros is 0 on a miss day that had planned pomodoros', async () => {
+    const day = '2026-08-12'
+    await blocks.createBlock(driver, {
+      day,
+      title: 'Never ran',
+      kind: 'deep',
+      startMin: 300,
+      durationMin: 90,
+      pomodoros: 3,
+    })
+    const record = await archive.dayRecord(driver, day)
+    expect(record?.status).toBe('miss')
+    expect(record?.pomodoros).toBe(0)
   })
 
   it('dayRecord orders blocks by sortBlocks (startMin, then sort)', async () => {

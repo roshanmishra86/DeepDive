@@ -17,6 +17,7 @@ export interface DayRecord {
   blockCount: number
   completedCount: number
   deepMin: number
+  /** Completed focus sessions on the day's blocks — what actually happened. */
   pomodoros: number
   note: string
   blocks: DayBlock[]
@@ -84,13 +85,11 @@ export async function dayRecord(driver: SqlDriver, day: string): Promise<DayReco
     blockCount: number
     completedCount: number | null
     deepMin: number
-    pomodoros: number
   }>(
     `SELECT
        COUNT(db.id) as blockCount,
        SUM(CASE WHEN db.completed = 1 THEN 1 ELSE 0 END) as completedCount,
-       COALESCE(SUM(CASE WHEN db.kind = 'deep' AND db.completed = 1 THEN db.duration_min ELSE 0 END), 0) as deepMin,
-       COALESCE(SUM(db.pomodoros), 0) as pomodoros
+       COALESCE(SUM(CASE WHEN db.kind = 'deep' AND db.completed = 1 THEN db.duration_min ELSE 0 END), 0) as deepMin
      FROM day_block db
      WHERE db.day = ?`,
     [day]
@@ -99,6 +98,23 @@ export async function dayRecord(driver: SqlDriver, day: string): Promise<DayReco
   const stats = rows[0]
   const blockCount = stats.blockCount
   const completedCount = stats.completedCount ?? 0
+
+  // The "Pomodoros" figure is a record of what happened — completed focus
+  // sessions — not the sum of PLANNED pomodoros on the day's blocks (which
+  // counts pomodoros for blocks that never ran; the mockup shows poms: 0 on
+  // miss days that had planned blocks). Kept as a SEPARATE scalar query:
+  // joining pomodoro_session into the stats query above would fan out the
+  // COUNT/SUM (one row per session per block), a bug class this project has
+  // hit. Unattached sessions (block_id NULL) join to no day and are counted
+  // nowhere.
+  const pomodoroRows = await driver.select<{ pomodoros: number }>(
+    `SELECT COUNT(*) as pomodoros
+     FROM pomodoro_session ps
+     JOIN day_block db ON ps.block_id = db.id
+     WHERE db.day = ? AND ps.phase = 'focus' AND ps.completed = 1`,
+    [day]
+  )
+  const pomodoros = pomodoroRows[0]?.pomodoros ?? 0
 
   // Fetch the shut-down note — it may exist even if there are no blocks
   const noteRows = await driver.select<{ note: string }>(
@@ -137,7 +153,7 @@ export async function dayRecord(driver: SqlDriver, day: string): Promise<DayReco
     blockCount: stats.blockCount,
     completedCount,
     deepMin: stats.deepMin,
-    pomodoros: stats.pomodoros,
+    pomodoros,
     note,
     blocks,
   }
