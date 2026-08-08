@@ -1429,6 +1429,88 @@ Not runnable in this WSL environment. On the first clean Windows install from th
 
 ---
 
+### Phase 11 — Persistence and interaction hardening *(owner: coding agent; independently verified)*
+
+> **Audit verdict:** only the work below should be carried forward. This is the authoritative
+> implementation list for Phase 11; the older unchecked bullets remain where they were written as
+> historical review notes and must not be treated as a second backlog. The static mock-up adds no
+> missing view or workflow beyond Phases 0–10.
+>
+> **Mock-up source caveat:** Phase 5.6 cites `Deep Work.dc.html` lines 809–908 as the composer,
+> but in the current ignored file that range is the full-session overlay and no composer modal is
+> present. Unless a second Claude Design export is supplied, preserve the implemented composer and
+> use the behavioural rules recorded in Phases 5.5–5.6; do not infer a redesign from the wrong range.
+
+#### Required work, in dependency order
+
+- [ ] **P0 — Make template mutations genuinely atomic on the production Tauri path.** Retire the
+  current `BEGIN; …; COMMIT` multi-statement fallback that can strand a pooled SQLite connection in
+  an open transaction after a middle statement fails. Use a design that owns one connection for the
+  entire operation (for example, a narrow Rust command) or reduce each affected mutation to one
+  atomic SQLite statement. Do **not** split `BEGIN`, writes and `COMMIT` across plugin `execute()`
+  calls: the pool can route them to different connections. Preserve rollback semantics for template
+  reorder, block edit/reorder and delete/reorder, and prove a forced middle failure leaves both the
+  data and the next database operation correct. The proof must exercise the implementation that
+  ships; the existing mocked `Database.load` test alone is not sufficient.
+
+- [ ] **P0 — Sequence Pomodoro persistence so a late INSERT cannot be lost.** Replace the
+  fire-and-forget session-start race with an explicit ordering or generation model. If `rest`,
+  `reset`, completion, or a subsequent start occurs while `startSession()` is pending, the inserted
+  row must be associated with that exact phase run and then completed/abandoned correctly; an old
+  promise must never publish its id into a newer run. Preserve synchronous UI responsiveness and the
+  P2-A no-rejected-action contract. Add deterministic deferred-promise tests for rapid
+  start→reset, start→rest, start→tick-to-zero and start→start sequences, plus SQLite read-backs
+  proving there is exactly one correctly-finalised row per phase run.
+
+- [ ] **P1 — Rehydrate coherent per-block Pomodoro progress after relaunch.** Restore
+  `pomodorosDone` from completed **focus** rows for the attached block, rather than from a global or
+  day-wide count. Rehydrate or attach from the current database block so edits, deletion and local-day
+  rollover cannot revive a stale snapshot. Do not resume an interrupted countdown and do not count
+  rest, incomplete, unattached or another block's rows. Define and test behaviour when the restored
+  count meets or exceeds the block target, when no work block is active, and when the recorded block
+  was deleted. Archive totals must remain unchanged.
+
+- [ ] **P1 — Add focused render-level regression coverage for the previously untested surfaces.**
+  Consolidate the repeated Phase 5.5–9 test gaps into a small set of user-flow tests covering:
+  composer create/edit/delete and duration validation; template apply confirmation; Archive
+  loading/empty/populated/error states; Library missing-file and transport states; and Pomodoro
+  widget/full-session phase, counter and exit states. Use one fast DOM/browser setup rather than
+  changing the whole Vitest suite from `node`; the fix must not reintroduce the ~113-second per-file
+  jsdom startup observed on this `/mnt/c` mount. Assert rendered behaviour and accessible controls,
+  not component implementation details.
+
+- [ ] **P2 — Make the composer duration field agree with the value that will be saved.** A deep or
+  shallow value below 30 minutes must not remain visibly `5` while the draft silently contains 30.
+  Normalize the visible input or show validation and block submission; preserve the valid 5-minute
+  minimum for break and ritual blocks, free-form values such as `1h30`, and the existing duration
+  presets. Cover keyboard submission, blur, kind changes and edit mode.
+
+#### Explicitly not Phase 11 work
+
+- Already resolved in Phase 10: muted/faint contrast, `RightRail`'s duplicate `taskMeta()` call,
+  the duplicate `day_block` row mapper, `--danger-surface`, and the UTC day-key test fixture.
+- Accepted as correct or intentional: the Archive store's inert module-scope initial date, honest
+  zero-height bars for zero output, the seeded loop default, and detecting a missing audio file only
+  after a load attempt. Persisted per-track health would require a different filesystem-permission
+  and data-model decision; it is not a polish fix implied by the mock-up.
+- The superseded inline-composer draft-id test is obsolete. Its current modal render path is covered
+  by the consolidated render-level task above.
+- Tagging `v0.1.0`, CI publication and clean-machine Windows QA are release-operator steps, not work
+  for the Phase 11 coding agent.
+
+#### Phase 11 acceptance
+
+- [ ] Every new regression test is demonstrated red against the old behaviour and green after the
+  fix; persistence assertions read back from real SQLite rather than only inspecting mocks.
+- [ ] `pnpm lint`, `pnpm typecheck`, `pnpm test`, `pnpm check:css`, `pnpm build`,
+  `cargo fmt --all -- --check` and `cargo clippy --all-targets -- -D warnings` all pass.
+- [ ] Native smoke verification covers a forced transaction failure followed by a successful write,
+  plus rapid timer actions with no open or mis-associated `pomodoro_session` rows.
+- [ ] Manual QA confirms relaunch restores only the correct block's completed Pomodoro count and the
+  composer never displays a duration different from the value it will save.
+
+---
+
 ## 4. Known risks
 
 | Risk | Mitigation |
