@@ -25,6 +25,13 @@ export function ArchiveView() {
         await hydrate(driver, today)
       } catch (err) {
         console.error('Failed to hydrate archive view:', err)
+        // Surface DB-open failures through the store's error contract — with
+        // `loading` starting true (Phase 10), a swallowed error would render
+        // "Loading archive…" forever. setState merges; this matches the
+        // store's own `set({ error, loading: false })` catch shape.
+        if (mounted) {
+          useArchiveStore.setState({ error: String(err), loading: false })
+        }
       }
     })()
     return () => {
