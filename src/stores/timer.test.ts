@@ -1,4 +1,9 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import { createTestDb } from '../test/nodeDriver'
+import type { SqlDriver } from '../db/driver'
+import type { DayBlock, Track } from '../db/types'
+import * as blocksRepo from '../db/repos/blocks'
+import * as sessionsRepo from '../db/repos/sessions'
 import {
   useTimerStore,
   FOCUS_SEC,
@@ -6,19 +11,33 @@ import {
   POMODOROS_PER_BLOCK,
   pomodoroCounterLabel,
 } from './timer'
+import { usePlayerStore, injectAudioElementForTests } from './player'
+import { useLibraryStore } from './library'
+
+function resetTimerStore() {
+  // Merge setState, never replace: true (which would drop the actions).
+  useTimerStore.setState({
+    phase: 'focus',
+    totalSec: FOCUS_SEC,
+    remainingSec: FOCUS_SEC,
+    running: false,
+    endsAt: null,
+    pomodorosDone: 0,
+    pomodorosPerBlock: POMODOROS_PER_BLOCK,
+    blockId: null,
+    blockTitle: null,
+    blockStartMin: null,
+    blockDurationMin: null,
+    blockQuiet: false,
+    openSessionId: null,
+  })
+}
 
 describe('useTimerStore', () => {
-  beforeEach(() => {
-    // Reset store to initial state before each test
-    useTimerStore.setState({
-      phase: 'focus',
-      totalSec: FOCUS_SEC,
-      remainingSec: FOCUS_SEC,
-      running: false,
-      endsAt: null,
-      pomodorosDone: 0,
-      pomodorosPerBlock: POMODOROS_PER_BLOCK,
-    })
+  beforeEach(async () => {
+    resetTimerStore()
+    // Clear any driver reference leaked by a previous test.
+    await useTimerStore.getState().hydrate(null)
     vi.useFakeTimers()
   })
 
@@ -245,13 +264,8 @@ describe('useTimerStore', () => {
 
     it('does NOT increment pomodorosDone when rest phase ends', () => {
       vi.setSystemTime(1000000)
-      useTimerStore.setState({
-        phase: 'rest',
-        totalSec: 300,
-        remainingSec: 300,
-        pomodorosDone: 2,
-      })
-      useTimerStore.getState().start()
+      useTimerStore.setState({ pomodorosDone: 2 })
+      useTimerStore.getState().rest()
       const endsAt = useTimerStore.getState().endsAt!
       useTimerStore.getState().tick(endsAt + 1000)
       expect(useTimerStore.getState().pomodorosDone).toBe(2)
@@ -259,8 +273,7 @@ describe('useTimerStore', () => {
 
     it('keeps phase as "rest" when rest ends', () => {
       vi.setSystemTime(1000000)
-      useTimerStore.setState({ phase: 'rest', totalSec: 300, remainingSec: 300 })
-      useTimerStore.getState().start()
+      useTimerStore.getState().rest()
       const endsAt = useTimerStore.getState().endsAt!
       useTimerStore.getState().tick(endsAt + 1000)
       expect(useTimerStore.getState().phase).toBe('rest')
@@ -418,5 +431,694 @@ describe('pomodoroCounterLabel', () => {
   it('works with block size of 1', () => {
     expect(pomodoroCounterLabel(0, 1)).toBe('1 / 1')
     expect(pomodoroCounterLabel(1, 1)).toBe('1 / 1')
+  })
+})
+
+/** Minimal HTMLAudioElement stand-in (same shape as player.test.ts's). */
+class FakeAudioElement {
+  src = ''
+  loop = false
+  volume = 1
+  currentTime = 0
+  duration = 0
+  paused = true
+  preload = ''
+  playCalls = 0
+  playRejects = false
+  error: { code: number } | null = null
+  private listeners = new Map<string, Set<() => void>>()
+
+  addEventListener(type: string, fn: () => void) {
+    if (!this.listeners.has(type)) this.listeners.set(type, new Set())
+    this.listeners.get(type)!.add(fn)
+  }
+
+  removeEventListener(type: string, fn: () => void) {
+    this.listeners.get(type)?.delete(fn)
+  }
+
+  emit(type: string) {
+    for (const fn of this.listeners.get(type) ?? []) fn()
+  }
+
+  play(): Promise<void> {
+    if (this.playRejects) {
+      return Promise.reject(new DOMException('play failed', 'NotSupportedError'))
+    }
+    this.playCalls += 1
+    this.paused = false
+    return Promise.resolve()
+  }
+
+  pause() {
+    this.paused = true
+  }
+}
+
+function makeTrack(id: number): Track {
+  return {
+    id,
+    path: `/music/track-${id}.mp3`,
+    displayName: `track-${id}`,
+    category: 'other',
+    durationSec: 3600,
+  }
+}
+
+function makeCandidate(id: number, overrides: Partial<DayBlock> = {}): DayBlock {
+  return {
+    id,
+    day: '2026-08-10',
+    taskId: null,
+    title: `Block ${id}`,
+    kind: 'deep',
+    startMin: 300,
+    durationMin: 90,
+    pomodoros: 0,
+    completed: false,
+    sort: 0,
+    note: '',
+    repeat: 'once',
+    trackId: null,
+    quiet: false,
+    ...overrides,
+  }
+}
+
+function resetPlayerStore() {
+  usePlayerStore.setState({
+    trackId: null,
+    trackName: null,
+    trackMeta: null,
+    playing: false,
+    volume: 70,
+    positionSec: 0,
+    durationSec: 0,
+    missing: false,
+    restPaused: false,
+  })
+}
+
+function resetLibraryStore() {
+  useLibraryStore.setState({
+    tracks: [],
+    loading: false,
+    error: null,
+    fadeInSec: 8,
+    silenceDuringRest: true,
+    loopUntilBlockEnd: true,
+  })
+}
+
+describe('useTimerStore persistence', () => {
+  let driver: SqlDriver
+  let fake: FakeAudioElement
+
+  beforeEach(async () => {
+    const db = createTestDb()
+    driver = db.driver
+    resetTimerStore()
+    resetPlayerStore()
+    resetLibraryStore()
+    fake = new FakeAudioElement()
+    injectAudioElementForTests(fake as unknown as HTMLAudioElement)
+    await usePlayerStore.getState().hydrate(null)
+    await useLibraryStore.getState().hydrate(null)
+    await useTimerStore.getState().hydrate(driver)
+    vi.useFakeTimers()
+  })
+
+  afterEach(() => {
+    injectAudioElementForTests(null)
+    vi.useRealTimers()
+    vi.restoreAllMocks()
+  })
+
+  it('fresh start with a candidate attaches and inserts a focus row', async () => {
+    vi.setSystemTime(1000000)
+    const blockId = await blocksRepo.createBlock(driver, {
+      day: '2026-08-10',
+      title: 'Write the spec',
+      kind: 'deep',
+      startMin: 300,
+      durationMin: 90,
+      pomodoros: 2,
+      quiet: true,
+    })
+    const candidate = makeCandidate(blockId, {
+      title: 'Write the spec',
+      pomodoros: 2,
+      quiet: true,
+    })
+
+    await useTimerStore.getState().start(candidate)
+
+    const state = useTimerStore.getState()
+    expect(state.blockId).toBe(blockId)
+    expect(state.blockTitle).toBe('Write the spec')
+    expect(state.blockStartMin).toBe(300)
+    expect(state.blockDurationMin).toBe(90)
+    expect(state.blockQuiet).toBe(true)
+    expect(state.pomodorosPerBlock).toBe(2)
+    expect(state.running).toBe(true)
+
+    const rows = await sessionsRepo.listSessionsForBlock(driver, blockId)
+    expect(rows.length).toBe(1)
+    expect(rows[0].blockId).toBe(blockId)
+    expect(rows[0].phase).toBe('focus')
+    expect(rows[0].endedAt).toBeNull()
+    expect(rows[0].completed).toBe(false)
+    expect(state.openSessionId).toBe(rows[0].id)
+  })
+
+  it('fresh start with a null candidate attaches nothing and inserts an unattached row', async () => {
+    vi.setSystemTime(1000000)
+    await useTimerStore.getState().start(null)
+
+    const state = useTimerStore.getState()
+    expect(state.blockId).toBeNull()
+    expect(state.blockTitle).toBeNull()
+    expect(state.pomodorosPerBlock).toBe(POMODOROS_PER_BLOCK)
+
+    const rows = await driver.select<{
+      block_id: number | null
+      phase: string
+      ended_at: string | null
+      completed: number
+    }>('SELECT * FROM pomodoro_session')
+    expect(rows.length).toBe(1)
+    expect(rows[0].block_id).toBeNull()
+    expect(rows[0].phase).toBe('focus')
+    expect(rows[0].ended_at).toBeNull()
+    expect(rows[0].completed).toBe(0)
+  })
+
+  it('pause keeps the row open; continue opens no second row', async () => {
+    vi.setSystemTime(1000000)
+    await useTimerStore.getState().start(null)
+
+    vi.setSystemTime(1000000 + 60000)
+    await useTimerStore.getState().pause()
+    expect(useTimerStore.getState().running).toBe(false)
+
+    let rows = await driver.select<{ ended_at: string | null }>(
+      'SELECT ended_at FROM pomodoro_session'
+    )
+    expect(rows.length).toBe(1)
+    expect(rows[0].ended_at).toBeNull()
+
+    await useTimerStore.getState().start(null) // resume
+    expect(useTimerStore.getState().running).toBe(true)
+    rows = await driver.select<{ ended_at: string | null }>(
+      'SELECT ended_at FROM pomodoro_session'
+    )
+    expect(rows.length).toBe(1)
+  })
+
+  it('focus tick to zero completes the row with the tick time and counts a pomodoro', async () => {
+    vi.setSystemTime(1000000)
+    const blockId = await blocksRepo.createBlock(driver, {
+      day: '2026-08-10',
+      title: 'Deep block',
+      kind: 'deep',
+      startMin: 300,
+      durationMin: 90,
+      pomodoros: 3,
+    })
+    await useTimerStore
+      .getState()
+      .start(makeCandidate(blockId, { title: 'Deep block', pomodoros: 3 }))
+
+    const endsAt = useTimerStore.getState().endsAt!
+    const tickNow = endsAt + 1000
+    await useTimerStore.getState().tick(tickNow)
+
+    const state = useTimerStore.getState()
+    expect(state.pomodorosDone).toBe(1)
+    expect(state.running).toBe(false)
+    expect(state.openSessionId).toBeNull()
+
+    const rows = await sessionsRepo.listSessionsForBlock(driver, blockId)
+    expect(rows.length).toBe(1)
+    expect(rows[0].completed).toBe(true)
+    expect(rows[0].endedAt).toBe(new Date(tickNow).toISOString())
+
+    // Second pomodoro start (remaining 0 → start) opens a SECOND row; the
+    // attachment is unchanged.
+    vi.setSystemTime(tickNow + 5000)
+    await useTimerStore.getState().start(null)
+    const state2 = useTimerStore.getState()
+    expect(state2.blockId).toBe(blockId)
+    expect(state2.blockTitle).toBe('Deep block')
+    expect(state2.pomodorosPerBlock).toBe(3)
+    expect(state2.running).toBe(true)
+
+    const rows2 = await sessionsRepo.listSessionsForBlock(driver, blockId)
+    expect(rows2.length).toBe(2)
+    expect(rows2[1].phase).toBe('focus')
+    expect(rows2[1].completed).toBe(false)
+    expect(rows2[1].endedAt).toBeNull()
+  })
+
+  it('rest() mid-focus abandons the focus row and opens a rest row', async () => {
+    vi.setSystemTime(1000000)
+    const blockId = await blocksRepo.createBlock(driver, {
+      day: '2026-08-10',
+      title: 'Deep block',
+      kind: 'deep',
+      startMin: 300,
+      durationMin: 90,
+    })
+    await useTimerStore.getState().start(makeCandidate(blockId))
+    await useTimerStore.getState().rest()
+
+    const state = useTimerStore.getState()
+    expect(state.phase).toBe('rest')
+    expect(state.running).toBe(true)
+
+    const rows = await sessionsRepo.listSessionsForBlock(driver, blockId)
+    expect(rows.length).toBe(2)
+    const focusRow = rows.find((r) => r.phase === 'focus')!
+    const restRow = rows.find((r) => r.phase === 'rest')!
+    expect(focusRow.completed).toBe(false)
+    expect(focusRow.endedAt).not.toBeNull()
+    expect(restRow.completed).toBe(false)
+    expect(restRow.endedAt).toBeNull()
+
+    // Rest tick to zero completes the rest row.
+    const restEndsAt = useTimerStore.getState().endsAt!
+    await useTimerStore.getState().tick(restEndsAt + 1000)
+    const rows2 = await sessionsRepo.listSessionsForBlock(driver, blockId)
+    const restRow2 = rows2.find((r) => r.phase === 'rest')!
+    expect(restRow2.completed).toBe(true)
+    expect(restRow2.endedAt).toBe(new Date(restEndsAt + 1000).toISOString())
+    expect(useTimerStore.getState().pomodorosDone).toBe(0)
+  })
+
+  it('start after rest ends switches to focus with the attachment kept and a new row', async () => {
+    vi.setSystemTime(1000000)
+    const blockId = await blocksRepo.createBlock(driver, {
+      day: '2026-08-10',
+      title: 'Deep block',
+      kind: 'deep',
+      startMin: 300,
+      durationMin: 90,
+      pomodoros: 2,
+    })
+    await useTimerStore.getState().start(makeCandidate(blockId, { pomodoros: 2 }))
+    await useTimerStore.getState().rest()
+
+    // Run the rest to completion.
+    const restEndsAt = useTimerStore.getState().endsAt!
+    await useTimerStore.getState().tick(restEndsAt + 1000)
+    expect(useTimerStore.getState().phase).toBe('rest')
+    expect(useTimerStore.getState().remainingSec).toBe(0)
+
+    // Press Start: fresh focus, attachment kept, new focus row.
+    vi.setSystemTime(restEndsAt + 60000)
+    await useTimerStore.getState().start(null)
+    const state = useTimerStore.getState()
+    expect(state.phase).toBe('focus')
+    expect(state.totalSec).toBe(FOCUS_SEC)
+    expect(state.remainingSec).toBe(FOCUS_SEC)
+    expect(state.running).toBe(true)
+    expect(state.blockId).toBe(blockId)
+    expect(state.pomodorosPerBlock).toBe(2)
+
+    const rows = await sessionsRepo.listSessionsForBlock(driver, blockId)
+    expect(rows.length).toBe(3)
+    const focusRows = rows.filter((r) => r.phase === 'focus')
+    expect(focusRows.length).toBe(2)
+    expect(focusRows[1].completed).toBe(false)
+    expect(focusRows[1].endedAt).toBeNull()
+  })
+
+  it('toggle on a paused mid-rest timer resumes REST with no new row', async () => {
+    vi.setSystemTime(1000000)
+    const blockId = await blocksRepo.createBlock(driver, {
+      day: '2026-08-10',
+      title: 'Deep block',
+      kind: 'deep',
+      startMin: 300,
+      durationMin: 90,
+    })
+    await useTimerStore.getState().start(makeCandidate(blockId))
+    await useTimerStore.getState().rest()
+
+    // Pause mid-rest, then toggle to resume.
+    vi.setSystemTime(1000000 + 60000)
+    await useTimerStore.getState().pause()
+    expect(useTimerStore.getState().phase).toBe('rest')
+    expect(useTimerStore.getState().running).toBe(false)
+
+    await useTimerStore.getState().toggle(null)
+    const state = useTimerStore.getState()
+    expect(state.phase).toBe('rest')
+    expect(state.running).toBe(true)
+
+    const rows = await sessionsRepo.listSessionsForBlock(driver, blockId)
+    // Still exactly one focus row + one rest row.
+    expect(rows.length).toBe(2)
+  })
+
+  it('start → pause within the same second → start resumes the SAME row (no orphan)', async () => {
+    // pause() ceils the remaining time, so a pause within the first
+    // wall-clock second leaves remainingSec === totalSec even though a row
+    // is open. start() must treat that as a resume, not a fresh start —
+    // otherwise the open row is dropped without being closed and a second
+    // row is inserted for the same run (found in Phase 9 verification).
+    vi.setSystemTime(1000000)
+    const blockId = await blocksRepo.createBlock(driver, {
+      day: '2026-08-10',
+      title: 'Deep block',
+      kind: 'deep',
+      startMin: 300,
+      durationMin: 90,
+    })
+    await useTimerStore.getState().start(makeCandidate(blockId))
+    await useTimerStore.getState().pause()
+    expect(useTimerStore.getState().remainingSec).toBe(FOCUS_SEC)
+    expect(useTimerStore.getState().openSessionId).not.toBeNull()
+
+    await useTimerStore.getState().start(makeCandidate(blockId))
+    expect(useTimerStore.getState().running).toBe(true)
+
+    const rows = await sessionsRepo.listSessionsForBlock(driver, blockId)
+    expect(rows.length).toBe(1)
+    expect(rows[0].endedAt).toBeNull()
+    expect(useTimerStore.getState().openSessionId).toBe(rows[0].id)
+  })
+
+  it('toggle on an instantly-paused rest resumes the rest (no abandon, no focus jump)', async () => {
+    // Same sub-second pause case, but in the rest phase: the paused rest is
+    // resumed rather than abandoned into a fresh focus.
+    vi.setSystemTime(1000000)
+    const blockId = await blocksRepo.createBlock(driver, {
+      day: '2026-08-10',
+      title: 'Deep block',
+      kind: 'deep',
+      startMin: 300,
+      durationMin: 90,
+    })
+    await useTimerStore.getState().start(makeCandidate(blockId))
+    await useTimerStore.getState().rest()
+    await useTimerStore.getState().pause()
+    expect(useTimerStore.getState().remainingSec).toBe(REST_SEC)
+
+    await useTimerStore.getState().toggle(null)
+    const state = useTimerStore.getState()
+    expect(state.phase).toBe('rest')
+    expect(state.running).toBe(true)
+
+    const rows = await sessionsRepo.listSessionsForBlock(driver, blockId)
+    // One abandoned focus row + ONE rest row still open.
+    expect(rows.length).toBe(2)
+    const restRow = rows.find((r) => r.phase === 'rest')!
+    expect(restRow.endedAt).toBeNull()
+    expect(state.openSessionId).toBe(restRow.id)
+  })
+
+  it('pause AT the deadline → start resumes into completion (row completed, counter +1)', async () => {
+    // PR #10 review: pausing in the window after the wall-clock deadline but
+    // before the tick fires left remainingSec === 0 with a row open, and the
+    // old isResume required remainingSec > 0 — so Continue took the fresh
+    // path, orphaning the row and never counting the pomodoro. Now the open
+    // row is resumed with endsAt = now and the next tick completes it:
+    // pausing at zero completes the pomodoro.
+    vi.setSystemTime(1000000)
+    const blockId = await blocksRepo.createBlock(driver, {
+      day: '2026-08-10',
+      title: 'Deep block',
+      kind: 'deep',
+      startMin: 300,
+      durationMin: 90,
+    })
+    await useTimerStore.getState().start(makeCandidate(blockId))
+    const endsAt = useTimerStore.getState().endsAt!
+
+    vi.setSystemTime(endsAt + 200) // deadline passed, tick has not fired
+    await useTimerStore.getState().pause()
+    expect(useTimerStore.getState().remainingSec).toBe(0)
+    expect(useTimerStore.getState().openSessionId).not.toBeNull()
+
+    await useTimerStore.getState().start(makeCandidate(blockId))
+    expect(useTimerStore.getState().running).toBe(true)
+
+    await useTimerStore.getState().tick(endsAt + 700)
+    const state = useTimerStore.getState()
+    expect(state.pomodorosDone).toBe(1)
+    expect(state.openSessionId).toBeNull()
+
+    const rows = await sessionsRepo.listSessionsForBlock(driver, blockId)
+    expect(rows.length).toBe(1) // the SAME row, completed — no orphan, no dupe
+    expect(rows[0].completed).toBe(true)
+    expect(rows[0].endedAt).not.toBeNull()
+  })
+
+  it('start AFTER a completed pomodoro opens a new row (no zero-length resume)', async () => {
+    // Guards the isResume reassociation: a phase that already completed via
+    // tick (remainingSec 0, NO open row) must take the next-pomodoro path.
+    // If isResume were relaxed to `remainingSec < totalSec || …` instead,
+    // this start would resume a zero-length timer whose next tick increments
+    // the counter with no row written.
+    vi.setSystemTime(1000000)
+    const blockId = await blocksRepo.createBlock(driver, {
+      day: '2026-08-10',
+      title: 'Deep block',
+      kind: 'deep',
+      startMin: 300,
+      durationMin: 90,
+    })
+    await useTimerStore.getState().start(makeCandidate(blockId))
+    const endsAt = useTimerStore.getState().endsAt!
+    useTimerStore.getState().tick(endsAt + 1000)
+    expect(useTimerStore.getState().pomodorosDone).toBe(1)
+    expect(useTimerStore.getState().openSessionId).toBeNull()
+
+    vi.setSystemTime(2000000)
+    await useTimerStore.getState().start(makeCandidate(blockId))
+    const state = useTimerStore.getState()
+    expect(state.remainingSec).toBe(FOCUS_SEC)
+    expect(state.pomodorosDone).toBe(1) // no phantom increment
+    expect(state.openSessionId).not.toBeNull()
+
+    const rows = await sessionsRepo.listSessionsForBlock(driver, blockId)
+    expect(rows.length).toBe(2)
+    expect(rows.filter((r) => r.completed).length).toBe(1)
+    expect(rows.some((r) => r.endedAt === null)).toBe(true)
+  })
+
+  it('pause at the rest deadline → start completes the rest row and resumes music', async () => {
+    // The rest-phase twin of the pause-at-deadline fix: a paused-at-zero
+    // rest with an open row resumes (stays in the rest phase), and the next
+    // tick completes the row and lifts the rest pause.
+    useLibraryStore.setState({ silenceDuringRest: true, fadeInSec: 0 })
+    await usePlayerStore.getState().playTrack(makeTrack(1))
+
+    vi.setSystemTime(1000000)
+    const blockId = await blocksRepo.createBlock(driver, {
+      day: '2026-08-10',
+      title: 'Deep block',
+      kind: 'deep',
+      startMin: 300,
+      durationMin: 90,
+    })
+    await useTimerStore.getState().start(makeCandidate(blockId))
+    await useTimerStore.getState().rest()
+    expect(usePlayerStore.getState().restPaused).toBe(true)
+    const restEndsAt = useTimerStore.getState().endsAt!
+
+    vi.setSystemTime(restEndsAt + 200)
+    await useTimerStore.getState().pause()
+    expect(useTimerStore.getState().remainingSec).toBe(0)
+
+    await useTimerStore.getState().start(null)
+    expect(useTimerStore.getState().phase).toBe('rest') // resumed, not a fresh focus
+    expect(useTimerStore.getState().running).toBe(true)
+
+    await useTimerStore.getState().tick(restEndsAt + 700)
+    const state = useTimerStore.getState()
+    expect(state.phase).toBe('rest')
+    expect(state.running).toBe(false)
+    expect(usePlayerStore.getState().restPaused).toBe(false)
+    expect(usePlayerStore.getState().playing).toBe(true)
+
+    const rows = await sessionsRepo.listSessionsForBlock(driver, blockId)
+    const restRow = rows.find((r) => r.phase === 'rest')!
+    expect(restRow.completed).toBe(true)
+    expect(restRow.endedAt).not.toBeNull()
+  })
+
+  it('reset abandons the open row and clears attachment, counter and target', async () => {
+    vi.setSystemTime(1000000)
+    const blockId = await blocksRepo.createBlock(driver, {
+      day: '2026-08-10',
+      title: 'Deep block',
+      kind: 'deep',
+      startMin: 300,
+      durationMin: 90,
+      pomodoros: 2,
+    })
+    await useTimerStore.getState().start(makeCandidate(blockId, { pomodoros: 2 }))
+    await useTimerStore.getState().reset()
+
+    const state = useTimerStore.getState()
+    expect(state.phase).toBe('focus')
+    expect(state.running).toBe(false)
+    expect(state.pomodorosDone).toBe(0)
+    expect(state.pomodorosPerBlock).toBe(POMODOROS_PER_BLOCK)
+    expect(state.blockId).toBeNull()
+    expect(state.blockTitle).toBeNull()
+    expect(state.blockStartMin).toBeNull()
+    expect(state.blockDurationMin).toBeNull()
+    expect(state.blockQuiet).toBe(false)
+    expect(state.openSessionId).toBeNull()
+
+    const rows = await sessionsRepo.listSessionsForBlock(driver, blockId)
+    expect(rows.length).toBe(1)
+    expect(rows[0].completed).toBe(false)
+    expect(rows[0].endedAt).not.toBeNull()
+  })
+
+  it('survives a window minimise: one tick after 26 idle minutes completes the pomodoro', async () => {
+    vi.setSystemTime(1000000)
+    const blockId = await blocksRepo.createBlock(driver, {
+      day: '2026-08-10',
+      title: 'Deep block',
+      kind: 'deep',
+      startMin: 300,
+      durationMin: 90,
+    })
+    await useTimerStore.getState().start(makeCandidate(blockId))
+
+    // Window minimised: no ticks for 26 minutes, then a single tick.
+    vi.setSystemTime(1000000 + 26 * 60 * 1000)
+    await useTimerStore.getState().tick()
+
+    const state = useTimerStore.getState()
+    expect(state.pomodorosDone).toBe(1)
+    expect(state.remainingSec).toBe(0)
+    expect(state.running).toBe(false)
+
+    const rows = await sessionsRepo.listSessionsForBlock(driver, blockId)
+    expect(rows.length).toBe(1)
+    expect(rows[0].completed).toBe(true)
+  })
+
+  it('works fully in-memory with a null driver', async () => {
+    await useTimerStore.getState().hydrate(null)
+    vi.setSystemTime(1000000)
+    await useTimerStore.getState().start(makeCandidate(42))
+    const endsAt = useTimerStore.getState().endsAt!
+    await useTimerStore.getState().tick(endsAt + 1000)
+    expect(useTimerStore.getState().pomodorosDone).toBe(1)
+    expect(useTimerStore.getState().blockId).toBe(42)
+  })
+
+  it('a failing driver never breaks the timer (state stays correct, errors logged)', async () => {
+    const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const failingDriver: SqlDriver = {
+      execute: () => Promise.reject(new Error('disk full')),
+      select: <T,>() => Promise.resolve([] as T[]),
+      transaction: () => Promise.reject(new Error('disk full')),
+    }
+    await useTimerStore.getState().hydrate(failingDriver)
+
+    vi.setSystemTime(1000000)
+    await useTimerStore.getState().start(makeCandidate(7))
+    expect(useTimerStore.getState().running).toBe(true)
+
+    const endsAt = useTimerStore.getState().endsAt!
+    await useTimerStore.getState().tick(endsAt + 1000)
+    expect(useTimerStore.getState().pomodorosDone).toBe(1)
+    expect(consoleSpy).toHaveBeenCalled()
+  })
+
+  describe('silence during rest', () => {
+    it('rest() pauses a playing track when silenceDuringRest is on; rest end resumes it', async () => {
+      useLibraryStore.setState({ silenceDuringRest: true, fadeInSec: 0 })
+      await usePlayerStore.getState().playTrack(makeTrack(1))
+      expect(usePlayerStore.getState().playing).toBe(true)
+      expect(fake.paused).toBe(false)
+
+      vi.setSystemTime(1000000)
+      await useTimerStore.getState().start(null)
+      await useTimerStore.getState().rest()
+
+      expect(fake.paused).toBe(true)
+      expect(usePlayerStore.getState().playing).toBe(false)
+      expect(usePlayerStore.getState().restPaused).toBe(true)
+
+      // Rest elapses: playback resumes.
+      const restEndsAt = useTimerStore.getState().endsAt!
+      await useTimerStore.getState().tick(restEndsAt + 1000)
+      expect(usePlayerStore.getState().restPaused).toBe(false)
+      expect(usePlayerStore.getState().playing).toBe(true)
+      expect(fake.paused).toBe(false)
+    })
+
+    it('rest() does NOT pause when silenceDuringRest is off', async () => {
+      useLibraryStore.setState({ silenceDuringRest: false, fadeInSec: 0 })
+      await usePlayerStore.getState().playTrack(makeTrack(1))
+
+      vi.setSystemTime(1000000)
+      await useTimerStore.getState().start(null)
+      await useTimerStore.getState().rest()
+
+      expect(fake.paused).toBe(false)
+      expect(usePlayerStore.getState().playing).toBe(true)
+      expect(usePlayerStore.getState().restPaused).toBe(false)
+    })
+
+    it('a user-paused player is never auto-resumed at rest end', async () => {
+      useLibraryStore.setState({ silenceDuringRest: true, fadeInSec: 0 })
+      await usePlayerStore.getState().playTrack(makeTrack(1))
+      await usePlayerStore.getState().togglePlay() // user pause
+      expect(usePlayerStore.getState().playing).toBe(false)
+      const playCallsBefore = fake.playCalls
+
+      vi.setSystemTime(1000000)
+      await useTimerStore.getState().start(null)
+      await useTimerStore.getState().rest()
+      // rest() did not mark restPaused (we did not pause).
+      expect(usePlayerStore.getState().restPaused).toBe(false)
+
+      const restEndsAt = useTimerStore.getState().endsAt!
+      await useTimerStore.getState().tick(restEndsAt + 1000)
+      expect(usePlayerStore.getState().playing).toBe(false)
+      expect(fake.playCalls).toBe(playCallsBefore)
+    })
+
+    it('reset() resumes a rest-paused player', async () => {
+      useLibraryStore.setState({ silenceDuringRest: true, fadeInSec: 0 })
+      await usePlayerStore.getState().playTrack(makeTrack(1))
+
+      vi.setSystemTime(1000000)
+      await useTimerStore.getState().start(null)
+      await useTimerStore.getState().rest()
+      expect(usePlayerStore.getState().restPaused).toBe(true)
+
+      await useTimerStore.getState().reset()
+      expect(usePlayerStore.getState().restPaused).toBe(false)
+      expect(usePlayerStore.getState().playing).toBe(true)
+      expect(fake.paused).toBe(false)
+    })
+
+    it('start after rest ends resumes a rest-paused player', async () => {
+      useLibraryStore.setState({ silenceDuringRest: true, fadeInSec: 0 })
+      await usePlayerStore.getState().playTrack(makeTrack(1))
+
+      vi.setSystemTime(1000000)
+      await useTimerStore.getState().start(null)
+      await useTimerStore.getState().rest()
+      expect(usePlayerStore.getState().restPaused).toBe(true)
+
+      // Press Start while the rest is still fresh (defensive path): fresh
+      // focus begins and the sound returns.
+      await useTimerStore.getState().start(null)
+      expect(useTimerStore.getState().phase).toBe('focus')
+      expect(usePlayerStore.getState().restPaused).toBe(false)
+      expect(usePlayerStore.getState().playing).toBe(true)
+    })
   })
 })

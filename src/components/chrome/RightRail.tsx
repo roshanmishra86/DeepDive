@@ -1,11 +1,13 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useAppStore } from '../../stores/app'
 import { useTasksStore } from '../../stores/tasks'
+import { useTodayStore } from '../../stores/today'
 import {
   useTimerStore,
   pomodoroCounterLabel,
 } from '../../stores/timer'
 import { formatClock } from '../../lib/time'
+import { activeWorkBlock, displayPomodoroTarget, isFreshCycle } from '../../lib/timer'
 import { upcomingTasks, taskMeta } from '../../lib/week'
 import { ArrowCounterClockwise } from '@phosphor-icons/react/dist/csr/ArrowCounterClockwise'
 
@@ -15,6 +17,7 @@ const RING_C = 540.35 // 2π · 86
 function PomodoroWidget() {
   const timerStyle = useAppStore((s) => s.timerStyle)
   const enterSession = useAppStore((s) => s.enterSession)
+  const blocks = useTodayStore((s) => s.blocks)
   const {
     phase,
     totalSec,
@@ -22,15 +25,38 @@ function PomodoroWidget() {
     running,
     pomodorosDone,
     pomodorosPerBlock,
+    blockTitle,
     toggle,
     rest,
     reset,
   } = useTimerStore()
 
+  const [nowMin, setNowMin] = useState(() => {
+    const d = new Date()
+    return d.getHours() * 60 + d.getMinutes()
+  })
+
+  // Update nowMin every 30s (same pattern as TodayView).
+  useEffect(() => {
+    const id = window.setInterval(() => {
+      const d = new Date()
+      setNowMin(d.getHours() * 60 + d.getMinutes())
+    }, 30000)
+    return () => window.clearInterval(id)
+  }, [])
+
+  const activeBlock = activeWorkBlock(blocks, nowMin)
+  const fresh = isFreshCycle({ phase, running, remainingSec, totalSec, pomodorosDone })
+
   const progress = totalSec > 0 ? 1 - remainingSec / totalSec : 0
   const clock = formatClock(remainingSec)
   const phaseLabel = phase === 'focus' ? 'Focus' : 'Rest'
-  const blockLabel = 'No block attached' // Phase 9 attaches the active block
+  // While fresh, preview the currently-active block; once a cycle starts,
+  // the attachment snapshot takes over (it survives the block ending).
+  const blockLabel = fresh
+    ? (activeBlock?.title ?? 'No block attached')
+    : (blockTitle ?? 'No block attached')
+  const counterTarget = displayPomodoroTarget(fresh, activeBlock, pomodorosPerBlock)
   const startLabel = running ? 'Pause' : remainingSec < totalSec ? 'Continue' : 'Start'
 
   return (
@@ -38,7 +64,7 @@ function PomodoroWidget() {
       <div className="pomodoro-head">
         <span className="rail-label">{phaseLabel}</span>
         <span className="pomodoro-count" data-testid="pomodoro-count">
-          {pomodoroCounterLabel(pomodorosDone, pomodorosPerBlock)}
+          {pomodoroCounterLabel(pomodorosDone, counterTarget)}
         </span>
       </div>
 
@@ -89,18 +115,18 @@ function PomodoroWidget() {
         <button
           type="button"
           className="btn-accent pomodoro-start"
-          onClick={toggle}
+          onClick={() => void toggle(activeBlock)}
           data-testid="timer-toggle"
         >
           {startLabel}
         </button>
-        <button type="button" className="btn-outline" onClick={rest} data-testid="timer-rest">
+        <button type="button" className="btn-outline" onClick={() => void rest()} data-testid="timer-rest">
           Rest
         </button>
         <button
           type="button"
           className="btn-outline pomodoro-reset"
-          onClick={reset}
+          onClick={() => void reset()}
           aria-label="Reset timer"
           data-testid="timer-reset"
         >

@@ -37,6 +37,8 @@ interface PlayerState {
   durationSec: number
   /** True when the current track's file failed to load (e.g. deleted). */
   missing: boolean
+  /** True when WE paused playback for a rest phase (so only we resume it). */
+  restPaused: boolean
 
   // Loads the persisted volume. Never autoplays and never loads a track.
   hydrate: (driver: SqlDriver | null) => Promise<void>
@@ -62,6 +64,14 @@ interface PlayerState {
 
   // Marks the current track's file as unreadable and stops playback.
   markMissing: () => void
+
+  // Pauses playback for a rest phase ("Silence during rest"). Sets
+  // restPaused ONLY when we actually paused — a user-paused player is never
+  // auto-resumed at rest end.
+  pauseForRest: () => void
+
+  // Resumes a rest-paused player. No-op unless restPaused is set.
+  resumeFromRest: () => Promise<void>
 }
 
 let persistenceDriver: SqlDriver | null = null
@@ -185,6 +195,7 @@ export const usePlayerStore = create<PlayerState>()((set, get) => ({
   positionSec: 0,
   durationSec: 0,
   missing: false,
+  restPaused: false,
 
   hydrate: async (driver) => {
     persistenceDriver = driver
@@ -212,6 +223,10 @@ export const usePlayerStore = create<PlayerState>()((set, get) => ({
       positionSec: 0,
       durationSec: track.durationSec ?? 0,
       missing: false,
+      // Selecting a track is a user transport action: the user has taken
+      // over playback, so any timer-owned rest pause is forfeited — a later
+      // resumeFromRest must not fire. (next/prev route through here.)
+      restPaused: false,
     })
     if (!el) return // no Audio in this environment; selection state still shows
     el.loop = loopUntilBlockEnd
@@ -241,6 +256,11 @@ export const usePlayerStore = create<PlayerState>()((set, get) => ({
     const el = ensureAudio()
     if (!el) return
     clearFade()
+    // Any user transport action forfeits a timer-owned rest pause —
+    // otherwise a user who plays then pauses during a rest would still be
+    // force-resumed at rest end (the exact case restPaused exists to
+    // prevent). Cleared once here so both branches below are covered.
+    if (get().restPaused) set({ restPaused: false })
     if (playing) {
       el.pause()
       set({ playing: false })
@@ -305,6 +325,7 @@ export const usePlayerStore = create<PlayerState>()((set, get) => ({
       positionSec: 0,
       durationSec: 0,
       missing: false,
+      restPaused: false,
     })
   },
 
@@ -312,6 +333,30 @@ export const usePlayerStore = create<PlayerState>()((set, get) => ({
     if (get().trackId === null) return
     clearFade()
     if (audio) audio.pause()
-    set({ missing: true, playing: false })
+    set({ missing: true, playing: false, restPaused: false })
+  },
+
+  pauseForRest: () => {
+    if (!get().playing) return
+    const el = ensureAudio()
+    if (!el) return
+    clearFade()
+    el.pause()
+    set({ playing: false, restPaused: true })
+  },
+
+  resumeFromRest: async () => {
+    if (!get().restPaused) return
+    set({ restPaused: false })
+    if (get().trackId === null) return
+    const el = ensureAudio()
+    if (!el) return
+    try {
+      el.volume = get().volume / 100
+      await el.play()
+      set({ playing: true })
+    } catch (err) {
+      handlePlayRejection(el, err)
+    }
   },
 }))

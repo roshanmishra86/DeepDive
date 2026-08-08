@@ -53,6 +53,7 @@ function App() {
           useTemplatesStore.getState().hydrate(driver),
           useLibraryStore.getState().hydrate(driver),
           usePlayerStore.getState().hydrate(driver),
+          useTimerStore.getState().hydrate(driver),
         ])
       } catch (err) {
         console.error('Failed to initialize database:', err)

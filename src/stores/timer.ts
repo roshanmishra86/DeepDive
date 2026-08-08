@@ -1,4 +1,10 @@
 import { create } from 'zustand'
+import type { SqlDriver } from '../db/driver'
+import type { DayBlock } from '../db/types'
+import * as sessionsRepo from '../db/repos/sessions'
+import { isFreshCycle, pomodoroTargetFor } from '../lib/timer'
+import { usePlayerStore } from './player'
+import { useLibraryStore } from './library'
 
 /** Defaults from the mockup: 25 min focus / 5 min rest, 3 pomodoros per block. */
 export const FOCUS_SEC = 1500
@@ -8,12 +14,23 @@ export const POMODOROS_PER_BLOCK = 3
 export type TimerPhase = 'focus' | 'rest'
 
 /**
- * Pomodoro countdown for the right-rail widget (and later the session
- * overlay). The tick is computed from a wall-clock deadline (`endsAt`) rather
- * than by decrementing, so it does not drift when the window is minimised.
+ * Pomodoro countdown for the right-rail widget and the session overlay.
+ * The tick is computed from a wall-clock deadline (`endsAt`) rather than by
+ * decrementing, so it does not drift when the window is minimised.
  *
- * Phase 9 adds session persistence and block attachment; this store is the
- * chrome-level countdown.
+ * Phase 9: a fresh focus start attaches to the currently-active work block
+ * (the caller passes `activeWorkBlock(...)` or null) and snapshots its
+ * title/start/duration/quiet into state, so the session survives the block
+ * being edited or deleted mid-session (`ON DELETE SET NULL` covers the DB
+ * side). Each pomodoro (and each rest) is one `pomodoro_session` row whose
+ * started_at→ended_at wall-clock span includes pauses; the row is completed
+ * when the phase elapses and abandoned (completed = 0) when the user rests
+ * or resets out of it.
+ *
+ * All actions update state synchronously BEFORE any await, so the UI stays
+ * snappy and existing synchronous callers keep working; the returned
+ * promise only flushes persistence for tests. No action ever rejects —
+ * persistence failures are caught and logged (the project's P2-A contract).
  */
 interface TimerState {
   phase: TimerPhase
@@ -24,13 +41,33 @@ interface TimerState {
   endsAt: number | null
   pomodorosDone: number
   pomodorosPerBlock: number
-  start: () => void
-  pause: () => void
-  toggle: () => void
-  rest: () => void
-  reset: () => void
+  /** Attached block snapshot; all null when unattached. */
+  blockId: number | null
+  blockTitle: string | null
+  blockStartMin: number | null
+  blockDurationMin: number | null
+  blockQuiet: boolean
+  /** Id of the currently-open pomodoro_session row; null when none is open. */
+  openSessionId: number | null
+
+  hydrate: (driver: SqlDriver | null) => Promise<void>
+  start: (candidate?: DayBlock | null) => Promise<void>
+  pause: () => Promise<void>
+  toggle: (candidate?: DayBlock | null) => Promise<void>
+  rest: () => Promise<void>
+  reset: () => Promise<void>
   /** Recompute remaining time from the wall clock. Called on an interval. */
-  tick: (now?: number) => void
+  tick: (now?: number) => Promise<void>
+}
+
+let persistenceDriver: SqlDriver | null = null
+
+/** Fire-and-forget persistence that never rejects (P2-A). */
+function persist(label: string, fn: (driver: SqlDriver) => Promise<void>): Promise<void> {
+  if (!persistenceDriver) return Promise.resolve()
+  return fn(persistenceDriver).catch((err) => {
+    console.error(`Failed to persist timer session (${label}):`, err)
+  })
 }
 
 export const useTimerStore = create<TimerState>()((set, get) => ({
@@ -41,36 +78,201 @@ export const useTimerStore = create<TimerState>()((set, get) => ({
   endsAt: null,
   pomodorosDone: 0,
   pomodorosPerBlock: POMODOROS_PER_BLOCK,
+  blockId: null,
+  blockTitle: null,
+  blockStartMin: null,
+  blockDurationMin: null,
+  blockQuiet: false,
+  openSessionId: null,
 
-  start: () => {
-    const { remainingSec, totalSec } = get()
-    const remaining = remainingSec > 0 ? remainingSec : totalSec
-    set({ running: true, remainingSec: remaining, endsAt: Date.now() + remaining * 1000 })
+  hydrate: async (driver) => {
+    persistenceDriver = driver
   },
 
-  pause: () => {
+  start: async (candidate = null) => {
+    const state = get()
+
+    // Resuming a paused timer: state only, no DB writes — the open row's
+    // wall-clock span simply includes the pause. The first clause is the
+    // ordinary mid-phase pause. The second covers every paused-with-an-open-
+    // row state where remainingSec alone misleads:
+    //   · a pause within the first wall-clock second of a run — pause()
+    //     ceils the remaining time, so remainingSec can still equal totalSec
+    //     while a row is open; treating it as fresh would drop the open
+    //     row's id without closing it (an orphaned, never-ended row) and
+    //     insert a second row for the same run;
+    //   · a pause AT the deadline (remainingSec === 0) — resuming with
+    //     endsAt = now lets the next tick complete the row and count the
+    //     pomodoro, which the wall clock says already happened. Settles the
+    //     design question the b946ed3 fix left open: pausing at zero
+    //     completes the pomodoro.
+    // A phase that already COMPLETED via tick (remainingSec 0, no open row)
+    // fails both clauses and takes the fresh/next-pomodoro path below —
+    // dropping the `remainingSec > 0` requirement from the first clause
+    // instead of reassociating would route that case into a zero-length
+    // resume that increments the counter with no row.
+    const isResume =
+      (state.remainingSec > 0 && state.remainingSec < state.totalSec) ||
+      (!state.running && state.openSessionId !== null)
+
+    if (isResume) {
+      set({ running: true, endsAt: Date.now() + state.remainingSec * 1000 })
+      return
+    }
+
+    if (state.phase === 'rest') {
+      // Rest is over (or the user bailed on a running rest): begin a fresh
+      // focus with the attachment kept. A PAUSED rest with an open row was
+      // handled by the resume branch above, so reaching here means the rest
+      // either elapsed (tick already completed its row) or is being
+      // abandoned mid-run — the open row, if any, is closed out below.
+      const openId = state.openSessionId
+      set({
+        phase: 'focus',
+        totalSec: FOCUS_SEC,
+        remainingSec: FOCUS_SEC,
+        running: true,
+        endsAt: Date.now() + FOCUS_SEC * 1000,
+        openSessionId: null,
+      })
+      const writes: Promise<void>[] = []
+      if (openId !== null) {
+        // Abandoned rest (user pressed Start before the rest elapsed).
+        writes.push(
+          persist('abandon-rest', (driver) =>
+            sessionsRepo.finishSession(driver, openId, {
+              endedAt: new Date().toISOString(),
+              completed: false,
+            })
+          )
+        )
+      }
+      writes.push(
+        (async () => {
+          if (!persistenceDriver) return
+          try {
+            const id = await sessionsRepo.startSession(persistenceDriver, {
+              blockId: get().blockId,
+              phase: 'focus',
+              startedAt: new Date().toISOString(),
+            })
+            set({ openSessionId: id })
+          } catch (err) {
+            console.error('Failed to persist timer session (start-focus-after-rest):', err)
+          }
+        })()
+      )
+      writes.push(usePlayerStore.getState().resumeFromRest())
+      await Promise.all(writes)
+      return
+    }
+
+    // Focus phase, not a resume: either a fresh cycle start (attach to the
+    // candidate) or the next pomodoro of an attached cycle (remainingSec 0).
+    const fresh = isFreshCycle(state)
+    const attachment = fresh
+      ? candidate
+        ? {
+            blockId: candidate.id,
+            blockTitle: candidate.title,
+            blockStartMin: candidate.startMin,
+            blockDurationMin: candidate.durationMin,
+            blockQuiet: candidate.quiet,
+            pomodorosPerBlock: pomodoroTargetFor(candidate),
+          }
+        : {
+            blockId: null,
+            blockTitle: null,
+            blockStartMin: null,
+            blockDurationMin: null,
+            blockQuiet: false,
+            pomodorosPerBlock: POMODOROS_PER_BLOCK,
+          }
+      : {}
+
+    set({
+      ...attachment,
+      phase: 'focus',
+      totalSec: FOCUS_SEC,
+      remainingSec: FOCUS_SEC,
+      running: true,
+      endsAt: Date.now() + FOCUS_SEC * 1000,
+      openSessionId: null,
+    })
+
+    if (!persistenceDriver) return
+    try {
+      const id = await sessionsRepo.startSession(persistenceDriver, {
+        blockId: get().blockId,
+        phase: 'focus',
+        startedAt: new Date().toISOString(),
+      })
+      set({ openSessionId: id })
+    } catch (err) {
+      console.error('Failed to persist timer session (start-focus):', err)
+    }
+  },
+
+  pause: async () => {
     const { running, endsAt } = get()
     if (!running || endsAt === null) return
     const remaining = Math.max(0, Math.ceil((endsAt - Date.now()) / 1000))
+    // State only: the row STAYS OPEN — one row per pomodoro, its
+    // started_at→ended_at wall-clock span includes pauses.
     set({ running: false, endsAt: null, remainingSec: remaining })
   },
 
-  toggle: () => {
-    if (get().running) get().pause()
-    else get().start()
+  toggle: async (candidate = null) => {
+    if (get().running) await get().pause()
+    else await get().start(candidate)
   },
 
-  rest: () => {
+  rest: async () => {
+    const { openSessionId, blockId } = get()
+    const abandonedId = openSessionId
+    // Pressing Rest mid-focus abandons the open pomodoro.
     set({
       phase: 'rest',
       totalSec: REST_SEC,
       remainingSec: REST_SEC,
       running: true,
       endsAt: Date.now() + REST_SEC * 1000,
+      openSessionId: null,
     })
+    const writes: Promise<void>[] = []
+    if (abandonedId !== null) {
+      writes.push(
+        persist('abandon-focus', (driver) =>
+          sessionsRepo.finishSession(driver, abandonedId, {
+            endedAt: new Date().toISOString(),
+            completed: false,
+          })
+        )
+      )
+    }
+    writes.push(
+      (async () => {
+        if (!persistenceDriver) return
+        try {
+          const id = await sessionsRepo.startSession(persistenceDriver, {
+            blockId,
+            phase: 'rest',
+            startedAt: new Date().toISOString(),
+          })
+          set({ openSessionId: id })
+        } catch (err) {
+          console.error('Failed to persist timer session (start-rest):', err)
+        }
+      })()
+    )
+    if (useLibraryStore.getState().silenceDuringRest) {
+      usePlayerStore.getState().pauseForRest()
+    }
+    await Promise.all(writes)
   },
 
-  reset: () => {
+  reset: async () => {
+    const { openSessionId } = get()
     set({
       phase: 'focus',
       totalSec: FOCUS_SEC,
@@ -78,24 +280,61 @@ export const useTimerStore = create<TimerState>()((set, get) => ({
       running: false,
       endsAt: null,
       pomodorosDone: 0,
+      pomodorosPerBlock: POMODOROS_PER_BLOCK,
+      blockId: null,
+      blockTitle: null,
+      blockStartMin: null,
+      blockDurationMin: null,
+      blockQuiet: false,
+      openSessionId: null,
     })
+    const writes: Promise<void>[] = [usePlayerStore.getState().resumeFromRest()]
+    if (openSessionId !== null) {
+      writes.push(
+        persist('abandon-reset', (driver) =>
+          sessionsRepo.finishSession(driver, openSessionId, {
+            endedAt: new Date().toISOString(),
+            completed: false,
+          })
+        )
+      )
+    }
+    await Promise.all(writes)
   },
 
-  tick: (now = Date.now()) => {
-    const { running, endsAt, phase, pomodorosDone } = get()
+  tick: async (now = Date.now()) => {
+    const { running, endsAt, phase, pomodorosDone, openSessionId } = get()
     if (!running || endsAt === null) return
     const remaining = Math.max(0, Math.ceil((endsAt - now) / 1000))
     if (remaining > 0) {
       set({ remainingSec: remaining })
       return
     }
-    // Phase elapsed: stop on zero. A completed focus counts a pomodoro.
+    // Phase elapsed: stop on zero. A completed focus counts a pomodoro and
+    // completes its row; a completed rest completes its row and brings the
+    // sound back.
     set({
       running: false,
       endsAt: null,
       remainingSec: 0,
       pomodorosDone: phase === 'focus' ? pomodorosDone + 1 : pomodorosDone,
+      openSessionId: null,
     })
+    const writes: Promise<void>[] = []
+    if (openSessionId !== null) {
+      writes.push(
+        persist('complete', (driver) =>
+          sessionsRepo.finishSession(driver, openSessionId, {
+            endedAt: new Date(now).toISOString(),
+            completed: true,
+          })
+        )
+      )
+    }
+    if (phase === 'rest') {
+      writes.push(usePlayerStore.getState().resumeFromRest())
+    }
+    await Promise.all(writes)
   },
 }))
 

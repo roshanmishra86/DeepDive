@@ -1157,10 +1157,10 @@ recorded in Phase 4, not a fault. The WSLg `libEGL` / `MESA ZINK` / `gdk_seat_ge
 persist; software-rendering noise, not app faults.
 
 #### Known, deliberately not fixed
-- [ ] **F1 — "Silence during rest" has no behavioural consumer yet.** The toggle hydrates, persists
-  and rolls back correctly, but nothing reads the setting: rest phases belong to the timer, which is
-  Phase 9 scope. The checklist item (the three session defaults exist and persist) is delivered;
-  Phase 9 must wire the rest phase to duck/pause playback when this is on, or remove the setting.
+- [x] **F1 — "Silence during rest" has no behavioural consumer yet.** **Resolved in Phase 9.** The
+  timer's `rest()` now pauses playback when the setting is on (`pauseForRest`), and rest elapse, a
+  focus (re)start, and reset all resume it (`resumeFromRest`). The `restPaused` flag is set only when
+  the timer actually paused a playing track, so a user-paused player is never auto-resumed.
 - [ ] No component-level test of the library render path — the suite runs on the `node` environment
   because jsdom costs ~113s on this `/mnt/c` mount (Phase 2). Pure helpers and both stores are
   tested; the JSX is not. Same standing exception as Phases 5.5, 5.6, 6 and 7.
@@ -1172,13 +1172,171 @@ persist; software-rendering noise, not app faults.
   phase (detection requires a load attempt; the fs plugin cannot pre-flight arbitrary paths);
   revisit in the Phase 10 polish pass if it reads as a rendering fault.
 
-### Phase 9 — Pomodoro & full session
-- [ ] Timer store: focus/rest phases, pomodoro counter, drift-free tick from wall clock
-- [ ] Three timer styles (ring / numeric / bar) driven by settings
-- [ ] Start / pause / continue / rest / reset
-- [ ] Full-session overlay (dark `#22332d`, 300px ring, next-block hint)
-- [ ] Persist completed pomodoros to `pomodoro_session`
-- [ ] Timer survives view switches and window minimise
+### Phase 9 — Pomodoro & full session *(owner: Haiku sub-agent, verified by Sonnet sub-agent + main session)*
+- [x] Timer store: focus/rest phases, pomodoro counter, drift-free tick from wall clock — the Phase 2
+  store already had the shape; this phase extended it with attachment, persistence and the rest→focus
+  transition
+- [x] Three timer styles (ring / numeric / bar) driven by settings — shipped in Phase 2; unchanged here
+- [x] Start / pause / continue / rest / reset — see the state-machine rules below
+- [x] Full-session overlay (dark `#22332d`, 300px ring, next-block hint) — completed with the attached
+  block title + meta line, the in-session music chip, and the next-block hint
+- [x] Persist completed pomodoros to `pomodoro_session` — one row per phase run; see the lifecycle below
+- [x] Timer survives view switches and window minimise — the store is module-level and the 500ms tick
+  lives in `App.tsx`, not in any view; minimise is covered by the wall-clock-deadline tick (proven by
+  test: 26 idle minutes, one tick, pomodoro completed and its row completed)
+- [x] **Phase 8 F1 deferral, now delivered:** `silenceDuringRest` has its behavioural consumer —
+  `rest()` pauses playback when the setting is on; rest elapse, a focus (re)start, and reset all resume it
+
+#### Attachment model — snapshot at fresh start, frozen until reset
+The timer attaches to a block only on a **fresh focus start** (`isFreshCycle`: focus phase, not running,
+`remainingSec === totalSec`, zero pomodoros done). The caller passes `activeWorkBlock(blocks, nowMin)` —
+the non-completed **deep/shallow** block whose window contains now; breaks and rituals are never
+attachable (you don't pomodoro a break). Attaching snapshots `blockId/title/startMin/durationMin/quiet`
+into the store and sets `pomodorosPerBlock = pomodoroTargetFor(block)` (the block's explicit
+`pomodoros` when set, else `max(1, floor(duration/30))`). The snapshot is deliberate: it survives the
+block being edited or deleted mid-session (`ON DELETE SET NULL` covers the DB side). While the cycle is
+fresh, the widget and overlay *preview* the currently-active block instead; the moment a pomodoro
+starts, the display freezes onto the snapshot. `reset()` is the universal let-go: it clears the
+attachment, the counter, and the target back to the defaults.
+
+#### Session row lifecycle — one row per phase run
+- Fresh focus start (and start-after-completion, and the rest→focus transition): INSERT a row
+  (`block_id` may be NULL — unattached pomodoros are honestly recorded as belonging to no block).
+- `pause()` never closes the row: one row per pomodoro, its `started_at`→`ended_at` wall-clock span
+  includes pauses. Continue opens no second row.
+- `tick` to zero completes the row (`completed = 1`, `ended_at` from the tick's wall-clock `now`).
+- `rest()` / `reset()` abandon an open row (`completed = 0`, `ended_at` now).
+- All writes are fire-and-forget and never reject (P2-A); state updates synchronously first, and every
+  action returns the persistence promise so tests can await the flush. `openSessionId` is cleared
+  synchronously before any async write, so a rapid start→zero→start can never write the wrong row id.
+- A row left open at app quit (`ended_at` NULL) is the honest record of an interrupted pomodoro; it is
+  deliberately not back-filled on next launch.
+
+#### The rest→focus transition
+`start`/`toggle` in the rest phase begins a **fresh 25:00 focus** (attachment kept, new focus row,
+music resumed) — except when resuming a paused mid-rest timer (`0 < remaining < total`, or the
+sub-second-pause case below), which stays in the rest phase on the same open row. The mockup's own
+toggle logic breaks down here (it would restart a 0-second rest); this is the pomodoro cycle's natural
+next step and the only sensible reading.
+
+#### Overlay and widget semantics
+- Overlay title/meta: the snapshot mid-cycle, the active-block preview while fresh, else
+  "Focus session" with no meta. The meta is `5:30 AM – 7:00 AM · 90 min block[ · notifications off]` —
+  raw `90 min`, not `formatDuration`, because the mockup says "90 min block". The `notifications off`
+  segment reflects the block's real `quiet` flag; the app does not actually control OS notifications.
+- Session tag matches the mockup copy: "session 2 of 3" (the widget keeps "2 / 3").
+- Music chip renders only when a track is loaded; its dot pulses only while playing (the mockup's dot
+  pulses unconditionally — a static mockup can't express the paused state). Clicking it toggles
+  playback; its aria-label names the track.
+- Next-block hint: the first non-completed block after the displayed one in canonical order (any kind —
+  the mockup's hint is a break); falls back to the first not-yet-ended non-completed block when the
+  attachment is gone (deleted mid-session).
+- **Known semantic, deliberately chosen:** mid-cycle *unattached* (timer started in a gap), the overlay
+  previews the currently-active block's title while the widget says "No block attached". The overlay
+  title answers "what should I be working on now"; the rows honestly record `block_id` NULL. Revisit in
+  Phase 10 if it reads as a false claim of attachment.
+
+#### Deliberate correction — the archive's "Pomodoros" figure now counts what happened
+`dayRecord.pomodoros` was `SUM(day_block.pomodoros)` — the sum of *planned* pomodoros over the day's
+blocks, which counts pomodoros for blocks that never ran (a miss day with two planned deep blocks would
+read "6 pomodoros"). The mockup's own data only makes sense as actuals (its miss days show `poms: 0`
+despite planned blocks). It now counts `pomodoro_session` rows joined to the day's blocks where
+`phase = 'focus' AND completed = 1`, as a **separate scalar query** — joining into the stats query would
+fan out the COUNT/SUM (the Phase 3 duplicate-counting class). Consequence: a day where blocks were
+checked off without the timer running reads 0 pomodoros, which is honest. This also makes the Phase 9
+persistence observable in the UI — a write nothing reads is the "dead feature" class. No existing test
+asserted the old number.
+
+#### Defect found in verification and fixed
+Found by the independent verifier's probe after the implementing sub-agent reported all gates green;
+committed as `b946ed3`.
+- [x] **Orphaned `pomodoro_session` row on sub-second pause→start.** `pause()` ceils the remaining time,
+  so pausing within the first wall-clock second of a run leaves `remainingSec === totalSec` with a row
+  open. `start()`'s resume check required `remainingSec < totalSec`, so it took the fresh-start path:
+  it nulled `openSessionId` **without closing the open row** and inserted a second one. Proven by probe
+  against real SQLite (two rows, both `ended_at` NULL, only the second tracked). Fixed: the resume
+  branch also covers `!running && openSessionId !== null` — a paused timer with an open row always
+  resumes that row. Two regression tests (focus variant; instantly-paused-rest variant, which
+  additionally corrected a factually wrong comment claiming a never-ran rest has no row — `rest()`
+  inserts immediately).
+
+#### Edge-case races dispositioned
+- **Pause-at-deadline then start:** ~~documented as a residual~~ **fixed in the PR #10 review round**
+  (see the external-review section below).
+- **In-flight INSERT race:** `openSessionId` is set after the async INSERT resolves, so an action
+  landing in that millisecond-scale gap can leave a tracked-late row a later fresh start drops.
+  Closers all clear `openSessionId` synchronously first, so no wrong-id write is possible; a real fix
+  needs action sequencing, a design decision.
+- **Direct `start()` while running** re-anchors `endsAt` from the last-ticked `remainingSec` (≤1 tick
+  of drift) and, within the first second, would open a second row. Not UI-reachable: both components
+  call only `toggle`, which routes running→pause. Documented per the no-guard choice.
+- **Double `rest()`** was probed and is correct: the first rest row is properly abandoned, the second
+  opened and tracked.
+
+**Phase 9 acceptance — MET (independently verified by the main session, not taken on the sub-agents' reports):**
+
+| Check | Result |
+| --- | --- |
+| `pnpm lint` | clean, zero warnings (96 files) |
+| `pnpm typecheck` | pass (`tsc -b` + `tsc -p tsconfig.test.json`) |
+| `pnpm test` | 751 tests, 29 files (682 at phase start; +58 implementation, +2 verification regression, +9 PR #10 review regression) |
+| `pnpm check:css` | pass — all `.session-*` classes resolve |
+| `pnpm build` | pass — built in ~34s |
+| `cargo fmt --all -- --check` / `cargo clippy --all-targets -- -D warnings` | pass (no Rust files changed) |
+| Forbidden files in the diff | zero — no migration, capability, `tauri.conf.json`, `package.json` or lockfile changes |
+| New colour literals | 7 hex lines, **all** inside the new `.session-*` rules and all from the overlay's established literal palette (the overlay is deliberately untokenized — Phase 2 decision); zero elsewhere |
+| Main-session probes vs real SQLite | pass ×5 — full cycle read back row-by-row (focus completed / rest completed / second focus open), archive counts exactly the completed focus rows, minimise catch-up persists, unattached rows are `block_id` NULL and counted on no day, pause/continue keeps one open row, reset abandons |
+| Regression tests proven able to fail | pass ×6 — five by the verifier (tick completion, rest→focus insert, archive `completed = 1` filter, `restPaused` guard, `isFreshCycle` clause), each reverted→red→restored; plus one main-session spot-check (tick `completed: true→false` → 6 red → restored → 74/74 green) |
+| `pnpm tauri dev` launches on WSLg | **process health only** — app healthy for 5m07s, 101 MB RSS, 0 panics, 0 Rust errors, Vite HTTP 200. Not feature verification: real-audio playback through a rest phase and the overlay's rendered look remain for the Phase 10 manual QA pass |
+
+#### External PR review — two findings confirmed and fixed, one fix corrected on evidence
+
+An external review of PR #10 re-ran the gates independently (742/742, tsc 0, oxlint 0, css pass) and
+confirmed the design, but found one real defect the PR did not document, plus two minors.
+- [x] **`restPaused` survives user intent (the defect).** `pauseForRest` set `restPaused`, and nothing
+  in `togglePlay`/`playTrack` cleared it — so a user who pressed play then pause during a rest (they
+  want silence) was force-resumed at rest end, violating the flag's own invariant ("a user-paused
+  player is never auto-resumed"). No test exercised user interaction between pause and resume. Fixed:
+  `togglePlay` clears `restPaused` on any user transport action (one line covering both branches) and
+  `playTrack` clears it in its selection set (`next`/`prev` route through it). Two regression tests,
+  proven red-then-green (2 failed pre-fix → 37 passed post-fix).
+- [x] **Overlay and widget disagreed on the pomodoro target while fresh.** The widget previewed
+  `pomodoroTargetFor(activeBlock)` while the overlay passed the raw store `pomodorosPerBlock` — a
+  3-hour block with no explicit pomodoros read "1 / 6" in the widget and "session 1 of 3" in the
+  overlay. Fixed by extracting `displayPomodoroTarget(fresh, activeBlock, storeTarget)` into
+  `lib/timer.ts` and calling it from both surfaces (the project's signature defect class — the same
+  expression in two components); four unit tests.
+- [x] **Pause-at-deadline residual — fixed, but not with the reviewer's suggested edit.** The review
+  correctly observed the residual was cheap to fix, and correctly settled the design question
+  ("pausing at zero completes the pomodoro" — the answer the wall-clock store already implies). But
+  the suggested one-liner (drop the `remainingSec > 0` clause from `isResume`) was **wrong on
+  evidence**: applied as a mutation, it turned five tests red — a completed phase (`remainingSec 0`,
+  no open row) would satisfy `remainingSec < totalSec` and take a zero-length resume whose next tick
+  increments the counter with no row, breaking the next-pomodoro start, the rest→focus transition,
+  and plain restart. The implemented fix reassociates instead: `isResume = (remainingSec > 0 &&
+  remainingSec < totalSec) || (!running && openSessionId !== null)` — an open row always resumes (at
+  zero, `endsAt = now` lets the next tick complete it); a completed phase with no row still starts
+  fresh. Three regression tests: paused-at-zero focus completes the same row and counts the pomodoro;
+  start-after-completion opens a NEW row with no phantom increment (guards the rejected edit);
+  paused-at-zero rest completes and resumes music. Proven red-then-green (2 failed pre-fix → 72
+  passed post-fix).
+
+Post-review gates: `pnpm lint` clean · `pnpm typecheck` pass · **`pnpm test` 751 tests / 29 files**
+(742 + 9 review regression tests) · `pnpm check:css` pass · `pnpm build` pass. Failability proofs
+this round: restPaused fix (2 red pre-fix), pause-at-deadline fix (2 red pre-fix), the reviewer's
+literal `isResume` edit as a deliberate mutation (5 red — the evidence for correcting it).
+
+#### Known, deliberately not fixed
+- [ ] No component-level test of the widget/overlay render paths — the suite runs on the `node`
+  environment because jsdom costs ~113s on this `/mnt/c` mount (Phase 2). Pure helpers and both stores
+  are tested; the JSX is not. Same standing exception as Phases 5.5–8.
+- [ ] The in-flight-INSERT residual above.
+- [ ] `pomodorosDone` is not rehydrated on relaunch — a restarted app starts the counter fresh even if
+  today's block already has completed sessions. The checklist asks only that completed pomodoros
+  persist (they do, and the archive reads them); per-block counter rehydration is a Phase 10 candidate.
+- [ ] Pre-existing, outside this diff: `src/stores/rituals.test.ts:362` uses
+  `toISOString().split('T')[0]` as a day key in a fixture — the Phase 3 banned pattern in test code.
+  Not user-facing; flagged for the Phase 10 pass.
 
 ### Phase 10 — Release
 - [ ] Real app icon set (all sizes, `.ico` + `.png` + `.icns`-optional)

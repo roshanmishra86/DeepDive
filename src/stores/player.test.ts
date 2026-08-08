@@ -76,6 +76,7 @@ function resetPlayerStore() {
     positionSec: 0,
     durationSec: 0,
     missing: false,
+    restPaused: false,
   })
 }
 
@@ -429,5 +430,122 @@ describe('player store', () => {
     // The cancelled ramp must not resurrect later.
     await vi.advanceTimersByTimeAsync(60_000)
     expect(fake.volume).toBeCloseTo(0.3)
+  })
+
+  it('pauseForRest pauses a playing track and marks restPaused', async () => {
+    useLibraryStore.setState({ fadeInSec: 0 })
+    await usePlayerStore.getState().playTrack(makeTrack(1))
+    expect(usePlayerStore.getState().playing).toBe(true)
+
+    usePlayerStore.getState().pauseForRest()
+    expect(fake.paused).toBe(true)
+    expect(usePlayerStore.getState().playing).toBe(false)
+    expect(usePlayerStore.getState().restPaused).toBe(true)
+  })
+
+  it('pauseForRest is a no-op when not playing (never auto-resumes a user pause)', async () => {
+    useLibraryStore.setState({ fadeInSec: 0 })
+    await usePlayerStore.getState().playTrack(makeTrack(1))
+    await usePlayerStore.getState().togglePlay() // user pause
+    expect(usePlayerStore.getState().playing).toBe(false)
+
+    usePlayerStore.getState().pauseForRest()
+    expect(usePlayerStore.getState().restPaused).toBe(false)
+  })
+
+  it('pauseForRest is a no-op with no track selected', () => {
+    usePlayerStore.getState().pauseForRest()
+    expect(usePlayerStore.getState().restPaused).toBe(false)
+  })
+
+  it('resumeFromRest plays again after a rest pause', async () => {
+    useLibraryStore.setState({ fadeInSec: 0 })
+    await usePlayerStore.getState().playTrack(makeTrack(1))
+    usePlayerStore.getState().pauseForRest()
+    expect(usePlayerStore.getState().restPaused).toBe(true)
+
+    await usePlayerStore.getState().resumeFromRest()
+    expect(usePlayerStore.getState().restPaused).toBe(false)
+    expect(usePlayerStore.getState().playing).toBe(true)
+    expect(fake.paused).toBe(false)
+  })
+
+  it('resumeFromRest is a no-op when not restPaused', async () => {
+    useLibraryStore.setState({ fadeInSec: 0 })
+    await usePlayerStore.getState().playTrack(makeTrack(1))
+    await usePlayerStore.getState().togglePlay() // user pause
+    const pausedBefore = fake.paused
+
+    await usePlayerStore.getState().resumeFromRest()
+    expect(usePlayerStore.getState().playing).toBe(false)
+    expect(fake.paused).toBe(pausedBefore)
+  })
+
+  it('resumeFromRest clears restPaused even with no track selected', async () => {
+    useLibraryStore.setState({ fadeInSec: 0 })
+    await usePlayerStore.getState().playTrack(makeTrack(1))
+    usePlayerStore.getState().pauseForRest()
+    expect(usePlayerStore.getState().restPaused).toBe(true)
+
+    usePlayerStore.getState().stop() // clears restPaused via stop
+    expect(usePlayerStore.getState().restPaused).toBe(false)
+
+    // Directly seeded restPaused with no track: resume clears the flag and
+    // does not throw.
+    usePlayerStore.setState({ restPaused: true })
+    await usePlayerStore.getState().resumeFromRest()
+    expect(usePlayerStore.getState().restPaused).toBe(false)
+    expect(usePlayerStore.getState().playing).toBe(false)
+  })
+
+  it('a rejected resume play() routes through handlePlayRejection without throwing', async () => {
+    useLibraryStore.setState({ fadeInSec: 0 })
+    await usePlayerStore.getState().playTrack(makeTrack(1))
+    usePlayerStore.getState().pauseForRest()
+
+    fake.playRejects = true
+    fake.playRejectName = 'NotAllowedError' // autoplay policy: not missing
+    await usePlayerStore.getState().resumeFromRest()
+    expect(usePlayerStore.getState().restPaused).toBe(false)
+    expect(usePlayerStore.getState().playing).toBe(false)
+    expect(usePlayerStore.getState().missing).toBe(false)
+  })
+
+  it('user play-then-pause during a rest forfeits the auto-resume (PR #10 review)', async () => {
+    // The defect: pauseForRest set restPaused, and nothing in togglePlay
+    // cleared it — so a user who pressed play then pause during a rest
+    // (they want silence) was force-resumed at rest end, violating the
+    // flag's own invariant ("a user-paused player is never auto-resumed").
+    useLibraryStore.setState({ fadeInSec: 0 })
+    await usePlayerStore.getState().playTrack(makeTrack(1))
+    usePlayerStore.getState().pauseForRest()
+    expect(usePlayerStore.getState().restPaused).toBe(true)
+
+    await usePlayerStore.getState().togglePlay() // user plays during the rest
+    expect(usePlayerStore.getState().playing).toBe(true)
+    expect(usePlayerStore.getState().restPaused).toBe(false)
+
+    await usePlayerStore.getState().togglePlay() // user pauses again — wants silence
+    expect(usePlayerStore.getState().playing).toBe(false)
+    expect(usePlayerStore.getState().restPaused).toBe(false)
+
+    await usePlayerStore.getState().resumeFromRest() // rest ends
+    expect(usePlayerStore.getState().playing).toBe(false)
+    expect(fake.paused).toBe(true)
+  })
+
+  it('playTrack clears a pending rest pause (next/prev route through it)', async () => {
+    useLibraryStore.setState({ fadeInSec: 0 })
+    await usePlayerStore.getState().playTrack(makeTrack(1))
+    usePlayerStore.getState().pauseForRest()
+    expect(usePlayerStore.getState().restPaused).toBe(true)
+
+    await usePlayerStore.getState().playTrack(makeTrack(2)) // user picks a track mid-rest
+    expect(usePlayerStore.getState().restPaused).toBe(false)
+    expect(usePlayerStore.getState().playing).toBe(true)
+
+    await usePlayerStore.getState().resumeFromRest() // no double-resume at rest end
+    expect(usePlayerStore.getState().trackId).toBe(2)
+    expect(usePlayerStore.getState().playing).toBe(true)
   })
 })

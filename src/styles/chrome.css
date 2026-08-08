@@ -1101,6 +1101,57 @@
   outline-offset: 2px;
 }
 
+.session-bottom {
+  position: absolute;
+  bottom: 26px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 12px;
+  color: #8fa79d;
+}
+
+.session-chip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid #3d554c;
+  border-radius: 20px;
+  padding: 6px 13px;
+  color: #8fa79d;
+  background: none;
+  cursor: pointer;
+  font-size: 12px;
+  font-family: inherit;
+  transition: background-color 0.15s;
+}
+
+.session-chip:hover {
+  background-color: #2b3f38;
+}
+
+.session-chip:focus-visible {
+  outline: 2px solid #c9dbd2;
+  outline-offset: 2px;
+}
+
+.session-chip-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #c9dbd2;
+  flex: none;
+}
+
+.session-chip-dot-playing {
+  animation: pulse 2s ease-in-out infinite;
+}
+
+.session-next {
+  font-family: var(--font-mono);
+  color: #8fa79d;
+}
+
 /* ─── Views (Content Area) ─── */
 .view {
   display: flex;
