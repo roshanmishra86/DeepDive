@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from 'react'
 import { useTemplatesStore } from '../../stores/templates'
+import { DEFAULT_TEMPLATE_START_MIN } from '../../lib/templates'
 
 interface NewTemplateModalProps {
   onClose: () => void
@@ -53,7 +54,7 @@ export function NewTemplateModal({ onClose }: NewTemplateModalProps) {
     const id = await createTemplate({
       name: name.trim(),
       description: '',
-      startMin: 300,
+      startMin: DEFAULT_TEMPLATE_START_MIN,
       weekdays: 0,
     })
     if (id !== null) {

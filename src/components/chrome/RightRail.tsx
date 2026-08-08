@@ -203,21 +203,24 @@ export function RightRail() {
           </div>
         ) : (
           <div className="rail-upcoming">
-            {upcoming.map((item, i) => (
-              <div key={item.task.id} className="rail-upcoming-item">
-                <span className="rail-upcoming-n" style={{ color: item.rankColor }}>
-                  {i + 1}
-                </span>
-                <div>
-                  <div className="rail-upcoming-title">
-                    {item.task.title}
+            {upcoming.map((item, i) => {
+              const meta = taskMeta(item.task, now)
+              return (
+                <div key={item.task.id} className="rail-upcoming-item">
+                  <span className="rail-upcoming-n" style={{ color: item.rankColor }}>
+                    {i + 1}
+                  </span>
+                  <div>
+                    <div className="rail-upcoming-title">
+                      {item.task.title}
+                    </div>
+                    {meta && (
+                      <div className="rail-upcoming-meta">{meta}</div>
+                    )}
                   </div>
-                  {taskMeta(item.task, now) && (
-                    <div className="rail-upcoming-meta">{taskMeta(item.task, now)}</div>
-                  )}
                 </div>
-              </div>
-            ))}
+              )
+            })}
           </div>
         )}
 

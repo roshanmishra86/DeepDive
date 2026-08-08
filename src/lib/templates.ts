@@ -9,6 +9,9 @@ import type { Template, TemplateBlock } from '../db/types'
 import { sortBlocks } from './today'
 import { minutesToClock } from './time'
 
+/** Default template start time in minutes since midnight (300 = 5:00 AM). */
+export const DEFAULT_TEMPLATE_START_MIN = 300
+
 /**
  * Weekday metadata with bit position, short label (single letter), and full label.
  * Monday = bit 0, Sunday = bit 6.
