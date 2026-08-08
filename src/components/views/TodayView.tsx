@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useCallback } from 'react'
 import { useTodayStore } from '../../stores/today'
 import { toDayKey } from '../../lib/time'
 import { openDatabase } from '../../db/index'
@@ -68,9 +68,9 @@ export function TodayView() {
     setComposerState({ mode: 'new', startMin: nextFreeStart(blocks, nowMin, 30) })
   }
 
-  const openEditComposer = (blockId: number) => {
+  const openEditComposer = useCallback((blockId: number) => {
     setComposerState({ mode: 'edit', blockId })
-  }
+  }, [])
 
   const closeComposer = () => {
     setComposerState({ mode: 'closed' })
@@ -264,7 +264,9 @@ export function TodayView() {
                   height={row.height}
                   state={blockState(row.block, nowMin)}
                   nowMin={nowMin}
-                  onEdit={() => openEditComposer(row.block.id)}
+                  isFirst={row.block.id === blocks[0]?.id}
+                  isLast={row.block.id === blocks[blocks.length - 1]?.id}
+                  onEdit={openEditComposer}
                   overlapMin={overlapByBlockId.get(row.block.id)}
                 />
               )

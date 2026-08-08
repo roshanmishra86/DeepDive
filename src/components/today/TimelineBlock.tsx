@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, memo } from 'react'
 import { useTodayStore } from '../../stores/today'
 import { blockProgress } from '../../lib/today'
 import { formatDuration } from '../../lib/time'
@@ -10,18 +10,22 @@ interface TimelineBlockProps {
   height: number
   state: BlockState
   nowMin: number
-  onEdit: () => void
+  isFirst: boolean
+  isLast: boolean
+  onEdit: (id: number) => void
   /** Minutes this block overlaps its predecessor, if any (see `conflicts()`). */
   overlapMin?: number
 }
 
 const NUDGE_MIN = 5
 
-export function TimelineBlock({
+function TimelineBlockInner({
   block,
   height,
   state,
   nowMin,
+  isFirst,
+  isLast,
   onEdit,
   overlapMin,
 }: TimelineBlockProps) {
@@ -29,16 +33,11 @@ export function TimelineBlock({
   const removeBlock = useTodayStore((s) => s.removeBlock)
   const move = useTodayStore((s) => s.move)
   const nudgeBlock = useTodayStore((s) => s.nudgeBlock)
-  const blocks = useTodayStore((s) => s.blocks)
 
   // Whether nudging this block ripples the shift to later blocks (default)
   // or is confined to just this block. Per-block so different blocks can be
   // nudged independently without the toggle "sticking".
   const [ripple, setRipple] = useState(true)
-
-  const index = blocks.findIndex((b) => b.id === block.id)
-  const isFirst = index === 0
-  const isLast = index === blocks.length - 1
 
   const isCompact = height < 48
   let progress: ReturnType<typeof blockProgress> | null = null
@@ -193,7 +192,7 @@ export function TimelineBlock({
         </button>
         <button
           className="btn-icon"
-          onClick={onEdit}
+          onClick={() => onEdit(block.id)}
           aria-label={`Edit ${block.title}`}
           title="Edit"
         >
@@ -216,3 +215,21 @@ export function TimelineBlock({
     </div>
   )
 }
+
+export const TimelineBlock = memo(TimelineBlockInner, (prev, next) => {
+  // If state is not active and hasn't changed, we can ignore nowMin updates.
+  // This prevents all past and future blocks from re-rendering every 30 seconds.
+  const ignoreNowMin = prev.state === next.state && prev.state !== 'active'
+
+  if (!ignoreNowMin && prev.nowMin !== next.nowMin) return false
+
+  return (
+    prev.block === next.block &&
+    prev.height === next.height &&
+    prev.state === next.state &&
+    prev.isFirst === next.isFirst &&
+    prev.isLast === next.isLast &&
+    prev.onEdit === next.onEdit &&
+    prev.overlapMin === next.overlapMin
+  )
+})
