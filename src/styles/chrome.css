@@ -3157,6 +3157,10 @@ button:focus-visible {
   gap: 22px;
 }
 
+.arc-empty-cta {
+  margin-top: 20px;
+}
+
 .arc-left-column {
   width: 352px;
   flex: none;

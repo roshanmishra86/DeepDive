@@ -1,5 +1,6 @@
 import { useEffect } from 'react'
 import { useArchiveStore } from '../../stores/archive'
+import { useAppStore } from '../../stores/app'
 import { openDatabase } from '../../db/index'
 import { toDayKey } from '../../lib/time'
 import { MonthCalendar } from '../archive/MonthCalendar'
@@ -11,6 +12,8 @@ export function ArchiveView() {
   const loading = useArchiveStore((s) => s.loading)
   const error = useArchiveStore((s) => s.error)
   const headline = useArchiveStore((s) => s.headline)
+  const hasRecords = useArchiveStore((s) => s.hasRecords)
+  const setView = useAppStore((s) => s.setView)
 
   useEffect(() => {
     let mounted = true
@@ -72,6 +75,41 @@ export function ArchiveView() {
             <div className="view-empty-title" style={{ color: 'var(--danger)' }}>
               Error: {error}
             </div>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  // Fresh-install empty state: no day_block or day_note rows anywhere, so
+  // every month's calendar would be dotless and the headline stats would be
+  // zeroed — which reads as broken, not empty. Keep the header (title +
+  // subtitle) but drop the stats and the body entirely; the CTA routes to
+  // Today, where the first record gets created.
+  if (!hasRecords) {
+    return (
+      <div className="arc-view">
+        <div className="arc-header">
+          <div>
+            <div className="arc-title">Archive</div>
+            <div className="arc-subtitle">
+              Every day you planned blocks. A dot means the day has a record — open it to see what actually landed.
+            </div>
+          </div>
+        </div>
+        <div className="arc-body">
+          <div className="view-empty">
+            <div className="view-empty-title">No recorded days yet</div>
+            <div className="view-empty-text">
+              The archive fills in as you plan days — every day with blocks or a shut-down note lands here.
+            </div>
+            <button
+              type="button"
+              className="btn-accent arc-empty-cta"
+              onClick={() => setView('today')}
+            >
+              Plan today
+            </button>
           </div>
         </div>
       </div>

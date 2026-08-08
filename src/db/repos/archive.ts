@@ -30,6 +30,20 @@ export interface HeadlineStats {
 }
 
 
+/**
+ * True iff the archive has anything to show at all: any `day_block` row OR
+ * any `day_note` row. These are exactly the two sources `dayStatuses` derives
+ * the calendar from, so this is false precisely when every month's calendar
+ * would be dotless — the fresh-install case the view renders an empty state
+ * for. Two EXISTS clauses, no full counts.
+ */
+export async function hasAnyRecords(driver: SqlDriver): Promise<boolean> {
+  const rows = await driver.select<{ has: number }>(
+    `SELECT EXISTS(SELECT 1 FROM day_block) OR EXISTS(SELECT 1 FROM day_note) as has`
+  )
+  return rows[0].has === 1
+}
+
 export async function dayStatuses(
   driver: SqlDriver,
   fromDay: string,

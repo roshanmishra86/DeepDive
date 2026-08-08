@@ -22,6 +22,10 @@ interface ArchiveState {
   record: DayRecord | null
   headline: HeadlineStats | null
   trend: { weekStart: string; hours: number }[]
+  // Global "does the archive have anything at all" flag (any day_block or
+  // day_note row). Drives the fresh-install empty state. Populated once in
+  // hydrate — setMonth does not recompute it (it is not per-month).
+  hasRecords: boolean
   loading: boolean
   error: string | null
 
@@ -57,6 +61,7 @@ export const useArchiveStore = create<ArchiveState>()((set, get) => ({
   record: null,
   headline: null,
   trend: [],
+  hasRecords: false,
   loading: false,
   error: null,
 
@@ -70,8 +75,9 @@ export const useArchiveStore = create<ArchiveState>()((set, get) => ({
         return
       }
 
-      // Fetch headline stats
+      // Fetch headline stats and the global has-records flag in the same pass
       const headline = await archiveRepo.headlineStats(driver, today)
+      const hasRecords = await archiveRepo.hasAnyRecords(driver)
 
       // Fetch 12-week trend. The repo buckets Mon–Sun from the anchor it is
       // given, so the anchor must be the Monday of today's week — the same
@@ -124,6 +130,7 @@ export const useArchiveStore = create<ArchiveState>()((set, get) => ({
         statuses,
         headline,
         trend,
+        hasRecords,
         selectedDay,
         record,
         loading: false,
