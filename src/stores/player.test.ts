@@ -318,6 +318,33 @@ describe('player store', () => {
     expect(usePlayerStore.getState().playing).toBe(false)
   })
 
+  it('an error event with code 1 (aborted) does NOT mark missing', async () => {
+    // Reassigning src aborts the previous track's load; some engines fire
+    // `error` for the abort. trackId already points at the new track by
+    // then — marking missing would falsely label a healthy file.
+    await usePlayerStore.getState().playTrack(makeTrack(1))
+    expect(usePlayerStore.getState().playing).toBe(true)
+
+    fake.error = { code: 1 } // MEDIA_ERR_ABORTED
+    fake.emit('error')
+
+    expect(usePlayerStore.getState().missing).toBe(false)
+    expect(usePlayerStore.getState().playing).toBe(true)
+  })
+
+  it('an error event with code 3 (decode) marks missing — the file is unplayable', async () => {
+    // Deliberately included on the error path although isSrcFailure
+    // excludes it on the play() path: a decode failure means the file can
+    // never play, and this listener is where it surfaces.
+    await usePlayerStore.getState().playTrack(makeTrack(1))
+
+    fake.error = { code: 3 } // MEDIA_ERR_DECODE
+    fake.emit('error')
+
+    expect(usePlayerStore.getState().missing).toBe(true)
+    expect(usePlayerStore.getState().playing).toBe(false)
+  })
+
   it('markMissing is a no-op when no track is selected', () => {
     usePlayerStore.getState().markMissing()
     expect(usePlayerStore.getState().missing).toBe(false)

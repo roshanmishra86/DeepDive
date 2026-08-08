@@ -1115,6 +1115,16 @@ acceptance table overstated what was verified, and four real defects, one of the
   exists.
 
 Minor findings, also fixed:
+- [x] **The `error` event listener was still unconditional** (follow-up review). After the
+  `isSrcFailure` fix, the `play()` path gated on cause but the element's `error` listener called
+  `markMissing()` for any MediaError code — including 1 (ABORTED), the very code the play path
+  excludes. The realistic trigger: clicking track B while A is still loading aborts A's load, and
+  engines that fire `error` for the abort would falsely label B. The listener now ignores code 1 and
+  treats 2/3/4 as genuine failures. The two paths are deliberately asymmetric, and it is recorded
+  here so it is not rediscovered as a bug: the `play()` path stays conservative (codes 2/4 only,
+  via `isSrcFailure`) because a rejection without an error event is ambiguous; the `error` event is
+  the authoritative signal and additionally covers code 3 (decode) — which is why the play path can
+  afford to exclude it. Proven red-then-green (guard removed → `expected true to be false`).
 - [x] Picker accepted `m4a`/`ogg` while the empty-state copy said "mp3, wav or flac". One
   `AUDIO_EXTENSIONS` list + one `AUDIO_EXTENSIONS_LABEL` in `lib/library.ts` now drive the picker
   filter, the drag-drop filter, and all copy.
@@ -1132,12 +1142,12 @@ Minor findings, also fixed:
 | --- | --- |
 | `pnpm lint` | clean, zero warnings |
 | `pnpm typecheck` | pass (`tsc -b` + `tsc -p tsconfig.test.json`) |
-| `pnpm test` ×2 | 680 tests, 28 files — identical both runs (605 at phase start) |
+| `pnpm test` ×2 | 682 tests, 28 files — identical both runs (605 at phase start) |
 | `pnpm check:css` | pass — all `.lib-*` classes resolve |
 | `pnpm build` | pass — 401.8 KB JS / 64.3 KB CSS (gzip 113.5 / 9.9) |
 | `cargo fmt --all -- --check` / `cargo clippy --all-targets -- -D warnings` | pass (no Rust files changed) |
 | New colour literals in the diff (`#`, `rgb()`, named) | zero |
-| Regression tests proven able to fail | pass ×6 — F2/F3/F4 plus the three review-fix mutations above; each reverted, suite went red, fix restored |
+| Regression tests proven able to fail | pass ×7 — F2/F3/F4, the three review-fix mutations, and the ABORTED guard; each reverted, suite went red, fix restored |
 | Store read-backs from real SQLite | pass — register/category/toggles/remove all read back via `node:sqlite` |
 | Playback exercised at runtime | pass — real browser + real WAV + real store: play, position tracking, seek, pause/resume, `ended` auto-advance, real-404 → missing (Chromium harness, see above) |
 | `pnpm tauri dev` launches on WSLg | **process health only** — app healthy, 189 MB RSS, 0 panics, Vite HTTP 200. Not feature verification: `convertFileSrc`/asset-protocol and WebKitGTK mp3 decode remain unverified until the Phase 10 manual QA pass |

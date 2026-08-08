@@ -11,11 +11,12 @@ import { useLibraryStore } from './library'
  * Playback store driving the music bar. Plays against ONE lazily-created
  * HTMLAudioElement; position/duration flow from the element's own events
  * (`timeupdate`/`durationchange`/`ended`/`error`), never from a polling
- * timer. A missing file is detected by the element's `error` event, or by a
- * rejected `play()` whose cause points at the source (`isSrcFailure`) — an
- * autoplay-policy rejection is not a missing file. The fs plugin cannot
- * stat arbitrary absolute paths, so no pre-flight existence check is
- * possible.
+ * timer. A missing file is detected by the element's `error` event
+ * (anything but MEDIA_ERR_ABORTED, which only means a load was
+ * interrupted), or by a rejected `play()` whose cause points at the source
+ * (`isSrcFailure`) — an autoplay-policy rejection is not a missing file.
+ * The fs plugin cannot stat arbitrary absolute paths, so no pre-flight
+ * existence check is possible.
  *
  * The element is injectable for tests (`injectAudioElementForTests`) because
  * node has no `Audio` constructor.
@@ -109,6 +110,17 @@ function wireAudio(el: HTMLAudioElement): HTMLAudioElement {
     handleEnded()
   })
   el.addEventListener('error', () => {
+    // MEDIA_ERR_ABORTED (1) is not a source failure: reassigning src aborts
+    // the previous track's load, and some engines fire `error` for the
+    // abort. By then trackId already points at the new track, so marking
+    // missing here would falsely label a healthy file. Codes 2/3/4
+    // (network / decode / unsupported) are genuine failures of the current
+    // source — the event is the authoritative missing signal for them,
+    // which is exactly what lets the play()-rejection path stay
+    // conservative (isSrcFailure excludes 1 and 3; decode failures arrive
+    // here instead).
+    const code = el.error ? el.error.code : null
+    if (code === 1) return
     usePlayerStore.getState().markMissing()
   })
   return el
