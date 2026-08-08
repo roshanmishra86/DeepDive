@@ -91,6 +91,25 @@ will ship binaries named `0.1.0`.
    binaries build and upload, not that they run.
 4. Publish the draft.
 
+## App icon
+
+The mark (a cream 270° progress-ring arc on the accent-green rounded square) is
+generated, not hand-exported:
+
+```bash
+python3 scripts/generate-icon.py          # writes assets/icon.png (1024x1024)
+./node_modules/.bin/tauri icon assets/icon.png   # regenerates src-tauri/icons/*
+```
+
+`public/favicon.svg` is the same geometry as a hand-written vector. Regenerate
+after changing the script, and commit both.
+
+## Keyboard shortcuts
+
+- **Space** — start/pause the pomodoro timer (ignored while typing, on key
+  repeat, with modifiers held, or while any dialog is open)
+- **Esc** — exit the full-session overlay (dialogs keep their own Esc handling)
+
 ## Toolchain notes
 
 `pnpm-workspace.yaml` uses pnpm 11's `allowBuilds` key to declare that esbuild's
