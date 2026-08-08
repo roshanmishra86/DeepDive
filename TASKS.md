@@ -1018,12 +1018,159 @@ component (`setMonth` via `prevMonth`/`nextMonth`, which are the mockup's only a
   environment because jsdom costs ~113s on this `/mnt/c` mount (Phase 2). Pure helpers are tested;
   the JSX is not. Same standing exception as Phases 5.5, 5.6 and 6.
 
-### Phase 8 — Sound library
-- [ ] "Load mp3" via dialog plugin; persist absolute path + metadata
-- [ ] Track grid with categories; empty state
-- [ ] Playback via `convertFileSrc()` + `<audio>`; play/pause/seek/volume in the music bar
-- [ ] Session defaults: fade-in 8s, silence during rest, loop until block ends
-- [ ] Remove track; handle a file that has since been deleted
+### Phase 8 — Sound library *(owner: Haiku sub-agent, verified by Sonnet sub-agent + main session)*
+- [x] "Load mp3" via dialog plugin; persist absolute path + metadata — `LibraryView.handlePick` → `open()` → duration probe → `registerTrack`
+- [x] Track grid with categories; empty state — `.lib-grid` of `TrackCard`s, per-card category `<select>`, real empty state (the mockup's five hardcoded tracks appear nowhere)
+- [x] Playback via `convertFileSrc()` + `<audio>`; play/pause/seek/volume in the music bar — rewritten `stores/player.ts` + wired `MusicBar`
+- [x] Session defaults: fade-in 8s, silence during rest, loop until block ends — three `ToggleSwitch` rows, persisted to `setting`; **see the F1 deferral below**
+- [x] Remove track; handle a file that has since been deleted — per-card remove; missing-file detection via the audio element, "File not found" card state
+
+#### The repo layer already existed
+As in Phases 6 and 7, Phase 3 had already shipped `db/repos/tracks.ts` (full CRUD, `ON CONFLICT(path)`
+upsert) and the `0002` seed already wrote `volume`/`fadeInSec`/`silenceDuringRest`/`loopUntilBlockEnd`.
+Phase 8 is store + UI + CSS — **no migration was needed**.
+
+#### Playback architecture
+One lazily-created `HTMLAudioElement` in `stores/player.ts`, fed by its own events
+(`timeupdate`/`durationchange`/`ended`/`error`) — never a polling timer. The element is injectable
+(`injectAudioElementForTests`) because the suite runs on the `node` environment, which has no `Audio`.
+Two permission facts were verified against the installed plugin sources before choosing this shape:
+
+| Fact | Source |
+| --- | --- |
+| `dialog:default` includes `allow-open`, so the file picker needs no capability change | `tauri-plugin-dialog-2.7.2/permissions/default.toml` |
+| `fs:default` covers only app-specific dirs, so a deleted file **cannot** be detected by stat-ing the path | `tauri-plugin-fs-2.5.1/permissions/default.toml` |
+
+Missing-file detection therefore comes from the element's `error` event and rejected `play()` —
+which is also the more honest signal, since it fires on unreadable files, not just absent ones.
+`convertFileSrc` is called only under `isTauri()`; plain `vite dev` renders a notice instead of crashing.
+
+#### Circular import, deliberate
+`player` ↔ `library` (the player reads the track list and session defaults; the library stops playback
+when the playing track is removed). Both dereference the other only inside action bodies, so module
+evaluation order cannot break it — and both orders are exercised, because `library.test.ts` imports
+library-first and `player.test.ts` imports player-first.
+
+#### Defects found in verification and fixed
+All found by the independent verifier **after** the implementing sub-agent reported every checklist
+item complete with all gates passing. The gates did pass and could not see any of these.
+- [x] **F2 — the loop toggle did not apply to the currently-playing element.** `el.loop` was assigned
+  only inside `playTrack`, so flipping the session default mid-playback changed nothing observable
+  until the next track. Fixed with a `setLoop` player action called from `setLoopUntilBlockEnd`.
+  Proven red-then-green (`expected true to be false`).
+- [x] **F3 — re-registering a known path could erase a good duration.** The refresh path called
+  `updateTrack(..., { durationSec })` unconditionally, and `updateTrack` persists `null` (it guards on
+  `!== undefined`), so a failed metadata probe on re-load overwrote a previously known duration with
+  NULL. Now updates only when the probe succeeded. Proven red-then-green (`expected null to be 100`).
+- [x] **F4 — the `missing → playing` transition was untested.** `playTrack` clears `missing`, but no
+  test covered it. Added; proven red-then-green by removing `missing: false` from the `playTrack` set
+  (`expected true to be false`).
+
+#### Checked and found correct (by the verifier, reproduced by the main session)
+Volume 0–1 ↔ 0–100 converted exactly once per direction, with a SQLite read-back round-trip; the
+fade-in ramp is interrupted by `setVolume` and never resurrects (fake-timers test); prev/next
+wrap-around for 0/1/n lists; duplicate-path registration returns the same id with one row; category
+changes re-list from the repo rather than hand-sorting (the SQL owns the one ordering); both
+missing-detection paths independently covered (emptying the `error` listener left the rejected-`play()`
+test green and vice versa); every new store action and exported helper reachable from a rendered
+component; accessible names include the track title; the `chrome.css` diff is purely additive (zero
+removed/modified lines), so a Phase 6-style `.btn-danger` collision is impossible; no capability,
+migration, `tauri.conf.json` or `package.json` changes.
+
+#### External PR review — findings, all confirmed and fixed
+
+An external review of PR #9 found the implementation solid and every gate claim accurate, but the
+acceptance table overstated what was verified, and four real defects, one of them user-facing.
+- [x] **The drop-zone advertised drag-and-drop that did not exist.** "Drop an .mp3 here" with no
+  `onDrop`, no `dragDropEnabled`, no `tauri://drag-drop` listener — a click-button wearing a dashed
+  border. Fixed for real: `LibraryView` subscribes to `getCurrentWindow().onDragDropEvent` (Tauri
+  emits drops through the window listener; `dragDropEnabled` defaults to true), filters dropped
+  paths through the new `audioFilePaths()` helper, registers each, and shows a hover state
+  (`.lib-dropzone-hover`). Copy updated to "Drop an .mp3 here, or click to choose" so it is true
+  both ways.
+- [x] **A rejected `play()` was unconditionally reported as "File not found".** Both catches called
+  `markMissing()` for any rejection — but `play()` rejects with `NotAllowedError` under autoplay
+  policy just as readily as `NotSupportedError` for a bad file, and `handleEnded → playTrack` runs
+  outside any user gesture, so an auto-advance could label a healthy file missing. Now routed by
+  cause through `isSrcFailure(errName, mediaErrorCode)`: `NotAllowedError` never marks missing;
+  MediaError codes 2/4 do; unknown causes default to NOT missing (the element's `error` event is
+  the authoritative signal, and a false "File not found" on a healthy file is the worse failure).
+  Proven red-then-green at both levels: `isSrcFailure` mutated to always-true (lib test red), and
+  `handlePlayRejection` mutated to unconditional `markMissing()` (2 player tests red).
+- [x] **`el.currentTime = 0` sat outside the try, right after `el.src = …`.** At `HAVE_NOTHING`,
+  WebKit historically threw `InvalidStateError` there, which would have escaped the action and
+  silently never started playback on the one engine Tauri uses on Linux. The line was also
+  redundant — assigning `src` already resets position. Deleted.
+- [x] **Nothing in the phase demonstrated that playback works.** The only audio element ever
+  exercised was the test fake, and the `tauri dev` acceptance row was process health sitting in a
+  table that read as feature verification. Fixed two ways: the row is relabelled honestly below,
+  and playback was **exercised at runtime** — an ephemeral vite harness drove the real player store
+  against a real `HTMLAudioElement` loading a real WAV over HTTP in Chromium (Playwright), with a
+  user-gesture click. Observed in the store's event log: metadata (`durationSec: 3`), `playing:
+  true`, position advancing 0.16 → 2.96 in real time, natural `ended`, auto-advance to the next
+  track, a real 404 producing the real `error` event → `missing: true`, plus seek landing exactly
+  at 2.0 and pause/resume holding and resuming position (2.06 → 2.63). Harness deleted after the
+  run. **Still not demonstrated:** `convertFileSrc` + the asset protocol and WebKitGTK's mp3
+  decoding — both need the packaged app; assigned to the Phase 10 manual QA pass, which already
+  exists.
+
+Minor findings, also fixed:
+- [x] **The `error` event listener was still unconditional** (follow-up review). After the
+  `isSrcFailure` fix, the `play()` path gated on cause but the element's `error` listener called
+  `markMissing()` for any MediaError code — including 1 (ABORTED), the very code the play path
+  excludes. The realistic trigger: clicking track B while A is still loading aborts A's load, and
+  engines that fire `error` for the abort would falsely label B. The listener now ignores code 1 and
+  treats 2/3/4 as genuine failures. The two paths are deliberately asymmetric, and it is recorded
+  here so it is not rediscovered as a bug: the `play()` path stays conservative (codes 2/4 only,
+  via `isSrcFailure`) because a rejection without an error event is ambiguous; the `error` event is
+  the authoritative signal and additionally covers code 3 (decode) — which is why the play path can
+  afford to exclude it. Proven red-then-green (guard removed → `expected true to be false`).
+- [x] Picker accepted `m4a`/`ogg` while the empty-state copy said "mp3, wav or flac". One
+  `AUDIO_EXTENSIONS` list + one `AUDIO_EXTENSIONS_LABEL` in `lib/library.ts` now drive the picker
+  filter, the drag-drop filter, and all copy.
+- [x] `setCategory` returned `true` and kept its optimistic update with no driver, while
+  `registerTrack`/`removeTrack` bail with an error for the same condition. Now bails consistently.
+  **Process lesson:** the first regression test asserted only `error !== null` and stayed green
+  under mutation — without the bail, the call fell into a `TypeError` on the null driver that the
+  catch converted into the same observable shape. The Phase 5.5 lesson in reverse: the assertion
+  had to be tightened to the exact message (`toBe('Editing tracks requires the desktop app.')`)
+  before the mutation went red (`expected 'TypeError…' to be 'Editing tracks…'`).
+
+**Phase 8 acceptance — MET (independently verified, not taken on the sub-agents' reports):**
+
+| Check | Result |
+| --- | --- |
+| `pnpm lint` | clean, zero warnings |
+| `pnpm typecheck` | pass (`tsc -b` + `tsc -p tsconfig.test.json`) |
+| `pnpm test` ×2 | 682 tests, 28 files — identical both runs (605 at phase start) |
+| `pnpm check:css` | pass — all `.lib-*` classes resolve |
+| `pnpm build` | pass — 401.8 KB JS / 64.3 KB CSS (gzip 113.5 / 9.9) |
+| `cargo fmt --all -- --check` / `cargo clippy --all-targets -- -D warnings` | pass (no Rust files changed) |
+| New colour literals in the diff (`#`, `rgb()`, named) | zero |
+| Regression tests proven able to fail | pass ×7 — F2/F3/F4, the three review-fix mutations, and the ABORTED guard; each reverted, suite went red, fix restored |
+| Store read-backs from real SQLite | pass — register/category/toggles/remove all read back via `node:sqlite` |
+| Playback exercised at runtime | pass — real browser + real WAV + real store: play, position tracking, seek, pause/resume, `ended` auto-advance, real-404 → missing (Chromium harness, see above) |
+| `pnpm tauri dev` launches on WSLg | **process health only** — app healthy, 189 MB RSS, 0 panics, Vite HTTP 200. Not feature verification: `convertFileSrc`/asset-protocol and WebKitGTK mp3 decode remain unverified until the Phase 10 manual QA pass |
+
+Note: the cold `cargo run` link on this `/mnt/c` 9p mount took 5m48s — the environment slowness
+recorded in Phase 4, not a fault. The WSLg `libEGL` / `MESA ZINK` / `gdk_seat_get_keyboard` warnings
+persist; software-rendering noise, not app faults.
+
+#### Known, deliberately not fixed
+- [ ] **F1 — "Silence during rest" has no behavioural consumer yet.** The toggle hydrates, persists
+  and rolls back correctly, but nothing reads the setting: rest phases belong to the timer, which is
+  Phase 9 scope. The checklist item (the three session defaults exist and persist) is delivered;
+  Phase 9 must wire the rest phase to duck/pause playback when this is on, or remove the setting.
+- [ ] No component-level test of the library render path — the suite runs on the `node` environment
+  because jsdom costs ~113s on this `/mnt/c` mount (Phase 2). Pure helpers and both stores are
+  tested; the JSX is not. Same standing exception as Phases 5.5, 5.6, 6 and 7.
+- [ ] The mockup renders the loop toggle off while the `0002` seed persists `loopUntilBlockEnd='1'`.
+  The toggle reflects the persisted setting; the mockup's switch positions are placeholder data, not
+  a spec. Not a drift worth a migration.
+- [ ] `missing` lives on the player, so only the currently-selected track can ever show "File not
+  found" — a library of several dead files looks healthy until each is clicked. Defensible for this
+  phase (detection requires a load attempt; the fs plugin cannot pre-flight arbitrary paths);
+  revisit in the Phase 10 polish pass if it reads as a rendering fault.
 
 ### Phase 9 — Pomodoro & full session
 - [ ] Timer store: focus/rest phases, pomodoro counter, drift-free tick from wall clock

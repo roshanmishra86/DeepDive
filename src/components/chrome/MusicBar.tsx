@@ -1,5 +1,6 @@
 import { usePlayerStore } from '../../stores/player'
 import { useAppStore } from '../../stores/app'
+import { formatClockSec } from '../../lib/library'
 import { MusicNotes } from '@phosphor-icons/react/dist/csr/MusicNotes'
 import { SkipBack } from '@phosphor-icons/react/dist/csr/SkipBack'
 import { SkipForward } from '@phosphor-icons/react/dist/csr/SkipForward'
@@ -8,20 +9,54 @@ import { Pause } from '@phosphor-icons/react/dist/csr/Pause'
 import { SpeakerHigh } from '@phosphor-icons/react/dist/csr/SpeakerHigh'
 
 /**
- * 66px footer. The library starts empty (Phase 8 loads real files), so the
- * bar shows an empty state and the transport stays inert until a track
- * exists. Volume is live and will drive the <audio> element added in Phase 8.
+ * 66px footer. Renders the player store: real elapsed/duration times, a
+ * click-to-seek progress bar, working transport, and a volume slider that
+ * persists. Empty state ("Nothing loaded" + link to the library) shows until
+ * a track has been selected.
  */
 export function MusicBar() {
-  const { volume, playing, hasTrack, trackName, trackMeta, setVolume, togglePlay } =
-    usePlayerStore()
+  const trackId = usePlayerStore((s) => s.trackId)
+  const trackName = usePlayerStore((s) => s.trackName)
+  const trackMeta = usePlayerStore((s) => s.trackMeta)
+  const playing = usePlayerStore((s) => s.playing)
+  const volume = usePlayerStore((s) => s.volume)
+  const positionSec = usePlayerStore((s) => s.positionSec)
+  const durationSec = usePlayerStore((s) => s.durationSec)
+  const missing = usePlayerStore((s) => s.missing)
+  const togglePlay = usePlayerStore((s) => s.togglePlay)
+  const setVolume = usePlayerStore((s) => s.setVolume)
+  const seek = usePlayerStore((s) => s.seek)
+  const next = usePlayerStore((s) => s.next)
+  const prev = usePlayerStore((s) => s.prev)
   const setView = useAppStore((s) => s.setView)
+
+  const hasTrack = trackId !== null
+  const seekable = hasTrack && durationSec > 0
+  const pct = seekable ? Math.min(100, (positionSec / durationSec) * 100) : 0
+
+  const handleSeekClick = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (!seekable) return
+    const rect = e.currentTarget.getBoundingClientRect()
+    const fraction = (e.clientX - rect.left) / rect.width
+    seek(fraction * durationSec)
+  }
+
+  const handleSeekKey = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    if (!seekable) return
+    if (e.key === 'ArrowLeft') {
+      e.preventDefault()
+      seek(positionSec - 5)
+    } else if (e.key === 'ArrowRight') {
+      e.preventDefault()
+      seek(positionSec + 5)
+    }
+  }
 
   return (
     <footer className="musicbar">
       <div className="musicbar-track">
         <div className="musicbar-art" aria-hidden>
-          <MusicNotes size={18} color="#8b8375" />
+          <MusicNotes size={18} />
         </div>
         <div className="musicbar-names">
           <div className="musicbar-name" data-testid="musicbar-name">
@@ -29,7 +64,11 @@ export function MusicBar() {
           </div>
           <div className="musicbar-meta">
             {hasTrack ? (
-              trackMeta
+              missing ? (
+                `File not found — ${trackMeta}`
+              ) : (
+                trackMeta
+              )
             ) : (
               <button type="button" className="musicbar-goto" onClick={() => setView('library')}>
                 Sound Library → Load mp3
@@ -40,13 +79,19 @@ export function MusicBar() {
       </div>
 
       <div className="musicbar-transport">
-        <button type="button" className="musicbar-skip" disabled={!hasTrack} aria-label="Previous track">
+        <button
+          type="button"
+          className="musicbar-skip"
+          disabled={!hasTrack}
+          aria-label="Previous track"
+          onClick={() => void prev()}
+        >
           <SkipBack size={14} weight="fill" />
         </button>
         <button
           type="button"
           className="musicbar-play"
-          onClick={togglePlay}
+          onClick={() => void togglePlay()}
           disabled={!hasTrack}
           aria-label={playing ? 'Pause' : 'Play'}
           data-testid="musicbar-play"
@@ -57,21 +102,38 @@ export function MusicBar() {
             <Play size={13} weight="fill" />
           )}
         </button>
-        <button type="button" className="musicbar-skip" disabled={!hasTrack} aria-label="Next track">
+        <button
+          type="button"
+          className="musicbar-skip"
+          disabled={!hasTrack}
+          aria-label="Next track"
+          onClick={() => void next()}
+        >
           <SkipForward size={14} weight="fill" />
         </button>
       </div>
 
       <div className="musicbar-progress">
-        <span className="musicbar-time">0:00</span>
-        <div className="musicbar-progress-track">
-          <div className="musicbar-progress-fill" style={{ width: '0%' }} />
+        <span className="musicbar-time">{formatClockSec(positionSec)}</span>
+        <div
+          className="musicbar-progress-track"
+          role="slider"
+          aria-label="Seek"
+          aria-valuemin={0}
+          aria-valuemax={Math.round(durationSec)}
+          aria-valuenow={Math.round(positionSec)}
+          aria-disabled={!seekable}
+          tabIndex={seekable ? 0 : -1}
+          onClick={handleSeekClick}
+          onKeyDown={handleSeekKey}
+        >
+          <div className="musicbar-progress-fill" style={{ width: `${pct}%` }} />
         </div>
-        <span className="musicbar-time">0:00</span>
+        <span className="musicbar-time">{formatClockSec(durationSec)}</span>
       </div>
 
       <div className="musicbar-volume">
-        <SpeakerHigh size={15} color="#8b8375" />
+        <SpeakerHigh size={15} />
         <input
           type="range"
           min={0}
