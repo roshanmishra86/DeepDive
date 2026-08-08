@@ -5,6 +5,8 @@ import { useTasksStore } from './stores/tasks'
 import { useTodayStore } from './stores/today'
 import { useTemplatesStore } from './stores/templates'
 import { useTimerStore } from './stores/timer'
+import { useLibraryStore } from './stores/library'
+import { usePlayerStore } from './stores/player'
 import { openDatabase } from './db/index'
 import { applyAccent } from './lib/accents'
 import { toDayKey } from './lib/time'
@@ -49,6 +51,8 @@ function App() {
           useTasksStore.getState().hydrate(driver),
           useTodayStore.getState().hydrate(driver, hydrationDay),
           useTemplatesStore.getState().hydrate(driver),
+          useLibraryStore.getState().hydrate(driver),
+          usePlayerStore.getState().hydrate(driver),
         ])
       } catch (err) {
         console.error('Failed to initialize database:', err)
