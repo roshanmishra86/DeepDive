@@ -6,6 +6,7 @@ import { usePlayerStore } from '../../stores/player'
 import { formatClock } from '../../lib/time'
 import {
   activeWorkBlock,
+  displayPomodoroTarget,
   isFreshCycle,
   nextBlockHint,
   nextHintLine,
@@ -96,7 +97,7 @@ export function SessionOverlay() {
   return (
     <div className="session-overlay" data-testid="session-overlay">
       <div className="session-tag">
-        Deep Work · {sessionTagLabel(pomodorosDone, pomodorosPerBlock)}
+        Deep Work · {sessionTagLabel(pomodorosDone, displayPomodoroTarget(fresh, activeBlock, pomodorosPerBlock))}
       </div>
       <button type="button" className="session-exit" onClick={exitSession} data-testid="exit-session">
         Exit session

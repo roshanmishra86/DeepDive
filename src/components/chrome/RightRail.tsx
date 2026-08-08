@@ -7,7 +7,7 @@ import {
   pomodoroCounterLabel,
 } from '../../stores/timer'
 import { formatClock } from '../../lib/time'
-import { activeWorkBlock, isFreshCycle, pomodoroTargetFor } from '../../lib/timer'
+import { activeWorkBlock, displayPomodoroTarget, isFreshCycle } from '../../lib/timer'
 import { upcomingTasks, taskMeta } from '../../lib/week'
 import { ArrowCounterClockwise } from '@phosphor-icons/react/dist/csr/ArrowCounterClockwise'
 
@@ -56,7 +56,7 @@ function PomodoroWidget() {
   const blockLabel = fresh
     ? (activeBlock?.title ?? 'No block attached')
     : (blockTitle ?? 'No block attached')
-  const counterTarget = fresh && activeBlock ? pomodoroTargetFor(activeBlock) : pomodorosPerBlock
+  const counterTarget = displayPomodoroTarget(fresh, activeBlock, pomodorosPerBlock)
   const startLabel = running ? 'Pause' : remainingSec < totalSec ? 'Continue' : 'Start'
 
   return (

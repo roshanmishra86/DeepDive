@@ -92,16 +92,28 @@ export const useTimerStore = create<TimerState>()((set, get) => ({
   start: async (candidate = null) => {
     const state = get()
 
-    // Resuming a paused timer (same phase, time left): state only, no DB
-    // writes — the open row's wall-clock span simply includes the pause.
-    // The `openSessionId` clause covers a pause within the first wall-clock
-    // second of a run: pause() ceils the remaining time, so remainingSec can
-    // still equal totalSec while a row is open. Treating that as a fresh
-    // start would drop the open row's id without closing it (an orphaned,
-    // never-ended row) and insert a second row for the same run.
+    // Resuming a paused timer: state only, no DB writes — the open row's
+    // wall-clock span simply includes the pause. The first clause is the
+    // ordinary mid-phase pause. The second covers every paused-with-an-open-
+    // row state where remainingSec alone misleads:
+    //   · a pause within the first wall-clock second of a run — pause()
+    //     ceils the remaining time, so remainingSec can still equal totalSec
+    //     while a row is open; treating it as fresh would drop the open
+    //     row's id without closing it (an orphaned, never-ended row) and
+    //     insert a second row for the same run;
+    //   · a pause AT the deadline (remainingSec === 0) — resuming with
+    //     endsAt = now lets the next tick complete the row and count the
+    //     pomodoro, which the wall clock says already happened. Settles the
+    //     design question the b946ed3 fix left open: pausing at zero
+    //     completes the pomodoro.
+    // A phase that already COMPLETED via tick (remainingSec 0, no open row)
+    // fails both clauses and takes the fresh/next-pomodoro path below —
+    // dropping the `remainingSec > 0` requirement from the first clause
+    // instead of reassociating would route that case into a zero-length
+    // resume that increments the counter with no row.
     const isResume =
-      state.remainingSec > 0 &&
-      (state.remainingSec < state.totalSec || (!state.running && state.openSessionId !== null))
+      (state.remainingSec > 0 && state.remainingSec < state.totalSec) ||
+      (!state.running && state.openSessionId !== null)
 
     if (isResume) {
       set({ running: true, endsAt: Date.now() + state.remainingSec * 1000 })

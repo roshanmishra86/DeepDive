@@ -1260,14 +1260,9 @@ committed as `b946ed3`.
   additionally corrected a factually wrong comment claiming a never-ran rest has no row — `rest()`
   inserts immediately).
 
-#### Edge-case races dispositioned (documented, not fixed)
-- **Pause-at-deadline then start:** pausing in the ≤500ms window after `endsAt` passes but before the
-  next tick computes `remaining = 0` and leaves the row open; a following `start()` takes the fresh
-  path and drops it (orphan) without counting the pomodoro. UI-reachable but narrow; impact is an
-  invisible `completed = 0` row and the in-session counter not advancing (the archive count is
-  unaffected). The correct semantics — does pausing exactly at zero complete the pomodoro? — are a
-  design decision; recommended fix for a future pass: `pause()` computing `remaining === 0` delegates
-  to the elapse path.
+#### Edge-case races dispositioned
+- **Pause-at-deadline then start:** ~~documented as a residual~~ **fixed in the PR #10 review round**
+  (see the external-review section below).
 - **In-flight INSERT race:** `openSessionId` is set after the async INSERT resolves, so an action
   landing in that millisecond-scale gap can leave a tracked-late row a later fresh start drops.
   Closers all clear `openSessionId` synchronously first, so no wrong-id write is possible; a real fix
@@ -1284,7 +1279,7 @@ committed as `b946ed3`.
 | --- | --- |
 | `pnpm lint` | clean, zero warnings (96 files) |
 | `pnpm typecheck` | pass (`tsc -b` + `tsc -p tsconfig.test.json`) |
-| `pnpm test` | 742 tests, 29 files (682 at phase start; +58 implementation, +2 verification regression) |
+| `pnpm test` | 751 tests, 29 files (682 at phase start; +58 implementation, +2 verification regression, +9 PR #10 review regression) |
 | `pnpm check:css` | pass — all `.session-*` classes resolve |
 | `pnpm build` | pass — built in ~34s |
 | `cargo fmt --all -- --check` / `cargo clippy --all-targets -- -D warnings` | pass (no Rust files changed) |
@@ -1294,11 +1289,48 @@ committed as `b946ed3`.
 | Regression tests proven able to fail | pass ×6 — five by the verifier (tick completion, rest→focus insert, archive `completed = 1` filter, `restPaused` guard, `isFreshCycle` clause), each reverted→red→restored; plus one main-session spot-check (tick `completed: true→false` → 6 red → restored → 74/74 green) |
 | `pnpm tauri dev` launches on WSLg | **process health only** — app healthy for 5m07s, 101 MB RSS, 0 panics, 0 Rust errors, Vite HTTP 200. Not feature verification: real-audio playback through a rest phase and the overlay's rendered look remain for the Phase 10 manual QA pass |
 
+#### External PR review — two findings confirmed and fixed, one fix corrected on evidence
+
+An external review of PR #10 re-ran the gates independently (742/742, tsc 0, oxlint 0, css pass) and
+confirmed the design, but found one real defect the PR did not document, plus two minors.
+- [x] **`restPaused` survives user intent (the defect).** `pauseForRest` set `restPaused`, and nothing
+  in `togglePlay`/`playTrack` cleared it — so a user who pressed play then pause during a rest (they
+  want silence) was force-resumed at rest end, violating the flag's own invariant ("a user-paused
+  player is never auto-resumed"). No test exercised user interaction between pause and resume. Fixed:
+  `togglePlay` clears `restPaused` on any user transport action (one line covering both branches) and
+  `playTrack` clears it in its selection set (`next`/`prev` route through it). Two regression tests,
+  proven red-then-green (2 failed pre-fix → 37 passed post-fix).
+- [x] **Overlay and widget disagreed on the pomodoro target while fresh.** The widget previewed
+  `pomodoroTargetFor(activeBlock)` while the overlay passed the raw store `pomodorosPerBlock` — a
+  3-hour block with no explicit pomodoros read "1 / 6" in the widget and "session 1 of 3" in the
+  overlay. Fixed by extracting `displayPomodoroTarget(fresh, activeBlock, storeTarget)` into
+  `lib/timer.ts` and calling it from both surfaces (the project's signature defect class — the same
+  expression in two components); four unit tests.
+- [x] **Pause-at-deadline residual — fixed, but not with the reviewer's suggested edit.** The review
+  correctly observed the residual was cheap to fix, and correctly settled the design question
+  ("pausing at zero completes the pomodoro" — the answer the wall-clock store already implies). But
+  the suggested one-liner (drop the `remainingSec > 0` clause from `isResume`) was **wrong on
+  evidence**: applied as a mutation, it turned five tests red — a completed phase (`remainingSec 0`,
+  no open row) would satisfy `remainingSec < totalSec` and take a zero-length resume whose next tick
+  increments the counter with no row, breaking the next-pomodoro start, the rest→focus transition,
+  and plain restart. The implemented fix reassociates instead: `isResume = (remainingSec > 0 &&
+  remainingSec < totalSec) || (!running && openSessionId !== null)` — an open row always resumes (at
+  zero, `endsAt = now` lets the next tick complete it); a completed phase with no row still starts
+  fresh. Three regression tests: paused-at-zero focus completes the same row and counts the pomodoro;
+  start-after-completion opens a NEW row with no phantom increment (guards the rejected edit);
+  paused-at-zero rest completes and resumes music. Proven red-then-green (2 failed pre-fix → 72
+  passed post-fix).
+
+Post-review gates: `pnpm lint` clean · `pnpm typecheck` pass · **`pnpm test` 751 tests / 29 files**
+(742 + 9 review regression tests) · `pnpm check:css` pass · `pnpm build` pass. Failability proofs
+this round: restPaused fix (2 red pre-fix), pause-at-deadline fix (2 red pre-fix), the reviewer's
+literal `isResume` edit as a deliberate mutation (5 red — the evidence for correcting it).
+
 #### Known, deliberately not fixed
 - [ ] No component-level test of the widget/overlay render paths — the suite runs on the `node`
   environment because jsdom costs ~113s on this `/mnt/c` mount (Phase 2). Pure helpers and both stores
   are tested; the JSX is not. Same standing exception as Phases 5.5–8.
-- [ ] The pause-at-deadline and in-flight-INSERT residuals above.
+- [ ] The in-flight-INSERT residual above.
 - [ ] `pomodorosDone` is not rehydrated on relaunch — a restarted app starts the counter fresh even if
   today's block already has completed sessions. The checklist asks only that completed pomodoros
   persist (they do, and the archive reads them); per-block counter rehydration is a Phase 10 candidate.

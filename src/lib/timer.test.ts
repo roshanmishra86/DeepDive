@@ -8,6 +8,7 @@ import {
   sessionTagLabel,
   sessionMetaLine,
   nextHintLine,
+  displayPomodoroTarget,
 } from './timer'
 
 function makeBlock(id: number, overrides: Partial<DayBlock> = {}): DayBlock {
@@ -233,5 +234,29 @@ describe('nextHintLine', () => {
   it('formats the mockup copy', () => {
     const block = makeBlock(1, { title: 'Walk & reset', startMin: 420 })
     expect(nextHintLine(block)).toBe('next: Walk & reset, 7:00 AM')
+  })
+})
+
+describe('displayPomodoroTarget', () => {
+  it('previews the active block target while fresh', () => {
+    // A 3-hour block with no explicit pomodoros derives 6 — the widget and
+    // overlay must both show it (PR #10 review: they disagreed, 6 vs 3).
+    const block = makeBlock(1, { pomodoros: 0, durationMin: 180 })
+    expect(displayPomodoroTarget(true, block, 3)).toBe(6)
+  })
+
+  it('honours the block explicit pomodoros while fresh', () => {
+    const block = makeBlock(1, { pomodoros: 2, durationMin: 90 })
+    expect(displayPomodoroTarget(true, block, 3)).toBe(2)
+  })
+
+  it('falls back to the store target when fresh with no active block', () => {
+    expect(displayPomodoroTarget(true, null, 3)).toBe(3)
+  })
+
+  it('uses the frozen store target once a cycle is running', () => {
+    const block = makeBlock(1, { pomodoros: 0, durationMin: 180 })
+    expect(displayPomodoroTarget(false, block, 3)).toBe(3)
+    expect(displayPomodoroTarget(false, null, 5)).toBe(5)
   })
 })

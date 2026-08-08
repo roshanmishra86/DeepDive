@@ -510,4 +510,42 @@ describe('player store', () => {
     expect(usePlayerStore.getState().playing).toBe(false)
     expect(usePlayerStore.getState().missing).toBe(false)
   })
+
+  it('user play-then-pause during a rest forfeits the auto-resume (PR #10 review)', async () => {
+    // The defect: pauseForRest set restPaused, and nothing in togglePlay
+    // cleared it — so a user who pressed play then pause during a rest
+    // (they want silence) was force-resumed at rest end, violating the
+    // flag's own invariant ("a user-paused player is never auto-resumed").
+    useLibraryStore.setState({ fadeInSec: 0 })
+    await usePlayerStore.getState().playTrack(makeTrack(1))
+    usePlayerStore.getState().pauseForRest()
+    expect(usePlayerStore.getState().restPaused).toBe(true)
+
+    await usePlayerStore.getState().togglePlay() // user plays during the rest
+    expect(usePlayerStore.getState().playing).toBe(true)
+    expect(usePlayerStore.getState().restPaused).toBe(false)
+
+    await usePlayerStore.getState().togglePlay() // user pauses again — wants silence
+    expect(usePlayerStore.getState().playing).toBe(false)
+    expect(usePlayerStore.getState().restPaused).toBe(false)
+
+    await usePlayerStore.getState().resumeFromRest() // rest ends
+    expect(usePlayerStore.getState().playing).toBe(false)
+    expect(fake.paused).toBe(true)
+  })
+
+  it('playTrack clears a pending rest pause (next/prev route through it)', async () => {
+    useLibraryStore.setState({ fadeInSec: 0 })
+    await usePlayerStore.getState().playTrack(makeTrack(1))
+    usePlayerStore.getState().pauseForRest()
+    expect(usePlayerStore.getState().restPaused).toBe(true)
+
+    await usePlayerStore.getState().playTrack(makeTrack(2)) // user picks a track mid-rest
+    expect(usePlayerStore.getState().restPaused).toBe(false)
+    expect(usePlayerStore.getState().playing).toBe(true)
+
+    await usePlayerStore.getState().resumeFromRest() // no double-resume at rest end
+    expect(usePlayerStore.getState().trackId).toBe(2)
+    expect(usePlayerStore.getState().playing).toBe(true)
+  })
 })

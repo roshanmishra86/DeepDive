@@ -94,6 +94,23 @@ export function sessionTagLabel(pomodorosDone: number, target: number): string {
 }
 
 /**
+ * The pomodoro target to DISPLAY, shared by the widget counter and the
+ * overlay session tag so the two surfaces can never disagree. While the
+ * cycle is fresh, the target previews the currently-active block's; once a
+ * cycle is running, the store's frozen `pomodorosPerBlock` (set at attach
+ * time) is the truth. Extracted as a helper after PR #10 review found the
+ * widget previewing `pomodoroTargetFor(activeBlock)` while the overlay used
+ * the raw store value — "1 / 6" beside "session 1 of 3" on the same block.
+ */
+export function displayPomodoroTarget(
+  fresh: boolean,
+  activeBlock: DayBlock | null,
+  storeTarget: number
+): number {
+  return fresh && activeBlock ? pomodoroTargetFor(activeBlock) : storeTarget
+}
+
+/**
  * Overlay meta line under the block title, e.g.
  * "5:30 AM – 7:00 AM · 90 min block · notifications off". The duration is
  * raw `${durationMin} min` (NOT formatDuration) — the mockup says

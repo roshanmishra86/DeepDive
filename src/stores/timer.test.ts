@@ -838,6 +838,117 @@ describe('useTimerStore persistence', () => {
     expect(state.openSessionId).toBe(restRow.id)
   })
 
+  it('pause AT the deadline → start resumes into completion (row completed, counter +1)', async () => {
+    // PR #10 review: pausing in the window after the wall-clock deadline but
+    // before the tick fires left remainingSec === 0 with a row open, and the
+    // old isResume required remainingSec > 0 — so Continue took the fresh
+    // path, orphaning the row and never counting the pomodoro. Now the open
+    // row is resumed with endsAt = now and the next tick completes it:
+    // pausing at zero completes the pomodoro.
+    vi.setSystemTime(1000000)
+    const blockId = await blocksRepo.createBlock(driver, {
+      day: '2026-08-10',
+      title: 'Deep block',
+      kind: 'deep',
+      startMin: 300,
+      durationMin: 90,
+    })
+    await useTimerStore.getState().start(makeCandidate(blockId))
+    const endsAt = useTimerStore.getState().endsAt!
+
+    vi.setSystemTime(endsAt + 200) // deadline passed, tick has not fired
+    await useTimerStore.getState().pause()
+    expect(useTimerStore.getState().remainingSec).toBe(0)
+    expect(useTimerStore.getState().openSessionId).not.toBeNull()
+
+    await useTimerStore.getState().start(makeCandidate(blockId))
+    expect(useTimerStore.getState().running).toBe(true)
+
+    await useTimerStore.getState().tick(endsAt + 700)
+    const state = useTimerStore.getState()
+    expect(state.pomodorosDone).toBe(1)
+    expect(state.openSessionId).toBeNull()
+
+    const rows = await sessionsRepo.listSessionsForBlock(driver, blockId)
+    expect(rows.length).toBe(1) // the SAME row, completed — no orphan, no dupe
+    expect(rows[0].completed).toBe(true)
+    expect(rows[0].endedAt).not.toBeNull()
+  })
+
+  it('start AFTER a completed pomodoro opens a new row (no zero-length resume)', async () => {
+    // Guards the isResume reassociation: a phase that already completed via
+    // tick (remainingSec 0, NO open row) must take the next-pomodoro path.
+    // If isResume were relaxed to `remainingSec < totalSec || …` instead,
+    // this start would resume a zero-length timer whose next tick increments
+    // the counter with no row written.
+    vi.setSystemTime(1000000)
+    const blockId = await blocksRepo.createBlock(driver, {
+      day: '2026-08-10',
+      title: 'Deep block',
+      kind: 'deep',
+      startMin: 300,
+      durationMin: 90,
+    })
+    await useTimerStore.getState().start(makeCandidate(blockId))
+    const endsAt = useTimerStore.getState().endsAt!
+    useTimerStore.getState().tick(endsAt + 1000)
+    expect(useTimerStore.getState().pomodorosDone).toBe(1)
+    expect(useTimerStore.getState().openSessionId).toBeNull()
+
+    vi.setSystemTime(2000000)
+    await useTimerStore.getState().start(makeCandidate(blockId))
+    const state = useTimerStore.getState()
+    expect(state.remainingSec).toBe(FOCUS_SEC)
+    expect(state.pomodorosDone).toBe(1) // no phantom increment
+    expect(state.openSessionId).not.toBeNull()
+
+    const rows = await sessionsRepo.listSessionsForBlock(driver, blockId)
+    expect(rows.length).toBe(2)
+    expect(rows.filter((r) => r.completed).length).toBe(1)
+    expect(rows.some((r) => r.endedAt === null)).toBe(true)
+  })
+
+  it('pause at the rest deadline → start completes the rest row and resumes music', async () => {
+    // The rest-phase twin of the pause-at-deadline fix: a paused-at-zero
+    // rest with an open row resumes (stays in the rest phase), and the next
+    // tick completes the row and lifts the rest pause.
+    useLibraryStore.setState({ silenceDuringRest: true, fadeInSec: 0 })
+    await usePlayerStore.getState().playTrack(makeTrack(1))
+
+    vi.setSystemTime(1000000)
+    const blockId = await blocksRepo.createBlock(driver, {
+      day: '2026-08-10',
+      title: 'Deep block',
+      kind: 'deep',
+      startMin: 300,
+      durationMin: 90,
+    })
+    await useTimerStore.getState().start(makeCandidate(blockId))
+    await useTimerStore.getState().rest()
+    expect(usePlayerStore.getState().restPaused).toBe(true)
+    const restEndsAt = useTimerStore.getState().endsAt!
+
+    vi.setSystemTime(restEndsAt + 200)
+    await useTimerStore.getState().pause()
+    expect(useTimerStore.getState().remainingSec).toBe(0)
+
+    await useTimerStore.getState().start(null)
+    expect(useTimerStore.getState().phase).toBe('rest') // resumed, not a fresh focus
+    expect(useTimerStore.getState().running).toBe(true)
+
+    await useTimerStore.getState().tick(restEndsAt + 700)
+    const state = useTimerStore.getState()
+    expect(state.phase).toBe('rest')
+    expect(state.running).toBe(false)
+    expect(usePlayerStore.getState().restPaused).toBe(false)
+    expect(usePlayerStore.getState().playing).toBe(true)
+
+    const rows = await sessionsRepo.listSessionsForBlock(driver, blockId)
+    const restRow = rows.find((r) => r.phase === 'rest')!
+    expect(restRow.completed).toBe(true)
+    expect(restRow.endedAt).not.toBeNull()
+  })
+
   it('reset abandons the open row and clears attachment, counter and target', async () => {
     vi.setSystemTime(1000000)
     const blockId = await blocksRepo.createBlock(driver, {
