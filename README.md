@@ -1,12 +1,21 @@
 # Deep Work
 
-> **⚠️ Work in progress — not ready for day-to-day use.**
->
-> This project is under active development. Features are incomplete, behaviour may
-> change without notice, and there is no stable release yet. Do not rely on it for
-> real work, and expect data formats to break between commits.
-
 A desktop application for managing deep work sessions, built with Tauri v2 and React.
+
+## Download
+
+Installers for every tagged release are published on the
+**[Releases page](https://github.com/roshanmishra86/DeepDive/releases)** —
+[latest release](https://github.com/roshanmishra86/DeepDive/releases/latest).
+
+| Platform | File |
+| --- | --- |
+| Windows | `Deep.Work_<version>_x64-setup.exe` (NSIS, installs per-user) |
+| Linux | `Deep.Work_<version>_amd64.AppImage` or `Deep.Work_<version>_amd64.deb` |
+
+The installers are unsigned, so Windows SmartScreen shows a "Windows protected
+your PC" warning on first run — choose **More info → Run anyway**. To build
+from source instead, see [Development](#development).
 
 ## Prerequisites
 
