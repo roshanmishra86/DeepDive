@@ -1636,6 +1636,45 @@ Phases 5.5–10 is therefore retired.
   as-rendered by the error test. Cosmetic; changing three views' error contract is out of scope
   for a hardening phase.
 
+#### External PR review (PR #13) — one finding confirmed and fixed, one hardening taken
+
+The review independently re-ran every gate and confirmed them as recorded, traced the run-token
+model and the rehydrate query path by hand (both accepted, including the FK/pragma assumptions
+behind the deleted-block claim), and confirmed the environment-vs-import breakdown behind the
+render-test cost argument. P0-1, P0-2, P1-3, P1-4 accepted. Two findings:
+
+- [x] **The pomodoro cap was derived from the unclamped transient duration (the defect).**
+  `handleDurationTextChange` clamped `pomodoros` against `maxPomodoros(parsed)` for every
+  keystroke — and `maxPomodoros(9) === 0`, so typing "90" passed through "9" and permanently
+  zeroed the block's pomodoro target; `Math.min` can never restore the old count once the text
+  becomes valid. Fixed by gating, not by the reviewer's literal suggestion: "clamp the cap['s
+  input]" (`maxPomodoros(max(minDurationFor, parsed))`) still erodes the target — a 3-pomodoro
+  block retyped via "1" → "12" → "120" sinks to the 30-minute cap of 1 at the first keystroke.
+  The non-lossy form is a new pure `pomodorosForDurationText(raw, kind, current)`: the cap is
+  derived ONLY from saveable durations; unparseable or below-minimum text preserves the count
+  untouched (saving is blocked for those anyway). The committed duration stays raw — the P2
+  design is untouched. The same defect class was swept in the siblings (the Phase 6 lesson):
+  `stepPomodoros` is now inert while the duration text is unsaveable (clicking + against a
+  sub-30 transient zeroed the target through a second path), the stepper buttons disable, the
+  stepper label shows the preserved `draft.pomodoros` instead of a transient-clamped 0, and the
+  max hint reads "max —" until the duration is saveable. One deliberate behaviour change: the
+  footer summary keeps the pomodoro segment visible during a below-minimum transient ("… · 5 min
+  · 1 pomodoro") because the summary must not disagree with the draft — the pre-fix test
+  asserting the segment disappears was updated. Seven lib tests + one render test (select-all
+  retype of a 2-pomodoro block through the "9" transient → save → SQLite read-back shows 90 min
+  and 2 pomodoros). Failability: the render test is red against the pre-fix composer, and
+  mutating the helper's gate turns 2 lib + 2 render tests red (restored green).
+- [x] **`create_if_missing(true)` coupled the transaction command to the path mapping
+  (hardening, flagged optional — taken).** A platform path drift between `app_config_dir()` and
+  the plugin's path_mapper would have silently created a second, empty database and failed every
+  statement with "no such table". The flag is removed: the plugin pool creates and migrates the
+  file long before any transaction can run, so a missing file now fails at connect with a clear
+  error. New Rust test proves both halves: connect fails AND no file is created.
+
+Post-review gates: `pnpm lint` clean · `pnpm typecheck` pass · `pnpm test` **837 tests / 34
+files** (829 + 7 lib + 1 render) · `pnpm check:css` pass · `pnpm build` pass ·
+`cargo fmt --check` / `cargo clippy -D warnings` clean · `cargo test` 4/4.
+
 #### Phase 11 acceptance
 
 - [x] Every new regression test is demonstrated red against the old behaviour and green after the
@@ -1653,11 +1692,11 @@ Phases 5.5–10 is therefore retired.
 | --- | --- |
 | `pnpm lint` | clean, zero warnings (102 files) |
 | `pnpm typecheck` | pass (`tsc -b` + `tsc -p tsconfig.test.json`) |
-| `pnpm test` | 829 tests, 34 files (778 at phase start: +6 sequencing, +10 rehydrate, +9 duration lib, +25 render, +1 driver forwarding rewrite) |
+| `pnpm test` | 837 tests, 34 files (778 at phase start: +6 sequencing, +10 rehydrate, +16 duration lib, +26 render, +1 driver forwarding rewrite) |
 | `pnpm check:css` | pass |
 | `pnpm build` | pass |
 | `cargo fmt --all -- --check` / `cargo clippy --all-targets -- -D warnings` | pass |
-| `cargo test` (tx.rs) | 3/3 — happy path, forced middle failure → rollback → subsequent write, empty list |
+| `cargo test` (tx.rs) | 4/4 — happy path, forced middle failure → rollback → subsequent write, missing file → connect error + no file created, empty list |
 | Regression tests proven able to fail | pass ×4 mutation experiments (hydrate fix, unconditional publish, below-min clause, doSave guard) — each reverted → red → restored → green; verifier traced all 5 race tests red under HEAD behaviour |
 | Native smoke (real app + real dev DB) | pass — forced tx failure rolled back with zero leaked rows and the next write succeeded; 4 rapid-action session rows all correctly finalised, none open or mis-associated; rehydration restored exactly the 2 completed focus rows for the correct block with no countdown resumed |
 | Render-test environment cost | pass — happy-dom, ~15–22s environment per file × 2 files; the ~113s/file jsdom cost not reintroduced (suite wall-time delta is 9p-mount import volatility, not environment startup) |
