@@ -10,7 +10,7 @@ A desktop application for managing deep work sessions, built with Tauri v2 and R
 
 ## Prerequisites
 
-- Node.js 20+ with **pnpm 11+** (pinned to `pnpm@11.18.0` via `packageManager`; CI uses Node 22)
+- Node.js 24+ with **pnpm 11+** (pinned to `pnpm@11.18.0` via `packageManager`; CI uses Node 24) — 24 is the floor because the test suite imports `node:sqlite`, which only appears in `module.builtinModules` on Node 24+, and Vitest relies on that list to externalize it
 - Rust stable (1.77.2 or later) via rustup
 - On Linux: `libwebkit2gtk-4.1-dev`, `libgtk-3-dev`, `libayatana-appindicator3-dev`, `librsvg2-dev`, `build-essential`, `pkg-config`, `libssl-dev`
 
