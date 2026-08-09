@@ -95,7 +95,9 @@ function App() {
       try {
         const driver = await openDatabase()
         if (!mounted) return
-        const hydrationDay = toDayKey(new Date())
+        const now = new Date()
+        const hydrationDay = toDayKey(now)
+        const nowMin = now.getHours() * 60 + now.getMinutes()
         await Promise.all([
           useAppStore.getState().hydrate(driver),
           useRitualsStore.getState().hydrate(driver, hydrationDay),
@@ -104,7 +106,9 @@ function App() {
           useTemplatesStore.getState().hydrate(driver),
           useLibraryStore.getState().hydrate(driver),
           usePlayerStore.getState().hydrate(driver),
-          useTimerStore.getState().hydrate(driver),
+          // day + nowMin let the timer restore the active block's pomodoro
+          // progress after a relaunch (Phase 11 P1-3).
+          useTimerStore.getState().hydrate(driver, hydrationDay, nowMin),
         ])
       } catch (err) {
         console.error('Failed to initialize database:', err)

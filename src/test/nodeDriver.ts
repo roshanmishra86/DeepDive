@@ -44,12 +44,14 @@ class NodeSqliteDriver implements SqlDriver {
     return Promise.resolve(rows)
   }
 
-  // Real BEGIN/ROLLBACK/COMMIT on the single node:sqlite handle. Unlike
-  // TauriDriver (which cannot guarantee rollback — see the comment above
-  // `TauriDriver.transaction`), this driver owns one connection directly,
-  // so a failure genuinely undoes every statement already applied in this
-  // call, verified by src/test/nodeDriver.test.ts's PROBE case reading back
-  // via a fresh select().
+  // Real BEGIN/ROLLBACK/COMMIT on the single node:sqlite handle. This
+  // driver owns one connection directly, so a failure genuinely undoes
+  // every statement already applied in this call, verified by
+  // src/test/nodeDriver.test.ts's PROBE case reading back via a fresh
+  // select(). The production TauriDriver gained the same guarantee in
+  // Phase 11 P0-1 via the `execute_transaction` Rust command
+  // (src-tauri/src/tx.rs), which owns one fresh connection per
+  // transaction — the two drivers' rollback semantics now match.
   transaction(statements: { sql: string; params?: unknown[] }[]): Promise<void> {
     if (statements.length === 0) return Promise.resolve()
 

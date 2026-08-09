@@ -25,6 +25,8 @@ import {
   nextDurationTextState,
   resolveBreakDurationMin,
   breakDurationOnKindSwitch,
+  durationIssueFor,
+  pomodorosForDurationText,
   DURATION_PRESETS,
   BREAK_DURATION_PRESETS,
 } from './today'
@@ -1036,5 +1038,84 @@ describe('breakDurationOnKindSwitch', () => {
 
   it('falls back to the break minimum when there is nothing to snap from', () => {
     expect(breakDurationOnKindSwitch('')).toBe(5)
+  })
+})
+
+describe('durationIssueFor', () => {
+  // The pure core of BlockComposer's duration validation: the draft holds
+  // the raw parsed value unclamped, and this function decides whether the
+  // visible text is acceptable, unparseable, or parseable-but-below the
+  // kind minimum. 'unparseable' and 'below-min' are mutually exclusive by
+  // construction (below-min requires a successful parse).
+  it('a parseable value below the deep minimum is below-min', () => {
+    expect(durationIssueFor('5', 'deep')).toBe('below-min')
+  })
+
+  it('breaks never report below-min (they have no free-text duration field)', () => {
+    expect(durationIssueFor('5', 'break')).toBe(null)
+  })
+
+  it('a value at the ritual minimum is acceptable', () => {
+    expect(durationIssueFor('5', 'ritual')).toBe(null)
+  })
+
+  it('a value at the deep minimum is acceptable', () => {
+    expect(durationIssueFor('30', 'deep')).toBe(null)
+  })
+
+  it('free-form hour+minute text above the minimum is acceptable', () => {
+    expect(durationIssueFor('1h30', 'deep')).toBe(null)
+  })
+
+  it('unparseable text is unparseable', () => {
+    expect(durationIssueFor('abc', 'deep')).toBe('unparseable')
+  })
+
+  it('empty text is unparseable', () => {
+    expect(durationIssueFor('', 'deep')).toBe('unparseable')
+  })
+
+  it('a parseable value one minute below the shallow minimum is below-min', () => {
+    expect(durationIssueFor('29', 'shallow')).toBe('below-min')
+  })
+
+  it('fractional hours that round below the minimum are below-min (0.4h = 24 min)', () => {
+    expect(durationIssueFor('0.4h', 'deep')).toBe('below-min')
+  })
+})
+
+describe('pomodorosForDurationText', () => {
+  it('a valid longer duration keeps the current count when it fits the cap', () => {
+    expect(pomodorosForDurationText('90', 'deep', 2)).toBe(2)
+  })
+
+  it('a valid shorter duration tightens the cap (90 → 60: 3 pomodoros no longer fit)', () => {
+    expect(pomodorosForDurationText('60', 'deep', 3)).toBe(2)
+  })
+
+  it('a below-minimum transient preserves the count — the "9" on the way to "90" (PR #13)', () => {
+    expect(pomodorosForDurationText('9', 'deep', 3)).toBe(3)
+    expect(pomodorosForDurationText('5', 'deep', 1)).toBe(1)
+    expect(pomodorosForDurationText('29', 'shallow', 2)).toBe(2)
+  })
+
+  it('unparseable and empty text preserve the count', () => {
+    expect(pomodorosForDurationText('abc', 'deep', 2)).toBe(2)
+    expect(pomodorosForDurationText('', 'deep', 2)).toBe(2)
+  })
+
+  it('a value below the ritual minimum preserves the count; a valid one applies the cap', () => {
+    expect(pomodorosForDurationText('4', 'ritual', 1)).toBe(1)
+    // 5 minutes fits zero 30-minute pomodoros.
+    expect(pomodorosForDurationText('5', 'ritual', 1)).toBe(0)
+  })
+
+  it('break applies the cap to any parseable value (breaks are below-min exempt)', () => {
+    expect(pomodorosForDurationText('10', 'break', 1)).toBe(0)
+  })
+
+  it('free-form combined input caps against the parsed minutes (1h30 → 90 → cap 3)', () => {
+    expect(pomodorosForDurationText('1h30', 'deep', 2)).toBe(2)
+    expect(pomodorosForDurationText('1h30', 'deep', 4)).toBe(3)
   })
 })

@@ -1429,7 +1429,7 @@ Not runnable in this WSL environment. On the first clean Windows install from th
 
 ---
 
-### Phase 11 — Persistence and interaction hardening *(owner: coding agent; independently verified)*
+### Phase 11 — Persistence and interaction hardening *(owner: main session + lightweight writer sub-agents, verified by an independent verifier sub-agent + main session)*
 
 > **Audit verdict:** only the work below should be carried forward. This is the authoritative
 > implementation list for Phase 11; the older unchecked bullets remain where they were written as
@@ -1443,7 +1443,7 @@ Not runnable in this WSL environment. On the first clean Windows install from th
 
 #### Required work, in dependency order
 
-- [ ] **P0 — Make template mutations genuinely atomic on the production Tauri path.** Retire the
+- [x] **P0 — Make template mutations genuinely atomic on the production Tauri path.** Retire the
   current `BEGIN; …; COMMIT` multi-statement fallback that can strand a pooled SQLite connection in
   an open transaction after a middle statement fails. Use a design that owns one connection for the
   entire operation (for example, a narrow Rust command) or reduce each affected mutation to one
@@ -1453,7 +1453,7 @@ Not runnable in this WSL environment. On the first clean Windows install from th
   data and the next database operation correct. The proof must exercise the implementation that
   ships; the existing mocked `Database.load` test alone is not sufficient.
 
-- [ ] **P0 — Sequence Pomodoro persistence so a late INSERT cannot be lost.** Replace the
+- [x] **P0 — Sequence Pomodoro persistence so a late INSERT cannot be lost.** Replace the
   fire-and-forget session-start race with an explicit ordering or generation model. If `rest`,
   `reset`, completion, or a subsequent start occurs while `startSession()` is pending, the inserted
   row must be associated with that exact phase run and then completed/abandoned correctly; an old
@@ -1462,7 +1462,7 @@ Not runnable in this WSL environment. On the first clean Windows install from th
   start→reset, start→rest, start→tick-to-zero and start→start sequences, plus SQLite read-backs
   proving there is exactly one correctly-finalised row per phase run.
 
-- [ ] **P1 — Rehydrate coherent per-block Pomodoro progress after relaunch.** Restore
+- [x] **P1 — Rehydrate coherent per-block Pomodoro progress after relaunch.** Restore
   `pomodorosDone` from completed **focus** rows for the attached block, rather than from a global or
   day-wide count. Rehydrate or attach from the current database block so edits, deletion and local-day
   rollover cannot revive a stale snapshot. Do not resume an interrupted countdown and do not count
@@ -1470,7 +1470,7 @@ Not runnable in this WSL environment. On the first clean Windows install from th
   count meets or exceeds the block target, when no work block is active, and when the recorded block
   was deleted. Archive totals must remain unchanged.
 
-- [ ] **P1 — Add focused render-level regression coverage for the previously untested surfaces.**
+- [x] **P1 — Add focused render-level regression coverage for the previously untested surfaces.**
   Consolidate the repeated Phase 5.5–9 test gaps into a small set of user-flow tests covering:
   composer create/edit/delete and duration validation; template apply confirmation; Archive
   loading/empty/populated/error states; Library missing-file and transport states; and Pomodoro
@@ -1479,7 +1479,7 @@ Not runnable in this WSL environment. On the first clean Windows install from th
   jsdom startup observed on this `/mnt/c` mount. Assert rendered behaviour and accessible controls,
   not component implementation details.
 
-- [ ] **P2 — Make the composer duration field agree with the value that will be saved.** A deep or
+- [x] **P2 — Make the composer duration field agree with the value that will be saved.** A deep or
   shallow value below 30 minutes must not remain visibly `5` while the draft silently contains 30.
   Normalize the visible input or show validation and block submission; preserve the valid 5-minute
   minimum for break and ritual blocks, free-form values such as `1h30`, and the existing duration
@@ -1498,16 +1498,209 @@ Not runnable in this WSL environment. On the first clean Windows install from th
 - Tagging `v0.1.0`, CI publication and clean-machine Windows QA are release-operator steps, not work
   for the Phase 11 coding agent.
 
+#### Implementation record
+
+- **P0-1 (atomic template mutations).** New Rust command `execute_transaction`
+  (`src-tauri/src/tx.rs`): one fresh `SqliteConnection` per call, begin → run every statement with
+  positionally bound params → commit, or best-effort rollback and `Err` on any failure. The empty
+  statement list returns `Ok` before connecting. `TauriDriver.transaction` is now a thin
+  `invoke('execute_transaction', { statements })` forwarder; the `BEGIN`/`COMMIT` folding across
+  pooled plugin connections is gone. Proven by three Rust tests against a real SQLite file (happy
+  path; forced middle CHECK-violation → rollback → the next write succeeds; empty list never
+  creates the file) and by the native smoke below, which exercises the shipped path end to end.
+  `sqlx` (sqlite + runtime-tokio) is the only new Rust dependency. The stale doc comments in
+  `driver.ts`/`nodeDriver.ts` describing the retired stranded-connection residual were updated.
+- **P0-2 (Pomodoro sequencing).** The fire-and-forget `startSession` race is replaced by a
+  run-token model in `src/stores/timer.ts`: a module-level `currentRun` token per phase run;
+  `beginSessionRun` publishes the inserted id only if the run is still live and unclosed —
+  a run closed while its INSERT was in flight gets the row finalised with the recorded outcome
+  (completed/abandoned) and the id is never published; a run orphaned by a full state reset is
+  defensively abandoned. `endSessionRun` flushes immediately when the id is known, else records
+  the outcome on the token. Every action (start/resume/rest/reset/tick) routes through the pair,
+  and `isResume`'s second clause is now `currentRun !== null`, so a pause during an in-flight
+  INSERT resumes the same run instead of double-inserting. Six deterministic deferred-promise
+  tests (`timerSequencing.test.ts`, a `GatedDriver` that genuinely parks the INSERT) cover
+  start→reset, start→rest, start→tick-to-zero, start→start, sub-second pause→start, and the
+  null-driver contract, each with real-SQLite read-backs: exactly one correctly-finalised row per
+  phase run, no `ended_at NULL` leaks.
+- **P1-3 (relaunch rehydration).** `hydrate(driver, day?, nowMin?)` restores the attachment and
+  `pomodorosDone` from the CURRENT database block: `listBlocksForDay` → `activeWorkBlock(nowMin)`
+  → new `countCompletedFocusForBlock` repo query (`phase='focus' AND completed=1` for that block
+  only — rest, abandoned, unattached and other blocks' rows excluded; deleted blocks' rows are
+  detached by the schema's `ON DELETE SET NULL`). Two SELECTs, zero writes, never sets `running`
+  or `endsAt` — an interrupted countdown is not resumed. A guard skips rehydration entirely when a
+  cycle is live or paused (see the defect below). Ten tests (`timerRehydrate.test.ts`): noise
+  exclusion, target-met keeps the raw count, no-active-block, break/ritual-only, deleted block,
+  day rollover, zero-write proof (row counts and archive totals unchanged), late-hydrate
+  isolation, and derived-target agreement. `App.tsx` passes `day`/`nowMin`.
+- **P1-4 (render tests).** 25 user-flow tests in TWO files under `src/test/render/`
+  (`composerFlows.test.tsx`, `viewFlows.test.tsx`) on the **happy-dom** environment — see the
+  environment decision below. Coverage: composer create/edit/delete with SQLite read-backs, all
+  six duration-validation behaviours (below-min hint + disabled save + Ctrl+Enter blocked in BOTH
+  create and edit mode, `1h30` free-form, kind-switch normalisation, no blur rewrite, unparseable
+  hint), template-apply confirm modal (exact-count warning, confirm/cancel/Escape/overlay),
+  Archive loading/empty/populated/error (empty and populated exercise the REAL query path through
+  a mocked `openDatabase` returning a seeded node driver — the Phase 10 null-driver-fallthrough
+  lesson), Library render/transport/missing-file via the `FakeAudioElement` pattern, Pomodoro
+  widget fresh/running/completed, SessionOverlay phase/exit. Queries are role + accessible name or
+  visible text throughout; `data-testid` only for `pomodoro-count` and `timer-clock`, which have
+  no accessible alternative in the component.
+- **P2 (composer duration agreement).** New pure `durationIssueFor(raw, kind)` in `lib/today.ts`
+  (`unparseable` | `below-min` | `null`; break exempt). The composer draft now holds the RAW
+  unclamped parsed value — the field, the footer summary and the save all read the same draft, so
+  what is displayed is what persists. Below-min shows the hint "Minimum duration for X blocks is
+  N min" (byte-identical to BlockModal's wording) and blocks save twice: the disabled button AND
+  a hard `if (!canSave) return` at the top of `doSave`, closing the Ctrl/Cmd+Enter bypass, which
+  calls `doSave` unconditionally. No blur rewrite (echoing a clamped value into the field is what
+  caused the Phase 6 untypeable-field regression). Nine lib tests plus the render coverage above.
+
+#### Defects found in verification and fixed
+
+As in every prior phase, the writer sub-agents reported their items complete with gates passing;
+the gates did pass and could not see these.
+
+- [x] **`hydrate` cleared `currentRun` unconditionally** (main-session review of the timer
+  rewrite). A late hydrate arriving while a cycle's INSERT was in flight orphaned the run token:
+  the row would have leaked `ended_at NULL` forever while `openSessionId` stayed set. Fixed by
+  scoping the clear to the isolation path only (no driver/day/nowMin). The strengthened
+  late-hydrate test (real block id for the FK, tick-to-zero read-back proving the row finalises)
+  goes red when the fix is reverted — proven, then restored.
+- [x] **No edit-mode render coverage for below-min duration** (independent verifier, severity 2 —
+  the P2 spec says "Cover keyboard submission, blur, kind changes and edit mode"). Added the
+  edit-mode test: hint shown, Save disabled, Ctrl+Enter persists nothing, SQLite row unchanged.
+  Proven red against the unguarded `doSave` (2 red: create + edit keyboard tests), green after
+  restore.
+
+#### Failability proofs (every regression test demonstrated able to fail)
+
+1. `hydrate` fix reverted → strengthened late-hydrate test red → restored → green.
+2. `beginSessionRun` mutated to publish unconditionally (the pre-P0-2 behaviour) → 4 of 6
+   sequencing tests red → restored → green. The independent verifier additionally traced all five
+   race tests red under a mental mutation to HEAD behaviour; the sixth is a labelled null-driver
+   contract guard, not a sequencing proof.
+3. `durationIssueFor` below-min clause removed → 3 lib tests + 3 render tests red → restored →
+   green.
+4. `doSave` hard guard removed → create-mode AND edit-mode Ctrl+Enter render tests red →
+   restored → green.
+
+#### Native smoke (real app, real dev database)
+
+A temporary harness (`src/dev/phase11Smoke.ts`, gated on `VITE_PHASE11_SMOKE=1`, wired into
+`App.tsx` post-hydrate, **removed after the run**) exercised the shipped production path inside
+the real Tauri dev app against the real `~/.config/com.roshanmishra.deepwork/deepwork.db`, and
+wrote its result blob into the `setting` table for external read-back:
+
+- **Forced transaction failure** (middle statement violates the `kind` CHECK) through
+  `TauriDriver.transaction` → `invoke('execute_transaction')` → Rust: error caught, **zero rows
+  leaked**, and the **next transaction succeeded** — also proving the `app_config_dir` path
+  mapping and that an app command needs no capability entry.
+- **Rapid timer actions fired without awaiting** (real IPC makes the in-flight window real, not
+  simulated): start→reset, start→rest, start→tick-to-zero produced exactly 4 rows — focus
+  abandoned, focus abandoned, rest abandoned, focus completed — **no open or mis-associated
+  rows**, `openSessionId` null at rest.
+- **Relaunch rehydration**: seeded block + 2 completed focus rows amid noise (abandoned focus,
+  completed rest, completed unattached) → rehydrated count exactly **2**, attached to the correct
+  block, no countdown resumed. All harness rows cleaned up afterwards.
+
+#### Render-test environment decision
+
+jsdom was measured at ~32s environment startup per file on this mount (the Phase 2 figure of
+~113s was a cold-cache worst case); happy-dom measured ~21s cold / ~6.5s warm per file with
+parallel forks, so **happy-dom@20** was added as a devDependency and the whole render suite
+consolidated into ≤2 files. Measured in the final suite: total environment time ~44–57s across
+all 34 files (the two happy-dom files contribute ~15–22s each) — versus the ~226s two jsdom files
+would have cost. Suite wall time rose from ~30–48s to ~215–261s, but the delta is module IMPORT
+time over the 9p `/mnt/c` mount (React + component trees + Tauri plugins; identical runs measured
+24.5s / 177s / 238.6s), not per-file environment startup — on a normal filesystem (CI, a Linux
+checkout) the import cost collapses. The standing "no component-level tests" exception from
+Phases 5.5–10 is therefore retired.
+
+#### Known notes (none blocking)
+
+- The ArchiveView loading test emits a React `act()` console warning (the hydrate effect resolves
+  after the synchronous assertion). Noise only.
+- Two render assertions are mildly structural (`dialog.parentElement` for the overlay click,
+  `.arc-stat-value` for the headline figure); they assert real rendered output but are brittle to
+  refactors.
+- `beginSessionRun`'s close-late finalise uses the module-level driver at resolve time while the
+  INSERT used the driver captured at call time — a mid-flight driver swap would finalise against
+  the wrong DB. Test-only scenario: production memoizes one driver and hydrates once.
+- A rehydrated cycle freezes attachment to the rehydrated block; pressing Start only after that
+  block's window has ended attaches to it rather than the now-active block. A consequence of the
+  Phase 9 frozen-attachment model, spec-compliant ("attach from the current database block" at
+  hydrate time).
+- Fractional-minute input (`30.5`) stays as typed in the field while summary/save use the rounded
+  value — the summary (the agreement surface) always matches the save.
+- The views' error copy double-prints (`Error: Error: …`) because stores hold `String(err)` and
+  views prefix `Error: ` — a consistent pre-existing pattern across Today/Week/Archive, asserted
+  as-rendered by the error test. Cosmetic; changing three views' error contract is out of scope
+  for a hardening phase.
+
+#### External PR review (PR #13) — one finding confirmed and fixed, one hardening taken
+
+The review independently re-ran every gate and confirmed them as recorded, traced the run-token
+model and the rehydrate query path by hand (both accepted, including the FK/pragma assumptions
+behind the deleted-block claim), and confirmed the environment-vs-import breakdown behind the
+render-test cost argument. P0-1, P0-2, P1-3, P1-4 accepted. Two findings:
+
+- [x] **The pomodoro cap was derived from the unclamped transient duration (the defect).**
+  `handleDurationTextChange` clamped `pomodoros` against `maxPomodoros(parsed)` for every
+  keystroke — and `maxPomodoros(9) === 0`, so typing "90" passed through "9" and permanently
+  zeroed the block's pomodoro target; `Math.min` can never restore the old count once the text
+  becomes valid. Fixed by gating, not by the reviewer's literal suggestion: "clamp the cap['s
+  input]" (`maxPomodoros(max(minDurationFor, parsed))`) still erodes the target — a 3-pomodoro
+  block retyped via "1" → "12" → "120" sinks to the 30-minute cap of 1 at the first keystroke.
+  The non-lossy form is a new pure `pomodorosForDurationText(raw, kind, current)`: the cap is
+  derived ONLY from saveable durations; unparseable or below-minimum text preserves the count
+  untouched (saving is blocked for those anyway). The committed duration stays raw — the P2
+  design is untouched. The same defect class was swept in the siblings (the Phase 6 lesson):
+  `stepPomodoros` is now inert while the duration text is unsaveable (clicking + against a
+  sub-30 transient zeroed the target through a second path), the stepper buttons disable, the
+  stepper label shows the preserved `draft.pomodoros` instead of a transient-clamped 0, and the
+  max hint reads "max —" until the duration is saveable. One deliberate behaviour change: the
+  footer summary keeps the pomodoro segment visible during a below-minimum transient ("… · 5 min
+  · 1 pomodoro") because the summary must not disagree with the draft — the pre-fix test
+  asserting the segment disappears was updated. Seven lib tests + one render test (select-all
+  retype of a 2-pomodoro block through the "9" transient → save → SQLite read-back shows 90 min
+  and 2 pomodoros). Failability: the render test is red against the pre-fix composer, and
+  mutating the helper's gate turns 2 lib + 2 render tests red (restored green).
+- [x] **`create_if_missing(true)` coupled the transaction command to the path mapping
+  (hardening, flagged optional — taken).** A platform path drift between `app_config_dir()` and
+  the plugin's path_mapper would have silently created a second, empty database and failed every
+  statement with "no such table". The flag is removed: the plugin pool creates and migrates the
+  file long before any transaction can run, so a missing file now fails at connect with a clear
+  error. New Rust test proves both halves: connect fails AND no file is created.
+
+Post-review gates: `pnpm lint` clean · `pnpm typecheck` pass · `pnpm test` **837 tests / 34
+files** (829 + 7 lib + 1 render) · `pnpm check:css` pass · `pnpm build` pass ·
+`cargo fmt --check` / `cargo clippy -D warnings` clean · `cargo test` 4/4.
+
 #### Phase 11 acceptance
 
-- [ ] Every new regression test is demonstrated red against the old behaviour and green after the
+- [x] Every new regression test is demonstrated red against the old behaviour and green after the
   fix; persistence assertions read back from real SQLite rather than only inspecting mocks.
-- [ ] `pnpm lint`, `pnpm typecheck`, `pnpm test`, `pnpm check:css`, `pnpm build`,
+- [x] `pnpm lint`, `pnpm typecheck`, `pnpm test`, `pnpm check:css`, `pnpm build`,
   `cargo fmt --all -- --check` and `cargo clippy --all-targets -- -D warnings` all pass.
-- [ ] Native smoke verification covers a forced transaction failure followed by a successful write,
+- [x] Native smoke verification covers a forced transaction failure followed by a successful write,
   plus rapid timer actions with no open or mis-associated `pomodoro_session` rows.
-- [ ] Manual QA confirms relaunch restores only the correct block's completed Pomodoro count and the
+- [x] Manual QA confirms relaunch restores only the correct block's completed Pomodoro count and the
   composer never displays a duration different from the value it will save.
+
+**Phase 11 acceptance — MET (independently verified, not taken on the sub-agents' reports):**
+
+| Check | Result |
+| --- | --- |
+| `pnpm lint` | clean, zero warnings (102 files) |
+| `pnpm typecheck` | pass (`tsc -b` + `tsc -p tsconfig.test.json`) |
+| `pnpm test` | 837 tests, 34 files (778 at phase start: +6 sequencing, +10 rehydrate, +16 duration lib, +26 render, +1 driver forwarding rewrite) |
+| `pnpm check:css` | pass |
+| `pnpm build` | pass |
+| `cargo fmt --all -- --check` / `cargo clippy --all-targets -- -D warnings` | pass |
+| `cargo test` (tx.rs) | 4/4 — happy path, forced middle failure → rollback → subsequent write, missing file → connect error + no file created, empty list |
+| Regression tests proven able to fail | pass ×4 mutation experiments (hydrate fix, unconditional publish, below-min clause, doSave guard) — each reverted → red → restored → green; verifier traced all 5 race tests red under HEAD behaviour |
+| Native smoke (real app + real dev DB) | pass — forced tx failure rolled back with zero leaked rows and the next write succeeded; 4 rapid-action session rows all correctly finalised, none open or mis-associated; rehydration restored exactly the 2 completed focus rows for the correct block with no countdown resumed |
+| Render-test environment cost | pass — happy-dom, ~15–22s environment per file × 2 files; the ~113s/file jsdom cost not reintroduced (suite wall-time delta is 9p-mount import volatility, not environment startup) |
+| Manual QA (relaunch count + composer agreement) | **covered by automation, honestly scoped** — relaunch rehydration proven in the native smoke against the real app DB (count 2, correct block, not running); composer field/summary/save agreement proven by 13 render tests including both keyboard paths. A human relaunch click-through remains part of the Windows handoff QA, as in Phase 10 |
 
 ---
 

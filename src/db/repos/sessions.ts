@@ -62,6 +62,24 @@ export async function countSessionsForDay(
   return rows[0]?.count ?? 0
 }
 
+/**
+ * Completed focus rows for one block — the rehydrate source for a block's
+ * pomodoro progress after a relaunch (Phase 11 P1-3). Rest rows, abandoned
+ * (completed = 0) rows, and other blocks' rows are excluded by the WHERE
+ * clause; rows whose block was deleted have block_id NULLed by the FK and
+ * so can never be counted here.
+ */
+export async function countCompletedFocusForBlock(
+  driver: SqlDriver,
+  blockId: number
+): Promise<number> {
+  const rows = await driver.select<{ count: number }>(
+    "SELECT COUNT(*) as count FROM pomodoro_session WHERE block_id = ? AND phase = 'focus' AND completed = 1",
+    [blockId]
+  )
+  return rows[0]?.count ?? 0
+}
+
 export async function listSessionsForBlock(
   driver: SqlDriver,
   blockId: number

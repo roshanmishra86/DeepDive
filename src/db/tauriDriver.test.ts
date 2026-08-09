@@ -1,16 +1,16 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
 // `@tauri-apps/plugin-sql` talks to a real Tauri webview/Rust backend that
-// doesn't exist in this Node test environment, so `Database.load` is mocked.
-// This test therefore cannot prove real atomicity through the Rust sqlx
-// pool — that's established by reading the plugin's source (see the
-// comment above `TauriDriver.transaction` and the Phase 6 F1 writeup in
-// TASKS.md). What THIS test proves: `transaction()` folds every statement,
-// including literal BEGIN/COMMIT, into exactly one `execute()` call with
-// positionally-flattened params — the one part of the strategy this driver
-// controls and that a regression could silently break (e.g. reverting to
-// one execute() call per statement, which is exactly the F1 bug).
+// doesn't exist in this Node test environment, so `Database.load` is mocked
+// (still needed for `connect()`). `@tauri-apps/api/core`'s `invoke` is also
+// mocked. What THIS test proves: `transaction()` forwards the statement
+// list unchanged to the Rust `execute_transaction` command — the one part
+// of the strategy this driver controls and that a regression could silently
+// break. Real atomicity (begin / commit / rollback-on-error on one owned
+// connection) is proven natively by the Rust tests in src-tauri/src/tx.rs
+// against a real SQLite file.
 const executeMock = vi.fn().mockResolvedValue({ rowsAffected: 0, lastInsertId: 0 })
+const invokeMock = vi.fn().mockResolvedValue(undefined)
 
 vi.mock('@tauri-apps/plugin-sql', () => ({
   default: class MockDatabase {
@@ -22,33 +22,36 @@ vi.mock('@tauri-apps/plugin-sql', () => ({
   },
 }))
 
+vi.mock('@tauri-apps/api/core', () => ({
+  invoke: invokeMock,
+}))
+
 describe('TauriDriver.transaction', () => {
   beforeEach(() => {
     executeMock.mockClear()
+    invokeMock.mockClear()
   })
 
-  it('issues exactly one execute() call with BEGIN/COMMIT wrapped around every statement', async () => {
+  it('forwards the statement list unchanged to the execute_transaction command', async () => {
     const { TauriDriver } = await import('./tauriDriver')
     const driver = new TauriDriver()
     await driver.connect()
 
-    await driver.transaction([
+    const statements = [
       { sql: 'UPDATE template_block SET start_min = ? WHERE id = ?', params: [999, 1] },
       {
         sql: 'UPDATE template_block SET sort = ? WHERE id = ? AND template_id = ?',
         params: [0, 2, 5],
       },
-    ])
+    ]
+    await driver.transaction(statements)
 
-    expect(executeMock).toHaveBeenCalledTimes(1)
-    const [sql, params] = executeMock.mock.calls[0]
-    expect(sql).toBe(
-      'BEGIN; UPDATE template_block SET start_min = ? WHERE id = ?; ' +
-        'UPDATE template_block SET sort = ? WHERE id = ? AND template_id = ?; COMMIT'
-    )
-    // Params flattened in statement order — this is what lets `?` binding
-    // line up correctly across the merged multi-statement string.
-    expect(params).toEqual([999, 1, 0, 2, 5])
+    expect(invokeMock).toHaveBeenCalledTimes(1)
+    expect(invokeMock).toHaveBeenCalledWith('execute_transaction', { statements })
+    // Params preserved in order, per statement.
+    const passed = invokeMock.mock.calls[0][1].statements
+    expect(passed[0].params).toEqual([999, 1])
+    expect(passed[1].params).toEqual([0, 2, 5])
   })
 
   it('is a no-op for an empty statement list', async () => {
@@ -58,6 +61,17 @@ describe('TauriDriver.transaction', () => {
 
     await driver.transaction([])
 
-    expect(executeMock).not.toHaveBeenCalled()
+    expect(invokeMock).not.toHaveBeenCalled()
+  })
+
+  it('propagates a rejection from the Rust command to the caller', async () => {
+    const { TauriDriver } = await import('./tauriDriver')
+    const driver = new TauriDriver()
+    await driver.connect()
+
+    invokeMock.mockRejectedValueOnce(new Error('statement 1 failed, transaction rolled back'))
+    await expect(
+      driver.transaction([{ sql: 'INSERT INTO t (n) VALUES (?)', params: [1] }])
+    ).rejects.toThrow('statement 1 failed, transaction rolled back')
   })
 })

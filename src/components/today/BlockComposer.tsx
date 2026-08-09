@@ -13,6 +13,8 @@ import {
   resolveTaskAction,
   resolveBlockTitle,
   durationPresetsFor,
+  durationIssueFor,
+  pomodorosForDurationText,
   nearestBreakDuration,
   BREAK_DURATION_PRESETS,
 } from '../../lib/today'
@@ -89,7 +91,15 @@ export function BlockComposer({ blockId, startMin: startMinProp, onDone }: Block
   const startValid = parseClock(startText, 0) !== null
   // Breaks have no free-text duration field — draft.durationMin is always a
   // valid number for them, set only via chips or kind-switch snapping.
-  const durationValid = draft.kind === 'break' || parseDuration(durationText) !== null
+  // For other kinds the draft holds the raw parsed value UNCLAMPED (see
+  // handleDurationTextChange), so a below-minimum value must surface as a
+  // validation issue here rather than being silently corrected — the field
+  // must never display a duration different from the value a save would
+  // persist (Phase 5.5 known-issue entry; BlockModal has the same
+  // validate-and-block pattern in its handleSave).
+  const durationIssue = draft.kind === 'break' ? null : durationIssueFor(durationText, draft.kind)
+  const durationValid = durationIssue !== 'unparseable'
+  const durationBelowMin = durationIssue === 'below-min'
   const shutdownNeeded = !block && shutdownMin === null
   const shutdownParsed = shutdownNeeded ? parseClock(shutdownInputText, 0) : null
   const showPomodoros = draft.kind !== 'break' && draft.kind !== 'ritual'
@@ -104,8 +114,21 @@ export function BlockComposer({ blockId, startMin: startMinProp, onDone }: Block
     setDurationText(raw)
     const parsed = parseDuration(raw)
     if (parsed !== null) {
-      const clamped = Math.max(minDurationFor(draft.kind), parsed)
-      setDraft((d) => ({ ...d, durationMin: clamped, pomodoros: Math.min(d.pomodoros, maxPomodoros(clamped)) }))
+      // Commit the RAW parsed value, unclamped. Clamping here (the pre-Phase-11
+      // behavior) made the draft silently diverge from the visible text —
+      // typing "5" on a deep block showed "5" while the draft (and footer
+      // summary, and any save) held 30. Below-minimum values are instead
+      // surfaced via durationBelowMin and blocked from saving, so what the
+      // field shows is always what a save would persist. The text itself is
+      // never rewritten mid-typing: echoing a clamped value back into the
+      // field is what caused the Phase 6 untypeable-field regression
+      // ("90" went 9 → "30" → "300").
+      // The pomodoro cap likewise must not be derived from the transient
+      // text: maxPomodoros(9) === 0, so the "9" on the way to "90" would
+      // permanently zero the block's pomodoro target (PR #13 review).
+      // pomodorosForDurationText tightens the cap only for saveable
+      // durations and preserves the count through unsaveable transients.
+      setDraft((d) => ({ ...d, durationMin: parsed, pomodoros: pomodorosForDurationText(raw, d.kind, d.pomodoros) }))
     }
   }
 
@@ -116,7 +139,11 @@ export function BlockComposer({ blockId, startMin: startMinProp, onDone }: Block
   }
 
   const stepPomodoros = (delta: number) => {
-    if (!showPomodoros) return
+    // Inert while the duration text is unsaveable: the cap is derived only
+    // from saveable durations (see pomodorosForDurationText), so there is
+    // no valid cap to step against — and clamping against the transient
+    // value would zero the target just like the keystroke path did.
+    if (!showPomodoros || durationIssue !== null) return
     setDraft((d) => {
       const max = maxPomodoros(d.durationMin)
       const next = Math.max(0, Math.min(max, d.pomodoros + delta))
@@ -143,9 +170,14 @@ export function BlockComposer({ blockId, startMin: startMinProp, onDone }: Block
     (draft.kind === 'break' || draft.title.trim() !== '') &&
     startValid &&
     durationValid &&
+    !durationBelowMin &&
     (!shutdownNeeded || shutdownParsed !== null)
 
   const doSave = async () => {
+    // Hard guard: the Ctrl/Cmd+Enter path in handleContainerKeyDown calls
+    // doSave() unconditionally, bypassing the disabled Save button — without
+    // this, a below-minimum duration could still be persisted via keyboard.
+    if (!canSave) return
     const title = resolveBlockTitle(draft.title, draft.kind)
     const effectivePomodoros = showPomodoros ? draft.pomodoros : 0
 
@@ -385,10 +417,20 @@ export function BlockComposer({ blockId, startMin: startMinProp, onDone }: Block
                   className="composer-mono-input"
                   value={durationText}
                   onChange={(e) => handleDurationTextChange(e.target.value)}
+                  // Deliberately no onBlur rewrite: an invalid or below-min
+                  // value stays visible with its hint and save stays blocked.
+                  // Rewriting on blur was rejected for the same reason as
+                  // mid-typing rewrites — the Phase 6 untypeable-field
+                  // regression (see handleDurationTextChange).
                   placeholder="90"
                 />
-                {!durationValid && (
+                {durationIssue === 'unparseable' && (
                   <span className="composer-hint composer-hint-error">Try 90, 1.5h, or 1h30</span>
+                )}
+                {durationIssue === 'below-min' && (
+                  <span className="composer-hint composer-hint-error">
+                    Minimum duration for {draft.kind} blocks is {minDurationFor(draft.kind)} min
+                  </span>
                 )}
               </>
             )}
@@ -403,26 +445,30 @@ export function BlockComposer({ blockId, startMin: startMinProp, onDone }: Block
                 type="button"
                 className="composer-stepper-btn"
                 aria-label="Decrease pomodoros"
-                disabled={!showPomodoros}
+                disabled={!showPomodoros || durationIssue !== null}
                 onClick={() => stepPomodoros(-1)}
               >
                 −
               </button>
               <span className="composer-stepper-label" aria-labelledby="composer-pomodoros-label">
-                {showPomodoros ? Math.min(draft.pomodoros, maxPomodoros(draft.durationMin)) : 0}
+                {showPomodoros ? draft.pomodoros : 0}
               </span>
               <button
                 type="button"
                 className="composer-stepper-btn"
                 aria-label="Increase pomodoros"
-                disabled={!showPomodoros}
+                disabled={!showPomodoros || durationIssue !== null}
                 onClick={() => stepPomodoros(1)}
               >
                 +
               </button>
             </div>
             <span className="composer-hint">
-              {showPomodoros ? `max ${maxPomodoros(draft.durationMin)}` : 'not for this type'}
+              {showPomodoros
+                ? durationIssue === null
+                  ? `max ${maxPomodoros(draft.durationMin)}`
+                  : 'max —'
+                : 'not for this type'}
             </span>
           </div>
         </div>
