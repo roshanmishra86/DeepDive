@@ -168,6 +168,9 @@ export const useLibraryStore = create<LibraryState>()((set, get) => ({
     if (player.trackId === id) {
       player.stop()
     }
+    // A queued entry pointing at a deleted row would be skipped silently by
+    // the queue walker; drop it so the queue count stays honest.
+    player.dequeue(id)
     try {
       await tracksRepo.deleteTrack(persistenceDriver, id)
       set({ tracks: get().tracks.filter((t) => t.id !== id), error: null })

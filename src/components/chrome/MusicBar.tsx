@@ -7,6 +7,7 @@ import { SkipForward } from '@phosphor-icons/react/dist/csr/SkipForward'
 import { Play } from '@phosphor-icons/react/dist/csr/Play'
 import { Pause } from '@phosphor-icons/react/dist/csr/Pause'
 import { SpeakerHigh } from '@phosphor-icons/react/dist/csr/SpeakerHigh'
+import { Repeat } from '@phosphor-icons/react/dist/csr/Repeat'
 
 /**
  * 66px footer. Renders the player store: real elapsed/duration times, a
@@ -28,6 +29,9 @@ export function MusicBar() {
   const seek = usePlayerStore((s) => s.seek)
   const next = usePlayerStore((s) => s.next)
   const prev = usePlayerStore((s) => s.prev)
+  const repeat = usePlayerStore((s) => s.repeat)
+  const toggleRepeat = usePlayerStore((s) => s.toggleRepeat)
+  const queueLength = usePlayerStore((s) => s.queue.length)
   const setView = useAppStore((s) => s.setView)
 
   const hasTrack = trackId !== null
@@ -111,6 +115,25 @@ export function MusicBar() {
         >
           <SkipForward size={14} weight="fill" />
         </button>
+        {/* Always available, queue or not: with a queue it decides whether
+            the queue wraps or stops at its end; without one it repeats the
+            loaded track. */}
+        <button
+          type="button"
+          className={repeat ? 'musicbar-repeat musicbar-repeat-on' : 'musicbar-repeat'}
+          aria-label={repeat ? 'Repeat on' : 'Repeat off'}
+          aria-pressed={repeat}
+          title={repeat ? 'Repeat queue: on' : 'Repeat queue: off'}
+          onClick={toggleRepeat}
+          data-testid="musicbar-repeat"
+        >
+          <Repeat size={14} weight="bold" />
+        </button>
+        {queueLength > 0 && (
+          <span className="musicbar-queue-count" title={`${queueLength} in queue`}>
+            {queueLength}
+          </span>
+        )}
       </div>
 
       <div className="musicbar-progress">

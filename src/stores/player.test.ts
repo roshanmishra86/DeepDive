@@ -78,6 +78,9 @@ function resetPlayerStore() {
     durationSec: 0,
     missing: false,
     restPaused: false,
+    queue: [],
+    queueIndex: -1,
+    repeat: false,
   })
 }
 
@@ -416,6 +419,146 @@ describe('player store', () => {
     expect(usePlayerStore.getState().playing).toBe(false)
     expect(usePlayerStore.getState().trackId).toBe(1)
     expect(usePlayerStore.getState().positionSec).toBe(0)
+  })
+
+  it('enqueue appends without duplicates and plays at once on an idle player', async () => {
+    const tracks = [makeTrack(1), makeTrack(2)]
+    useLibraryStore.setState({ tracks })
+
+    await usePlayerStore.getState().enqueue(tracks[0])
+    expect(usePlayerStore.getState().queue).toEqual([1])
+    // Nothing was loaded, so the first queued track starts.
+    expect(usePlayerStore.getState().trackId).toBe(1)
+    expect(usePlayerStore.getState().queueIndex).toBe(0)
+
+    await usePlayerStore.getState().enqueue(tracks[1])
+    await usePlayerStore.getState().enqueue(tracks[1])
+    expect(usePlayerStore.getState().queue).toEqual([1, 2])
+    // A second enqueue never steals playback from the running track.
+    expect(usePlayerStore.getState().trackId).toBe(1)
+  })
+
+  it('ended walks the queue and stops at its end when repeat is off', async () => {
+    const tracks = [makeTrack(1), makeTrack(2), makeTrack(3)]
+    useLibraryStore.setState({ tracks, loopUntilBlockEnd: false })
+
+    await usePlayerStore.getState().enqueue(tracks[1])
+    await usePlayerStore.getState().enqueue(tracks[2])
+    expect(usePlayerStore.getState().trackId).toBe(2)
+
+    fake.emit('ended')
+    await vi.waitFor(() => {
+      expect(usePlayerStore.getState().trackId).toBe(3)
+    })
+    expect(usePlayerStore.getState().queueIndex).toBe(1)
+
+    // Last queue entry ended, repeat off: playback stops instead of falling
+    // through to the rest of the library.
+    fake.emit('ended')
+    await vi.waitFor(() => {
+      expect(usePlayerStore.getState().playing).toBe(false)
+    })
+    expect(usePlayerStore.getState().trackId).toBe(3)
+  })
+
+  it('ended wraps to the head of the queue when repeat is on', async () => {
+    const tracks = [makeTrack(1), makeTrack(2)]
+    useLibraryStore.setState({ tracks, loopUntilBlockEnd: false })
+
+    await usePlayerStore.getState().enqueue(tracks[0])
+    await usePlayerStore.getState().enqueue(tracks[1])
+    usePlayerStore.getState().toggleRepeat()
+    expect(usePlayerStore.getState().repeat).toBe(true)
+
+    fake.emit('ended')
+    await vi.waitFor(() => {
+      expect(usePlayerStore.getState().trackId).toBe(2)
+    })
+
+    fake.emit('ended')
+    await vi.waitFor(() => {
+      expect(usePlayerStore.getState().trackId).toBe(1)
+    })
+    expect(usePlayerStore.getState().queueIndex).toBe(0)
+    expect(usePlayerStore.getState().playing).toBe(true)
+  })
+
+  it('repeat replays the current track when the queue is empty', async () => {
+    const tracks = [makeTrack(1), makeTrack(2)]
+    useLibraryStore.setState({ tracks, loopUntilBlockEnd: false })
+
+    await usePlayerStore.getState().playTrack(tracks[0])
+    usePlayerStore.getState().toggleRepeat()
+    fake.emit('ended')
+
+    await vi.waitFor(() => {
+      expect(usePlayerStore.getState().playing).toBe(true)
+    })
+    // Repeat beats the library auto-advance: track 1 plays again, not 2.
+    expect(usePlayerStore.getState().trackId).toBe(1)
+    expect(usePlayerStore.getState().positionSec).toBe(0)
+  })
+
+  it('the queue drives next/prev, with wrap-around, over the library order', async () => {
+    const tracks = [makeTrack(1), makeTrack(2), makeTrack(3)]
+    useLibraryStore.setState({ tracks })
+
+    await usePlayerStore.getState().enqueue(tracks[2]) // starts playing
+    await usePlayerStore.getState().enqueue(tracks[0])
+
+    await usePlayerStore.getState().next()
+    expect(usePlayerStore.getState().trackId).toBe(1)
+    await usePlayerStore.getState().next() // wraps, skipping library track 2
+    expect(usePlayerStore.getState().trackId).toBe(3)
+    await usePlayerStore.getState().prev()
+    expect(usePlayerStore.getState().trackId).toBe(1)
+  })
+
+  it('the queue skips entries whose track has left the library', async () => {
+    const tracks = [makeTrack(1), makeTrack(2), makeTrack(3)]
+    useLibraryStore.setState({ tracks, loopUntilBlockEnd: false })
+
+    await usePlayerStore.getState().enqueue(tracks[0])
+    await usePlayerStore.getState().enqueue(tracks[1])
+    await usePlayerStore.getState().enqueue(tracks[2])
+    useLibraryStore.setState({ tracks: [tracks[0], tracks[2]] })
+
+    fake.emit('ended')
+    await vi.waitFor(() => {
+      expect(usePlayerStore.getState().trackId).toBe(3)
+    })
+  })
+
+  it('dequeue removes an entry and keeps the cursor on the same track', async () => {
+    const tracks = [makeTrack(1), makeTrack(2), makeTrack(3)]
+    useLibraryStore.setState({ tracks, loopUntilBlockEnd: false })
+
+    await usePlayerStore.getState().enqueue(tracks[0])
+    await usePlayerStore.getState().enqueue(tracks[1])
+    await usePlayerStore.getState().enqueue(tracks[2])
+    await usePlayerStore.getState().next() // now on queue entry 1 (track 2)
+    expect(usePlayerStore.getState().queueIndex).toBe(1)
+
+    usePlayerStore.getState().dequeue(1) // remove an entry BEFORE the cursor
+    expect(usePlayerStore.getState().queue).toEqual([2, 3])
+    expect(usePlayerStore.getState().queueIndex).toBe(0)
+
+    fake.emit('ended')
+    await vi.waitFor(() => {
+      expect(usePlayerStore.getState().trackId).toBe(3)
+    })
+  })
+
+  it('stop keeps the queue and only drops the cursor', async () => {
+    const tracks = [makeTrack(1), makeTrack(2)]
+    useLibraryStore.setState({ tracks })
+
+    await usePlayerStore.getState().enqueue(tracks[0])
+    await usePlayerStore.getState().enqueue(tracks[1])
+    usePlayerStore.getState().stop()
+
+    expect(usePlayerStore.getState().queue).toEqual([1, 2])
+    expect(usePlayerStore.getState().queueIndex).toBe(-1)
   })
 
   it('stop clears the selection and halts playback', async () => {

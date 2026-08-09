@@ -40,19 +40,41 @@ interface PlayerState {
   missing: boolean
   /** True when WE paused playback for a rest phase (so only we resume it). */
   restPaused: boolean
+  /** Track ids queued up, in play order. No duplicates. */
+  queue: number[]
+  /** Index into `queue` of the playing track, or -1 when playing off-queue. */
+  queueIndex: number
+  /**
+   * Queue repeat. On: the queue wraps to its first entry when the last one
+   * ends (and with an empty queue, the current track replays). Off: playback
+   * stops at the end of the queue.
+   */
+  repeat: boolean
 
   // Loads the persisted volume. Never autoplays and never loads a track.
   hydrate: (driver: SqlDriver | null) => Promise<void>
 
   // Selects and starts a track, honouring the library's session defaults
   // (loop, fade-in). A failed load marks the track missing instead of throwing.
-  playTrack: (track: Track) => Promise<void>
+  // `queueIndex` is supplied by the queue walker; callers outside it let the
+  // track's own position in the queue (if any) decide.
+  playTrack: (track: Track, queueIndex?: number) => Promise<void>
 
   togglePlay: () => Promise<void>
   seek: (sec: number) => void
   setVolume: (volume: number) => void
   next: () => Promise<void>
   prev: () => Promise<void>
+
+  // Appends a track to the queue (no-op if already queued). With nothing
+  // loaded, the appended track starts playing immediately.
+  enqueue: (track: Track) => Promise<void>
+
+  // Drops a track from the queue, keeping queueIndex pointing at the same
+  // entry it did before.
+  dequeue: (trackId: number) => void
+
+  toggleRepeat: () => void
 
   // Applies the loop session default to the live element. Called by the
   // library store's setLoopUntilBlockEnd so toggling it mid-playback takes
@@ -171,11 +193,60 @@ function handlePlayRejection(el: HTMLAudioElement, err: unknown) {
   }
 }
 
+function haltPlayback() {
+  clearFade()
+  if (audio) audio.pause()
+  usePlayerStore.setState({ playing: false, positionSec: 0 })
+}
+
+/**
+ * Plays the first queue entry at or after `from` whose track still exists in
+ * the library (a queued track can be removed while it waits). Wraps to the
+ * head of the queue once when `wrap` is set — the wrap costs one full extra
+ * scan at most, so this always terminates. Returns false when nothing in the
+ * queue is playable.
+ */
+async function playQueueFrom(from: number, wrap: boolean): Promise<boolean> {
+  const { queue } = usePlayerStore.getState()
+  const tracks = useLibraryStore.getState().tracks
+  const limit = wrap ? queue.length : queue.length - from
+  for (let step = 0; step < limit; step += 1) {
+    const index = wrap ? (from + step) % queue.length : from + step
+    const track = tracks.find((t) => t.id === queue[index])
+    if (!track) continue
+    await usePlayerStore.getState().playTrack(track, index)
+    return true
+  }
+  return false
+}
+
 function handleEnded() {
-  // `ended` only fires when `loop` is false. Advance to the next track if
-  // one exists, else stop. A single-track list wraps to itself, which is
-  // not "a next track", so playback stops.
+  // `ended` only fires when `loop` is false.
   const state = usePlayerStore.getState()
+
+  // With a queue, the queue is the running order: advance through it, wrap
+  // back to the top when repeat is on, and stop at its end when it is off.
+  if (state.queue.length > 0) {
+    const from = state.queueIndex + 1 // -1 (off-queue) starts at the head
+    void (async () => {
+      if (await playQueueFrom(from, false)) return
+      if (state.repeat && (await playQueueFrom(0, false))) return
+      haltPlayback()
+    })()
+    return
+  }
+
+  // No queue. Repeat replays the current track; otherwise advance to the
+  // next library track if one exists, else stop. A single-track list wraps
+  // to itself, which is not "a next track", so playback stops.
+  if (state.repeat) {
+    const tracks = useLibraryStore.getState().tracks
+    const current = tracks.find((t) => t.id === state.trackId)
+    if (current) {
+      void state.playTrack(current)
+      return
+    }
+  }
   const tracks = useLibraryStore.getState().tracks
   const nextId = nextTrackId(tracks, state.trackId, 1)
   const nextTrack = tracks.find((t) => t.id === nextId)
@@ -197,6 +268,9 @@ export const usePlayerStore = create<PlayerState>()((set, get) => ({
   durationSec: 0,
   missing: false,
   restPaused: false,
+  queue: [],
+  queueIndex: -1,
+  repeat: false,
 
   hydrate: async (driver) => {
     persistenceDriver = driver
@@ -212,12 +286,16 @@ export const usePlayerStore = create<PlayerState>()((set, get) => ({
     }
   },
 
-  playTrack: async (track) => {
+  playTrack: async (track, queueIndex) => {
     const el = ensureAudio()
     clearFade()
     const { loopUntilBlockEnd, fadeInSec } = useLibraryStore.getState()
     set({
       trackId: track.id,
+      // Playing a queued track directly (card play button) keeps the queue
+      // running from that point; an unqueued track plays off-queue and the
+      // queue resumes from its head when the track ends.
+      queueIndex: queueIndex ?? get().queue.indexOf(track.id),
       trackName: track.displayName,
       trackMeta: describeTrack(track),
       playing: false,
@@ -308,6 +386,14 @@ export const usePlayerStore = create<PlayerState>()((set, get) => ({
   },
 
   next: async () => {
+    // A queue overrides the library order for the transport buttons. Manual
+    // skips always wrap, regardless of repeat — repeat governs what happens
+    // when a track ends on its own, not what the user can reach by hand.
+    const { queue, queueIndex } = get()
+    if (queue.length > 0) {
+      const from = queueIndex < 0 ? 0 : (queueIndex + 1) % queue.length
+      if (await playQueueFrom(from, true)) return
+    }
     const tracks = useLibraryStore.getState().tracks
     const id = nextTrackId(tracks, get().trackId, 1)
     const track = tracks.find((t) => t.id === id)
@@ -315,10 +401,47 @@ export const usePlayerStore = create<PlayerState>()((set, get) => ({
   },
 
   prev: async () => {
+    const { queue, queueIndex } = get()
+    if (queue.length > 0) {
+      const from =
+        queueIndex < 0 ? queue.length - 1 : (queueIndex - 1 + queue.length) % queue.length
+      if (await playQueueFrom(from, true)) return
+    }
     const tracks = useLibraryStore.getState().tracks
     const id = nextTrackId(tracks, get().trackId, -1)
     const track = tracks.find((t) => t.id === id)
     if (track) await get().playTrack(track)
+  },
+
+  enqueue: async (track) => {
+    const { queue, trackId } = get()
+    if (queue.includes(track.id)) return
+    const nextQueue = [...queue, track.id]
+    set({ queue: nextQueue })
+    // Nothing loaded: the first queued track starts straight away, so the
+    // queue button doubles as "play this" on an idle player.
+    if (trackId === null) {
+      await get().playTrack(track, nextQueue.length - 1)
+    } else if (trackId === track.id) {
+      // The playing track was just queued — anchor the queue on it.
+      set({ queueIndex: nextQueue.length - 1 })
+    }
+  },
+
+  dequeue: (trackId) => {
+    const { queue, queueIndex } = get()
+    const index = queue.indexOf(trackId)
+    if (index === -1) return
+    const nextQueue = queue.filter((id) => id !== trackId)
+    // Keep queueIndex on the same entry: removing something ahead of the
+    // cursor does not move it, removing the cursor itself leaves the cursor
+    // just before whatever slid into its slot.
+    const nextIndex = queueIndex === -1 || index > queueIndex ? queueIndex : queueIndex - 1
+    set({ queue: nextQueue, queueIndex: nextQueue.length === 0 ? -1 : nextIndex })
+  },
+
+  toggleRepeat: () => {
+    set({ repeat: !get().repeat })
   },
 
   setLoop: (on) => {
@@ -337,6 +460,8 @@ export const usePlayerStore = create<PlayerState>()((set, get) => ({
       durationSec: 0,
       missing: false,
       restPaused: false,
+      // The queue itself survives — only the cursor into it is dropped.
+      queueIndex: -1,
     })
   },
 

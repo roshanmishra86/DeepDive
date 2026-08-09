@@ -2,6 +2,21 @@ import { useState, useEffect, useRef } from 'react'
 import { useTasksStore } from '../../stores/tasks'
 import { composeDueAt, decomposeDueAt } from '../../lib/week'
 
+/**
+ * The estimate is captured in hours (quarter-hour steps) but stored in
+ * minutes — `Task.estimateMin` is what the scheduler and every other view
+ * read, so the conversion lives here at the edge.
+ */
+const MIN_ESTIMATE_HOURS = 0.25
+const MAX_ESTIMATE_HOURS = 24
+
+function minutesToHoursField(minutes: number | null | undefined): string {
+  if (minutes === null || minutes === undefined) return ''
+  // Two decimals covers quarter-hours exactly; trailing zeros are trimmed so
+  // a 1-hour estimate reads "1", not "1.00".
+  return String(Number((minutes / 60).toFixed(2)))
+}
+
 const FOCUSABLE_SELECTOR =
   'button:not(:disabled), [href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])'
 
@@ -24,7 +39,7 @@ export function TaskEditor({ taskId, onClose }: TaskEditorProps) {
   const initialDue = task?.dueAt ? decomposeDueAt(task.dueAt) : { date: '', time: '17:00' }
   const [dueDate, setDueDate] = useState(initialDue.date)
   const [dueTime, setDueTime] = useState(initialDue.time)
-  const [estimateMin, setEstimateMin] = useState<string>((task?.estimateMin ?? '').toString())
+  const [estimateHours, setEstimateHours] = useState<string>(minutesToHoursField(task?.estimateMin))
   const [error, setError] = useState('')
   const modalRef = useRef<HTMLDivElement>(null)
   const titleInputRef = useRef<HTMLInputElement>(null)
@@ -38,7 +53,7 @@ export function TaskEditor({ taskId, onClose }: TaskEditorProps) {
       const due = task.dueAt ? decomposeDueAt(task.dueAt) : { date: '', time: '17:00' }
       setDueDate(due.date)
       setDueTime(due.time)
-      setEstimateMin((task.estimateMin ?? '').toString())
+      setEstimateHours(minutesToHoursField(task.estimateMin))
     } else {
       setTitle('')
       setNotes('')
@@ -46,7 +61,7 @@ export function TaskEditor({ taskId, onClose }: TaskEditorProps) {
       setUrgent(false)
       setDueDate('')
       setDueTime('17:00')
-      setEstimateMin('')
+      setEstimateHours('')
     }
   }, [task])
 
@@ -59,10 +74,10 @@ export function TaskEditor({ taskId, onClose }: TaskEditorProps) {
       setError('Title is required')
       return false
     }
-    if (estimateMin) {
-      const est = parseInt(estimateMin as string, 10)
-      if (est < 1 || est > 1440) {
-        setError('Estimate must be between 1 and 1440 minutes')
+    if (estimateHours) {
+      const hours = Number.parseFloat(estimateHours)
+      if (!Number.isFinite(hours) || hours < MIN_ESTIMATE_HOURS || hours > MAX_ESTIMATE_HOURS) {
+        setError(`Estimate must be between ${MIN_ESTIMATE_HOURS} and ${MAX_ESTIMATE_HOURS} hours`)
         return false
       }
     }
@@ -78,7 +93,9 @@ export function TaskEditor({ taskId, onClose }: TaskEditorProps) {
 
     try {
       const dueAt = composeDueAt(dueDate, dueTime)
-      const estimateMinNum = estimateMin ? parseInt(estimateMin as string, 10) : null
+      const estimateMinNum = estimateHours
+        ? Math.round(Number.parseFloat(estimateHours) * 60)
+        : null
 
       if (task) {
         // Edit existing task
@@ -251,17 +268,18 @@ export function TaskEditor({ taskId, onClose }: TaskEditorProps) {
 
           <div className="task-editor-field">
             <label htmlFor="task-estimate" className="task-editor-label">
-              Estimate (minutes)
+              Estimate (hours)
             </label>
             <input
               id="task-estimate"
               type="number"
               className="task-editor-input"
-              value={estimateMin}
-              onChange={(e) => setEstimateMin(e.target.value)}
-              placeholder="How long will this take?"
-              min="1"
-              max="1440"
+              value={estimateHours}
+              onChange={(e) => setEstimateHours(e.target.value)}
+              placeholder="How many hours will this take?"
+              min={MIN_ESTIMATE_HOURS}
+              max={MAX_ESTIMATE_HOURS}
+              step="0.25"
             />
           </div>
         </div>

@@ -112,6 +112,9 @@ function resetPlayerStore() {
     durationSec: 0,
     missing: false,
     restPaused: false,
+    queue: [],
+    queueIndex: -1,
+    repeat: false,
   })
 }
 

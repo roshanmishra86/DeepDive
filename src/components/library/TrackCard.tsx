@@ -1,23 +1,33 @@
 import { X } from '@phosphor-icons/react/dist/csr/X'
+import { Play } from '@phosphor-icons/react/dist/csr/Play'
+import { Pause } from '@phosphor-icons/react/dist/csr/Pause'
+import { ListPlus } from '@phosphor-icons/react/dist/csr/ListPlus'
+import { Check } from '@phosphor-icons/react/dist/csr/Check'
 import type { Track } from '../../db/types'
 import { CATEGORIES, trackMeta } from '../../lib/library'
 import { useLibraryStore } from '../../stores/library'
 import { usePlayerStore } from '../../stores/player'
 
 /**
- * One track in the "On this machine" grid. The main area is a real button
- * (play/pause); the remove button and category select are siblings, so no
- * interactive element is nested inside another. The currently-playing card
- * gets the accent border, a "Now playing" label and a pulsing dot per the
- * mockup; a track whose file failed to load renders a "File not found"
- * state with the remove affordance still available.
+ * One track in the "On this machine" grid. The card body is a real button
+ * (play/pause) and so is the play control in the bottom-right corner — both
+ * do the same thing, the corner button just makes the affordance visible and
+ * carries the accent fill while this track is the one playing. The queue,
+ * remove and category controls are siblings, so no interactive element is
+ * nested inside another. The currently-playing card gets the accent border, a
+ * "Now playing" label and a pulsing dot per the mockup; a track whose file
+ * failed to load renders a "File not found" state with the remove affordance
+ * still available.
  */
 export function TrackCard({ track }: { track: Track }) {
   const isCurrent = usePlayerStore((s) => s.trackId === track.id)
   const playing = usePlayerStore((s) => s.playing)
   const playerMissing = usePlayerStore((s) => s.missing)
+  const queued = usePlayerStore((s) => s.queue.includes(track.id))
   const playTrack = usePlayerStore((s) => s.playTrack)
   const togglePlay = usePlayerStore((s) => s.togglePlay)
+  const enqueue = usePlayerStore((s) => s.enqueue)
+  const dequeue = usePlayerStore((s) => s.dequeue)
   const removeTrack = useLibraryStore((s) => s.removeTrack)
   const setCategory = useLibraryStore((s) => s.setCategory)
 
@@ -44,6 +54,14 @@ export function TrackCard({ track }: { track: Track }) {
     }
   }
 
+  const handleQueue = () => {
+    if (queued) {
+      dequeue(track.id)
+    } else {
+      void enqueue(track)
+    }
+  }
+
   return (
     <div className={cardClass}>
       <div className="lib-card-top">
@@ -65,14 +83,7 @@ export function TrackCard({ track }: { track: Track }) {
         </button>
       </div>
 
-      <button
-        type="button"
-        className="lib-card-main"
-        aria-label={
-          nowPlaying ? `Pause ${track.displayName}` : `Play ${track.displayName}`
-        }
-        onClick={handleActivate}
-      >
+      <button type="button" className="lib-card-main" onClick={handleActivate}>
         <span className={nowPlaying ? 'lib-card-name lib-card-name-playing' : 'lib-card-name'}>
           {track.displayName}
         </span>
@@ -81,18 +92,45 @@ export function TrackCard({ track }: { track: Track }) {
         </span>
       </button>
 
-      <select
-        className="lib-card-select"
-        value={track.category}
-        aria-label={`Category for ${track.displayName}`}
-        onChange={(e) => void setCategory(track.id, e.target.value)}
-      >
-        {categoryOptions.map((c) => (
-          <option key={c} value={c}>
-            {c}
-          </option>
-        ))}
-      </select>
+      <div className="lib-card-bottom">
+        <select
+          className="lib-card-select"
+          value={track.category}
+          aria-label={`Category for ${track.displayName}`}
+          onChange={(e) => void setCategory(track.id, e.target.value)}
+        >
+          {categoryOptions.map((c) => (
+            <option key={c} value={c}>
+              {c}
+            </option>
+          ))}
+        </select>
+
+        <div className="lib-card-actions">
+          <button
+            type="button"
+            className={queued ? 'lib-card-queue lib-card-queue-on' : 'lib-card-queue'}
+            aria-label={
+              queued ? `Remove ${track.displayName} from queue` : `Queue ${track.displayName}`
+            }
+            aria-pressed={queued}
+            title={queued ? 'Queued — click to remove' : 'Add to queue'}
+            onClick={handleQueue}
+          >
+            {queued ? <Check size={13} weight="bold" /> : <ListPlus size={13} />}
+          </button>
+          <button
+            type="button"
+            className={nowPlaying ? 'lib-card-play lib-card-play-on' : 'lib-card-play'}
+            aria-label={
+              nowPlaying ? `Pause ${track.displayName}` : `Play ${track.displayName}`
+            }
+            onClick={handleActivate}
+          >
+            {nowPlaying ? <Pause size={12} weight="fill" /> : <Play size={12} weight="fill" />}
+          </button>
+        </div>
+      </div>
     </div>
   )
 }
