@@ -472,6 +472,24 @@ export function nextDurationTextState(
 }
 
 /**
+ * Why a duration field's current text fails validation, or null if it's
+ * acceptable. 'unparseable' means parseDuration returned null (the composer
+ * shows a "Try 90, 1.5h, or 1h30" hint); 'below-min' means the text parses
+ * but is under the kind's minimum (the composer shows a minimum-duration
+ * hint and blocks saving). The two are mutually exclusive by construction.
+ * 'break' never returns 'below-min': breaks have no free-text duration
+ * field, so there is no raw text to be below anything.
+ */
+export type DurationIssue = 'unparseable' | 'below-min' | null
+
+export function durationIssueFor(raw: string, kind: BlockKind): DurationIssue {
+  const parsed = parseDuration(raw)
+  if (parsed === null) return 'unparseable'
+  if (kind !== 'break' && parsed < minDurationFor(kind)) return 'below-min'
+  return null
+}
+
+/**
  * Resolves the duration (in minutes) to persist for a break block from its
  * raw duration text. Break blocks have no free-text duration entry — their
  * duration comes only from preset chips or a kind-switch snap — so
