@@ -304,7 +304,10 @@ describe('LibraryView / TrackCard', () => {
     })
 
     expect(usePlayerStore.getState().playing).toBe(true)
-    expect(usePlayerStore.getState().trackId).toBe(useLibraryStore.getState().tracks[0].id)
+    // hydrate also seeds the built-ins, so 'rain' is not necessarily
+    // tracks[0] — find it by displayName instead of assuming index 0.
+    const rain = useLibraryStore.getState().tracks.find((t) => t.displayName === 'rain')
+    expect(usePlayerStore.getState().trackId).toBe(rain?.id)
     expect(await screen.findByText('Now playing')).toBeDefined()
 
     // The now-playing card's main control becomes a pause button.

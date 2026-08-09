@@ -5,6 +5,7 @@ import type { Track } from '../db/types'
 import * as settingsRepo from '../db/repos/settings'
 import { isTauri } from '../lib/platform'
 import { isSrcFailure, nextTrackId, trackMeta as describeTrack } from '../lib/library'
+import { builtinSrc, isBuiltinPath } from '../lib/builtinTracks'
 import { useLibraryStore } from './library'
 
 /**
@@ -230,11 +231,21 @@ export const usePlayerStore = create<PlayerState>()((set, get) => ({
     })
     if (!el) return // no Audio in this environment; selection state still shows
     el.loop = loopUntilBlockEnd
-    // convertFileSrc is Tauri-only. Outside the webview the raw path is set
-    // instead, so the element errors and the track surfaces as missing
-    // rather than crashing (unreachable in practice: no tracks exist
-    // without the database, which only exists inside Tauri).
-    el.src = isTauri() ? convertFileSrc(track.path) : track.path
+    // Three cases for resolving a track's playable src:
+    //  1. Built-in track: a `builtin:<file>.mp3` path, resolved to the
+    //     same-origin `/audio/<file>.mp3` URL Vite serves from `public/` —
+    //     never convertFileSrc, since this is not a filesystem path.
+    //  2. Tauri, user file: convertFileSrc turns the absolute disk path
+    //     into an asset:// URL the webview is allowed to load.
+    //  3. Outside Tauri (browser preview), user file: the raw path is set
+    //     as-is, so the element errors and the track surfaces as missing
+    //     rather than crashing (unreachable in practice: no tracks exist
+    //     without the database, which only exists inside Tauri).
+    el.src = isBuiltinPath(track.path)
+      ? builtinSrc(track.path)
+      : isTauri()
+        ? convertFileSrc(track.path)
+        : track.path
     // No `el.currentTime = 0` here: assigning src already resets the
     // position, and setting currentTime at HAVE_NOTHING is exactly where
     // WebKit historically threw InvalidStateError — outside the try below,

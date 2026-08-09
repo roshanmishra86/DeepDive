@@ -4,6 +4,7 @@ import type { Track } from '../db/types'
 import * as tracksRepo from '../db/repos/tracks'
 import * as settingsRepo from '../db/repos/settings'
 import { defaultCategory, displayNameFromPath } from '../lib/library'
+import { BUILTIN_SEED_VERSION, BUILTIN_TRACKS, builtinPath } from '../lib/builtinTracks'
 import { usePlayerStore } from './player'
 
 /** Fade-in length when the "Fade in" session default is on (the mockup's 8 s). */
@@ -79,6 +80,40 @@ export const useLibraryStore = create<LibraryState>()((set, get) => ({
         loopUntilBlockEnd: settings.loopUntilBlockEnd !== '0',
         loading: false,
       })
+
+      // Seed the bundled built-in tracks, guarded by a version setting so
+      // this is idempotent AND so a user who deleted a built-in keeps it
+      // deleted: once builtinSeedVersion reaches BUILTIN_SEED_VERSION, this
+      // never inserts again until a future bump. addTrack's
+      // ON CONFLICT(path) DO UPDATE only touches display_name, so it never
+      // resurrects a category/duration the user edited on a re-seed either.
+      // A seeding failure is caught on its own — it must not take down the
+      // tracks/settings state the outer try already applied above.
+      const seededVersion = Number.parseInt(settings.builtinSeedVersion ?? '', 10)
+      if (!Number.isFinite(seededVersion) || seededVersion < BUILTIN_SEED_VERSION) {
+        try {
+          for (const t of BUILTIN_TRACKS) {
+            await tracksRepo.addTrack(driver, {
+              path: builtinPath(t.file),
+              displayName: t.title,
+              category: t.category,
+              durationSec: t.durationSec,
+            })
+          }
+          await settingsRepo.setSetting(
+            driver,
+            'builtinSeedVersion',
+            String(BUILTIN_SEED_VERSION)
+          )
+          // Re-list rather than splicing locally, matching registerTrack's
+          // contract: in-memory order always matches the repo's ORDER BY.
+          const seededTracks = await tracksRepo.listTracks(driver)
+          set({ tracks: seededTracks })
+        } catch (err) {
+          console.error('Failed to seed built-in tracks:', err)
+          set({ error: String(err) })
+        }
+      }
     } catch (err) {
       console.error('Failed to hydrate library store:', err)
       set({ error: String(err), loading: false })

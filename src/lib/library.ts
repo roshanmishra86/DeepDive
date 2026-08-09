@@ -5,6 +5,7 @@
  */
 
 import type { Track } from '../db/types'
+import { builtinByPath, isBuiltinPath } from './builtinTracks'
 
 /** Categories offered by the per-track category control. */
 export const CATEGORIES = ['ambient', 'binaural', 'classical', 'noise', 'other'] as const
@@ -81,12 +82,18 @@ export function displayNameFromPath(path: string): string {
 /**
  * `file.mp3 · 62 min` meta line. The duration segment is omitted when the
  * track's duration is unknown (metadata unreadable or never loaded).
+ *
+ * A built-in track's `path` is a `builtin:<file>.mp3` key, not a real file —
+ * printing its basename would surface that internal prefix to the user, so
+ * built-ins render `<artist> · 62 min` instead (or just `<artist>` with no
+ * known duration). Non-built-in output is unchanged.
  */
 export function trackMeta(track: Pick<Track, 'path' | 'durationSec'>): string {
-  const file = fileNameFromPath(track.path)
-  if (track.durationSec === null) return file
+  const builtin = isBuiltinPath(track.path) ? builtinByPath(track.path) : null
+  const label = builtin ? builtin.artist : fileNameFromPath(track.path)
+  if (track.durationSec === null) return label
   const minutes = Math.round(track.durationSec / 60)
-  return `${file} · ${minutes} min`
+  return `${label} · ${minutes} min`
 }
 
 /**

@@ -11,6 +11,7 @@ import {
   audioFilePaths,
   fileNameFromPath,
 } from '../../lib/library'
+import { isBuiltinPath } from '../../lib/builtinTracks'
 import { TrackCard } from '../library/TrackCard'
 import { ToggleSwitch } from '../library/ToggleSwitch'
 
@@ -63,6 +64,15 @@ export function LibraryView() {
   const [notice, setNotice] = useState<string | null>(null)
   const [lastLoadedName, setLastLoadedName] = useState<string | null>(null)
   const [dragHover, setDragHover] = useState(false)
+
+  // Two grids: the tracks shipped with the app, and the user's own files.
+  // The built-in section is hidden when empty, but "On this machine" always
+  // renders — it carries the "+ Add from disk" card, which must stay
+  // reachable even with no user files loaded. The "no tracks yet" empty state
+  // only fires when both are empty (built-ins failing to seed, e.g. no driver
+  // in the browser preview, is a real empty-library state).
+  const builtins = tracks.filter((t) => isBuiltinPath(t.path))
+  const userTracks = tracks.filter((t) => !isBuiltinPath(t.path))
 
   const handleDropPaths = async (paths: string[]) => {
     const audioPaths = audioFilePaths(paths)
@@ -141,7 +151,9 @@ export function LibraryView() {
     <div className="lib-header">
       <div>
         <div className="lib-title">Sound library</div>
-        <div className="lib-subtitle">Local mp3 files, loaded from disk. Nothing streams.</div>
+        <div className="lib-subtitle">
+          Ships with 10 built-in tracks, plus your own local mp3 files. Nothing streams.
+        </div>
       </div>
       <button type="button" className="lib-load-btn" onClick={() => void handlePick()}>
         <UploadSimple size={13} />
@@ -220,9 +232,20 @@ export function LibraryView() {
           </div>
         ) : (
           <>
+            {builtins.length > 0 && (
+              <>
+                <div className="lib-section-label">Built in</div>
+                <div className="lib-grid">
+                  {builtins.map((t) => (
+                    <TrackCard key={t.id} track={t} />
+                  ))}
+                </div>
+              </>
+            )}
+
             <div className="lib-section-label">On this machine</div>
             <div className="lib-grid">
-              {tracks.map((t) => (
+              {userTracks.map((t) => (
                 <TrackCard key={t.id} track={t} />
               ))}
               <button type="button" className="lib-card-add" onClick={() => void handlePick()}>

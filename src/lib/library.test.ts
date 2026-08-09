@@ -12,6 +12,7 @@ import {
   trackMeta,
   nextTrackId,
 } from './library'
+import { BUILTIN_TRACKS, builtinPath } from './builtinTracks'
 
 describe('formatClockSec', () => {
   it('formats zero as 0:00', () => {
@@ -104,6 +105,24 @@ describe('trackMeta', () => {
 
   it('omits the duration segment when durationSec is null', () => {
     expect(trackMeta({ path: '/music/rain.mp3', durationSec: null })).toBe('rain.mp3')
+  })
+
+  it('renders a built-in track as artist · minutes instead of the raw builtin: path', () => {
+    const t = BUILTIN_TRACKS[0]
+    expect(trackMeta({ path: builtinPath(t.file), durationSec: t.durationSec })).toBe(
+      `${t.artist} · ${Math.round(t.durationSec / 60)} min`
+    )
+  })
+
+  it('renders a built-in track with unknown duration as just the artist', () => {
+    const t = BUILTIN_TRACKS[0]
+    expect(trackMeta({ path: builtinPath(t.file), durationSec: null })).toBe(t.artist)
+  })
+
+  it('leaves non-built-in output byte-identical', () => {
+    expect(trackMeta({ path: '/music/binaural-40hz.mp3', durationSec: 3720 })).toBe(
+      'binaural-40hz.mp3 · 62 min'
+    )
   })
 })
 

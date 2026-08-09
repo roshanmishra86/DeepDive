@@ -104,6 +104,24 @@ python3 scripts/generate-icon.py          # writes assets/icon.png (1024x1024)
 `public/favicon.svg` is the same geometry as a hand-written vector. Regenerate
 after changing the script, and commit both.
 
+## Sound library
+
+The app ships with 10 built-in background tracks, encoded to 96 kbps MP3 and
+stored at `public/audio/*.mp3` (Pixabay Content License — free for commercial
+use, no attribution required). Vite serves `public/` at the app origin, so
+they play from `/audio/<file>.mp3` both under `vite dev` and inside the
+bundled Tauri app; they are deliberately not shipped as Tauri
+`bundle.resources`, since AppImage remounts at a fresh path on every launch,
+which would break a seeded absolute path.
+
+`src/lib/builtinTracks.ts` is the single source of truth for the built-in
+list; `src/stores/library.ts` seeds it into the `track` table during
+`hydrate`, gated by the `builtinSeedVersion` setting: seeding runs only when
+the stored version is behind `BUILTIN_SEED_VERSION`, so it happens once and a
+user's deletion of a built-in sticks. To add, remove, or edit a built-in track: update
+`BUILTIN_TRACKS` in `src/lib/builtinTracks.ts` and bump
+`BUILTIN_SEED_VERSION` — there is no SQL migration for this.
+
 ## Keyboard shortcuts
 
 - **Space** — start/pause the pomodoro timer (ignored while typing, on key
@@ -125,3 +143,16 @@ Built artifacts are located in:
 - Windows: `src-tauri/target/release/bundle/nsis/`
 - Linux (deb): `src-tauri/target/release/bundle/deb/`
 - Linux (AppImage): `src-tauri/target/release/bundle/appimage/`
+
+## License
+
+The source code is MIT — see [LICENSE](LICENSE).
+
+The bundled audio in `public/audio/` is **not** covered by that grant. Those ten
+tracks come from [Pixabay](https://pixabay.com/music/) and are used under the
+[Pixabay Content License](https://pixabay.com/service/license-summary/), which
+permits commercial use and redistribution without attribution but forbids
+redistributing them as standalone audio files or on a competing stock-media
+service. Artist and title are embedded in each file's ID3 tags, and the source
+metadata is listed in `src/lib/builtinTracks.ts`. Forks that redistribute this
+repository inherit those terms for the audio.

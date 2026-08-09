@@ -7,3 +7,4 @@
 - Requires pnpm 11. `pnpm-workspace.yaml` must use `allowBuilds`, never `ignoredBuiltDependencies`.
 - When workflows, scripts, or toolchain config change, update `README.md` and this file in the same commit.
 - Requires Node.js 24+ (CI uses Node 24): tests import `node:sqlite`, listed in `module.builtinModules` only on Node 24+, which Vitest needs to externalize it.
+- Built-in sound library: `src/lib/builtinTracks.ts` is the source of truth for the 10 bundled tracks (`public/audio/*.mp3`, not touched by app code). Adding/changing a built-in means editing that file and bumping `BUILTIN_SEED_VERSION` — no SQL migration. See README.md "Sound library".

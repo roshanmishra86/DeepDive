@@ -3,6 +3,7 @@ import { createTestDb } from '../test/nodeDriver'
 import type { SqlDriver } from '../db/driver'
 import * as tracksRepo from '../db/repos/tracks'
 import * as settingsRepo from '../db/repos/settings'
+import { BUILTIN_SEED_VERSION, BUILTIN_TRACKS, builtinPath, isBuiltinPath } from '../lib/builtinTracks'
 import { useLibraryStore } from './library'
 import { usePlayerStore } from './player'
 
@@ -43,8 +44,12 @@ describe('library store', () => {
     const state = useLibraryStore.getState()
     expect(state.loading).toBe(false)
     expect(state.error).toBeNull()
-    expect(state.tracks).toHaveLength(1)
-    expect(state.tracks[0].displayName).toBe('rain')
+    // hydrate also seeds the BUILTIN_TRACKS built-ins into a fresh DB (see
+    // the "hydrate seeds the built-in tracks" test below) — filter down to
+    // this test's own row rather than asserting an exact total length.
+    const userTracks = state.tracks.filter((t) => !isBuiltinPath(t.path))
+    expect(userTracks).toHaveLength(1)
+    expect(userTracks[0].displayName).toBe('rain')
     // Seeded defaults from 0002_seed.sql
     expect(state.fadeInSec).toBe(8)
     expect(state.silenceDuringRest).toBe(true)
@@ -91,7 +96,9 @@ describe('library store', () => {
     const second = await useLibraryStore.getState().registerTrack('/music/rain.mp3', 200)
 
     expect(second).toBe(first)
-    const all = await tracksRepo.listTracks(driver)
+    // hydrate above also seeded the built-ins; only this test's own path
+    // should have duplicated (or not) under repeated registration.
+    const all = (await tracksRepo.listTracks(driver)).filter((t) => !isBuiltinPath(t.path))
     expect(all).toHaveLength(1)
     expect(all[0].durationSec).toBe(200)
   })
@@ -122,8 +129,10 @@ describe('library store', () => {
     const ok = await useLibraryStore.getState().removeTrack(id as number)
 
     expect(ok).toBe(true)
-    expect(await tracksRepo.listTracks(driver)).toHaveLength(0)
-    expect(useLibraryStore.getState().tracks).toHaveLength(0)
+    // hydrate above also seeded the built-ins, which removeTrack must not
+    // touch — only this test's own row is expected to be gone.
+    expect(await tracksRepo.getTrackByPath(driver, '/music/rain.mp3')).toBeNull()
+    expect(useLibraryStore.getState().tracks.some((t) => t.id === id)).toBe(false)
   })
 
   it('removeTrack stops the player when the removed track is loaded', async () => {
@@ -190,7 +199,11 @@ describe('library store', () => {
     expect(ok).toBe(true)
     const row = await tracksRepo.getTrackByPath(driver, '/music/rain.mp3')
     expect(row?.category).toBe('binaural')
-    expect(useLibraryStore.getState().tracks[0].category).toBe('binaural')
+    // hydrate above also seeded the built-ins (all 'ambient'/'other'), so
+    // this track is not necessarily first in the re-listed order — find it
+    // by id instead of assuming index 0.
+    const updated = useLibraryStore.getState().tracks.find((t) => t.id === id)
+    expect(updated?.category).toBe('binaural')
   })
 
   it('setFadeIn toggles between 8 and 0 and persists the setting', async () => {
@@ -241,6 +254,67 @@ describe('library store', () => {
     expect(ok).toBe(false)
     expect(useLibraryStore.getState().loopUntilBlockEnd).toBe(true)
     expect(useLibraryStore.getState().error).toContain('disk full')
+  })
+
+  it('hydrate seeds the built-in tracks into a fresh DB and marks the seed version', async () => {
+    await useLibraryStore.getState().hydrate(driver)
+
+    const state = useLibraryStore.getState()
+    expect(state.tracks).toHaveLength(BUILTIN_TRACKS.length)
+    for (const t of BUILTIN_TRACKS) {
+      const row = await tracksRepo.getTrackByPath(driver, builtinPath(t.file))
+      expect(row).not.toBeNull()
+      expect(row?.displayName).toBe(t.title)
+      expect(row?.category).toBe(t.category)
+      expect(row?.durationSec).toBe(t.durationSec)
+    }
+    expect(await settingsRepo.getSetting(driver, 'builtinSeedVersion')).toBe(
+      String(BUILTIN_SEED_VERSION)
+    )
+  })
+
+  it('does not re-seed (and does not resurrect a user deletion) once the seed version is current', async () => {
+    await useLibraryStore.getState().hydrate(driver)
+    const first = useLibraryStore.getState().tracks.find((t) => t.path === builtinPath(BUILTIN_TRACKS[0].file))
+    expect(first).toBeDefined()
+
+    // User deletes a built-in — this must stick across a later hydrate.
+    await useLibraryStore.getState().removeTrack(first!.id)
+    expect(await tracksRepo.getTrackByPath(driver, builtinPath(BUILTIN_TRACKS[0].file))).toBeNull()
+
+    resetLibraryStore()
+    await useLibraryStore.getState().hydrate(driver)
+
+    expect(
+      await tracksRepo.getTrackByPath(driver, builtinPath(BUILTIN_TRACKS[0].file))
+    ).toBeNull()
+    // The other 9 built-ins are still present — this was a targeted
+    // deletion, not a full re-seed skip artifact.
+    expect(useLibraryStore.getState().tracks).toHaveLength(BUILTIN_TRACKS.length - 1)
+  })
+
+  it('a seeding failure still leaves the user\'s own tracks hydrated', async () => {
+    await tracksRepo.addTrack(driver, {
+      path: '/music/mine.mp3',
+      displayName: 'mine',
+      category: 'other',
+      durationSec: 60,
+    })
+    const failingInsert: SqlDriver = {
+      select: driver.select.bind(driver),
+      execute: (sql, params) =>
+        sql.includes('INSERT INTO track')
+          ? Promise.reject(new Error('disk full'))
+          : driver.execute(sql, params),
+      transaction: driver.transaction.bind(driver),
+    }
+
+    await useLibraryStore.getState().hydrate(failingInsert)
+
+    const state = useLibraryStore.getState()
+    expect(state.error).toContain('disk full')
+    expect(state.tracks.some((t) => t.displayName === 'mine')).toBe(true)
+    expect(state.loading).toBe(false)
   })
 
   it('removeTrack reports failure instead of throwing when persistence fails', async () => {

@@ -3,6 +3,7 @@ import { createTestDb } from '../test/nodeDriver'
 import type { SqlDriver } from '../db/driver'
 import type { Track } from '../db/types'
 import * as settingsRepo from '../db/repos/settings'
+import { BUILTIN_TRACKS, builtinPath } from '../lib/builtinTracks'
 import { usePlayerStore, injectAudioElementForTests } from './player'
 import { useLibraryStore } from './library'
 
@@ -155,6 +156,20 @@ describe('player store', () => {
     // Not Tauri in tests: the raw path is used instead of convertFileSrc.
     expect(fake.src).toBe('/music/track-1.mp3')
     expect(fake.paused).toBe(false)
+  })
+
+  it('playTrack resolves a built-in track to its /audio/ URL, not convertFileSrc', async () => {
+    const bt = BUILTIN_TRACKS[0]
+    await usePlayerStore.getState().playTrack(
+      makeTrack(1, { path: builtinPath(bt.file), displayName: bt.title })
+    )
+
+    // convertFileSrc would produce an asset://-style URL, never a bare
+    // root-relative one — this is the same "not Tauri in tests" style
+    // assertion the raw-path case above uses, just for the builtin: branch,
+    // which takes the builtinSrc path unconditionally of isTauri().
+    expect(fake.src).toBe(`/audio/${bt.file}`)
+    expect(usePlayerStore.getState().playing).toBe(true)
   })
 
   it('playTrack applies the library loop default to the element', async () => {
