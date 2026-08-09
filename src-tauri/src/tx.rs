@@ -26,9 +26,14 @@ pub async fn run_in_transaction(db_path: &Path, statements: &[TxStatement]) -> R
     if statements.is_empty() {
         return Ok(());
     }
-    let options = sqlx::sqlite::SqliteConnectOptions::new()
-        .filename(db_path)
-        .create_if_missing(true);
+    // Deliberately NO create_if_missing: the plugin pool creates and
+    // migrates the database on first open, long before any transaction can
+    // run, so the file always exists here. If it does not, the path is
+    // wrong (e.g. a platform path-mapping drift) and the correct failure
+    // is a connect error — not a silently created second, empty database
+    // that every statement then fails against with "no such table"
+    // (PR #13 review).
+    let options = sqlx::sqlite::SqliteConnectOptions::new().filename(db_path);
     let mut conn = SqliteConnection::connect_with(&options)
         .await
         .map_err(|e| format!("connect: {e}"))?;
@@ -161,6 +166,22 @@ mod tests {
         assert_eq!(rows, vec![7]);
 
         let _ = std::fs::remove_file(&path);
+    }
+
+    #[tokio::test]
+    async fn missing_file_is_a_connect_error_not_a_silent_new_database() {
+        let path = temp_db_path("missing");
+        let _ = std::fs::remove_file(&path);
+
+        let result = run_in_transaction(&path, &[insert_stmt(1)]).await;
+        assert!(
+            result.is_err(),
+            "a missing database file must fail to connect"
+        );
+        assert!(
+            !path.exists(),
+            "the command must not create a second, empty database at a wrong path"
+        );
     }
 
     #[tokio::test]
