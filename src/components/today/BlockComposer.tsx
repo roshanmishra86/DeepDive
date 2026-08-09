@@ -14,6 +14,7 @@ import {
   resolveBlockTitle,
   durationPresetsFor,
   durationIssueFor,
+  pomodorosForDurationText,
   nearestBreakDuration,
   BREAK_DURATION_PRESETS,
 } from '../../lib/today'
@@ -122,7 +123,12 @@ export function BlockComposer({ blockId, startMin: startMinProp, onDone }: Block
       // never rewritten mid-typing: echoing a clamped value back into the
       // field is what caused the Phase 6 untypeable-field regression
       // ("90" went 9 → "30" → "300").
-      setDraft((d) => ({ ...d, durationMin: parsed, pomodoros: Math.min(d.pomodoros, maxPomodoros(parsed)) }))
+      // The pomodoro cap likewise must not be derived from the transient
+      // text: maxPomodoros(9) === 0, so the "9" on the way to "90" would
+      // permanently zero the block's pomodoro target (PR #13 review).
+      // pomodorosForDurationText tightens the cap only for saveable
+      // durations and preserves the count through unsaveable transients.
+      setDraft((d) => ({ ...d, durationMin: parsed, pomodoros: pomodorosForDurationText(raw, d.kind, d.pomodoros) }))
     }
   }
 
@@ -133,7 +139,11 @@ export function BlockComposer({ blockId, startMin: startMinProp, onDone }: Block
   }
 
   const stepPomodoros = (delta: number) => {
-    if (!showPomodoros) return
+    // Inert while the duration text is unsaveable: the cap is derived only
+    // from saveable durations (see pomodorosForDurationText), so there is
+    // no valid cap to step against — and clamping against the transient
+    // value would zero the target just like the keystroke path did.
+    if (!showPomodoros || durationIssue !== null) return
     setDraft((d) => {
       const max = maxPomodoros(d.durationMin)
       const next = Math.max(0, Math.min(max, d.pomodoros + delta))
@@ -435,26 +445,30 @@ export function BlockComposer({ blockId, startMin: startMinProp, onDone }: Block
                 type="button"
                 className="composer-stepper-btn"
                 aria-label="Decrease pomodoros"
-                disabled={!showPomodoros}
+                disabled={!showPomodoros || durationIssue !== null}
                 onClick={() => stepPomodoros(-1)}
               >
                 −
               </button>
               <span className="composer-stepper-label" aria-labelledby="composer-pomodoros-label">
-                {showPomodoros ? Math.min(draft.pomodoros, maxPomodoros(draft.durationMin)) : 0}
+                {showPomodoros ? draft.pomodoros : 0}
               </span>
               <button
                 type="button"
                 className="composer-stepper-btn"
                 aria-label="Increase pomodoros"
-                disabled={!showPomodoros}
+                disabled={!showPomodoros || durationIssue !== null}
                 onClick={() => stepPomodoros(1)}
               >
                 +
               </button>
             </div>
             <span className="composer-hint">
-              {showPomodoros ? `max ${maxPomodoros(draft.durationMin)}` : 'not for this type'}
+              {showPomodoros
+                ? durationIssue === null
+                  ? `max ${maxPomodoros(draft.durationMin)}`
+                  : 'max —'
+                : 'not for this type'}
             </span>
           </div>
         </div>

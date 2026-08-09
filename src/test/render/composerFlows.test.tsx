@@ -232,8 +232,11 @@ describe('BlockComposer flows', () => {
       expect(createBtn.disabled).toBe(true)
 
       // Footer summary must agree with the field — the draft holds the raw
-      // unclamped 5, so the summary reads "9:00 AM – 9:05 AM · 5 min".
-      expect(screen.getByText('9:00 AM – 9:05 AM · 5 min')).toBeDefined()
+      // unclamped 5, so the summary reads "9:00 AM – 9:05 AM · 5 min". The
+      // pomodoro segment stays visible with the preserved target (default
+      // 1): the cap is no longer derived from the unsaveable transient
+      // (PR #13 review), and the summary must not disagree with the draft.
+      expect(screen.getByText('9:00 AM – 9:05 AM · 5 min · 1 pomodoro')).toBeDefined()
 
       // The keyboard path calls doSave unconditionally; the hard guard in
       // doSave must block the save just like the disabled button does.
@@ -340,6 +343,45 @@ describe('BlockComposer flows', () => {
 
       expect(screen.getByText('Try 90, 1.5h, or 1h30')).toBeDefined()
       expect((screen.getByRole('button', { name: 'Create' }) as HTMLButtonElement).disabled).toBe(true)
+    })
+
+    it('edit mode: retyping the duration through a below-min transient preserves the pomodoro target (PR #13 review)', async () => {
+      const blockId = await useTodayStore.getState().addBlock({
+        title: 'Pomodoro keeper',
+        kind: 'deep',
+        durationMin: 60,
+        pomodoros: 2,
+        startMin: START_MIN,
+      })
+      expect(blockId).not.toBeNull()
+
+      const onDone = vi.fn()
+      render(<BlockComposer blockId={blockId} startMin={START_MIN} onDone={onDone} />)
+
+      // Select-all retype, the way a user replaces a field value: the text
+      // passes through the below-minimum transient "9" on the way to "90".
+      fireEvent.change(durationField(), { target: { value: '9' } })
+
+      // The transient is below-minimum (hint, blocked save) — but the block's
+      // pomodoro target must survive it. The footer summary is the agreement
+      // surface: it still shows the preserved target.
+      expect(screen.getByText('Minimum duration for deep blocks is 30 min')).toBeDefined()
+      expect(screen.getByText(/2 pomodoros/)).toBeDefined()
+
+      fireEvent.change(durationField(), { target: { value: '90' } })
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+      })
+
+      expect(onDone).toHaveBeenCalledTimes(1)
+      const rows = await readBlocks(driver, DAY)
+      expect(rows).toHaveLength(1)
+      expect(rows[0].duration_min).toBe(90)
+      // The regression this guards: deriving the pomodoro cap from the
+      // transient "9" clamped the target to maxPomodoros(9) === 0, and
+      // Math.min could never restore it — the save persisted 0.
+      expect(rows[0].pomodoros).toBe(2)
     })
 
     it('edit mode: typing "5" on an existing deep block shows the hint, disables Save, and Ctrl+Enter persists nothing', async () => {

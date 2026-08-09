@@ -490,6 +490,26 @@ export function durationIssueFor(raw: string, kind: BlockKind): DurationIssue {
 }
 
 /**
+ * The pomodoro count to keep when the composer's duration text changes.
+ * The cap is derived ONLY from a saveable duration: while the text is
+ * unparseable or below the kind minimum, the current count is returned
+ * untouched. Deriving the cap from the transient text would permanently
+ * destroy the target — typing "90" passes through "9", maxPomodoros(9) is
+ * 0, and Math.min can never restore the old count once the text becomes
+ * valid again (PR #13 review). Saving is blocked for unsaveable text
+ * anyway, so preserving the count costs nothing. Clamping the cap's INPUT
+ * to the kind minimum instead would still erode the target (a 3-pomodoro
+ * block retyped via "1" → "12" → "120" would sink to the 30-minute cap of
+ * 1 at the first keystroke); gating is the non-lossy form.
+ */
+export function pomodorosForDurationText(raw: string, kind: BlockKind, current: number): number {
+  if (durationIssueFor(raw, kind) !== null) return current
+  const parsed = parseDuration(raw)
+  if (parsed === null) return current // unreachable — durationIssueFor covers it
+  return Math.min(current, maxPomodoros(parsed))
+}
+
+/**
  * Resolves the duration (in minutes) to persist for a break block from its
  * raw duration text. Break blocks have no free-text duration entry — their
  * duration comes only from preset chips or a kind-switch snap — so
