@@ -19,6 +19,7 @@ interface TimelineBlockProps {
   onDragOver?: () => void
   onDrop?: () => void
   onDragEnd?: () => void
+  dragTarget?: boolean
 }
 
 const NUDGE_MIN = 5
@@ -34,6 +35,7 @@ export function TimelineBlock({
   onDragOver,
   onDrop,
   onDragEnd,
+  dragTarget = false,
 }: TimelineBlockProps) {
   const toggleCompleted = useTodayStore((s) => s.toggleCompleted)
   const removeBlock = useTodayStore((s) => s.removeBlock)
@@ -62,6 +64,7 @@ export function TimelineBlock({
     `timeline-block-${state}`,
     isCompact && 'timeline-block-compact',
     overlapMin !== undefined && 'timeline-block-conflict',
+    dragTarget && 'timeline-block-drag-target',
   ]
     .filter(Boolean)
     .join(' ')

@@ -49,6 +49,15 @@ export async function hasAnyRecords(driver: SqlDriver): Promise<boolean> {
   return rows[0].has === 1
 }
 
+/** True iff the day-record half of Archive has calendar data to render. */
+export async function hasAnyDayRecords(driver: SqlDriver): Promise<boolean> {
+  const rows = await driver.select<{ has: number }>(
+    `SELECT EXISTS(SELECT 1 FROM day_block)
+        OR EXISTS(SELECT 1 FROM day_note WHERE note != '') as has`
+  )
+  return rows[0].has === 1
+}
+
 export async function dayStatuses(
   driver: SqlDriver,
   fromDay: string,

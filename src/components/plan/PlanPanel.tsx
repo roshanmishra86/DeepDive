@@ -25,15 +25,13 @@ export function PlanPanel() {
   const blocks = useTodayStore((state) => state.blocks)
   const saveBlockNote = useTodayStore((state) => state.saveBlockNote)
   const block = target?.kind === 'block' ? blocks.find((item) => item.id === target.id) ?? null : null
-  const linkedTask = block?.taskId
-    ? useTasksStore.getState().tasks.find((item) => item.id === block.taskId) ?? useTasksStore.getState().archivedTasks.find((item) => item.id === block.taskId) ?? null
-    : null
-  const noteOwner = task ?? linkedTask
+  const noteOwner = task
   const [draft, setDraft] = useState(noteOwner?.notes ?? block?.note ?? '')
   const [saveState, setSaveState] = useState<SaveState>('Saved')
   const [notice, setNotice] = useState<string | null>(null)
   const revision = useRef(0)
   const savedRevision = useRef(0)
+  const initializedTarget = useRef<string | null>(null)
   const debounce = useRef<ReturnType<typeof setTimeout> | null>(null)
   const writeChain = useRef(Promise.resolve(true))
   const bypassClose = useRef(false)
@@ -44,13 +42,28 @@ export function PlanPanel() {
     if (target?.kind === 'task') void loadSubtasks(target.id)
   }, [loadSubtasks, target])
 
+  const targetKey = target ? `${target.kind}:${target.id}` : null
+
+  // Only seed the editor when its identity changes. `saveTaskNotes` and
+  // `saveBlockNote` optimistically update their store rows, so listening to
+  // `notes` here would replace a newer local keystroke with the older value
+  // currently being persisted. Waiting for the owner also covers a plan
+  // target opened just before its task/block collection has hydrated.
   useEffect(() => {
-    setDraft(noteOwner?.notes ?? block?.note ?? '')
+    if (!targetKey) {
+      initializedTarget.current = null
+      return
+    }
+    if ((!noteOwner && !block) || initializedTarget.current === targetKey) return
+    const notes = noteOwner?.notes ?? block?.note ?? ''
+    initializedTarget.current = targetKey
+    draftRef.current = notes
+    setDraft(notes)
     setSaveState('Saved')
     setNotice(null)
     revision.current = 0
     savedRevision.current = 0
-  }, [target, noteOwner?.id, noteOwner?.notes, block?.id, block?.note])
+  }, [block, noteOwner, targetKey])
 
   const saveRevision = useCallback((targetAtRevision = target, notes = draftRef.current, rev = revision.current): Promise<boolean> => {
     if (!targetAtRevision || rev <= savedRevision.current) return Promise.resolve(true)
@@ -107,9 +120,12 @@ export function PlanPanel() {
   if (!target || (!noteOwner && !block)) return null
 
   const title = noteOwner?.title ?? block?.title ?? 'Plan'
-  const context = noteOwner?.archived ? 'Archived task' : block?.taskId ? 'Linked task' : 'Today block'
+  const context = noteOwner?.archived ? 'Archived task' : noteOwner ? 'Task' : 'Today block'
 
   const onChange = (value: string) => {
+    // Update the ref synchronously as well as React state. Import followed by
+    // flush and a rapid blur can otherwise save the previous render's draft.
+    draftRef.current = value
     setDraft(value)
     revision.current += 1
     setSaveState('Saving…')

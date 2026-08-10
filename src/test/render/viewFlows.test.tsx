@@ -74,6 +74,7 @@ function resetArchiveStore() {
     headline: null,
     trend: [],
     hasRecords: false,
+    hasDayRecords: false,
     loading: false,
     error: null,
   })

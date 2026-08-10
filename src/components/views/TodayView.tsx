@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { useTodayStore } from '../../stores/today'
 import { toDayKey } from '../../lib/time'
 import { openDatabase } from '../../db/index'
-import { layout, daySummary, blockState, conflicts, nextFreeStart } from '../../lib/today'
+import { layout, daySummary, blockState, conflicts, moveBlockTo, nextFreeStart } from '../../lib/today'
 import { formatDuration, minutesToClock, parseClock } from '../../lib/time'
 import { TimelineBlock } from '../today/TimelineBlock'
 import { useDragList } from '../common/useDragList'
@@ -27,7 +27,7 @@ export function TodayView() {
     const d = new Date()
     return d.getHours() * 60 + d.getMinutes()
   })
-  const { drag, start, clear } = useDragList<number>()
+  const { drag, start, over, clear } = useDragList<number>()
   const moveTo = useTodayStore((s) => s.moveTo)
 
   const [composerState, setComposerState] = useState<ComposerState>({ mode: 'closed' })
@@ -63,8 +63,13 @@ export function TodayView() {
     return () => window.clearInterval(id)
   }, [])
 
-  const summary = daySummary(blocks)
-  const conflictList = conflicts(blocks)
+  const sourceIndex = drag.sourceId === null ? -1 : blocks.findIndex((block) => block.id === drag.sourceId)
+  const previewBlocks = sourceIndex !== -1 && drag.targetIndex !== null
+    ? moveBlockTo(blocks, sourceIndex, drag.targetIndex)
+    : blocks
+  const previewing = previewBlocks !== blocks
+  const summary = daySummary(previewBlocks)
+  const conflictList = conflicts(previewBlocks)
   const overlapByBlockId = new Map(conflictList.map((c) => [c.blockId, c.overlapMin]))
 
   const openNewComposer = () => {
@@ -109,7 +114,7 @@ export function TodayView() {
 
   const isEmptyAndClosed = blocks.length === 0 && composerState.mode === 'closed'
 
-  const rows = layout(blocks)
+  const rows = layout(previewBlocks)
 
   return (
     <div className="today-view">
@@ -128,6 +133,10 @@ export function TodayView() {
                 ? '1 block overlaps its predecessor'
                 : `${conflictList.length} blocks overlap their predecessors`}
             </div>
+          )}
+          {previewing && <div className="today-drag-preview" role="status">Previewing reordered schedule — drop to apply</div>}
+          {previewing && shutdownMin !== null && summary.endMin > shutdownMin && (
+            <div className="today-conflict-notice" role="alert">Preview ends after shutdown ({minutesToClock(shutdownMin)})</div>
           )}
           {shutdownMin !== null && (
             <div className="shutdown-control">
@@ -270,12 +279,14 @@ export function TodayView() {
                   onEdit={() => openEditComposer(row.block.id)}
                   overlapMin={overlapByBlockId.get(row.block.id)}
                   onDragStart={() => start(row.block.id)}
-                  onDragOver={() => undefined}
+                  onDragOver={() => over(blocks.findIndex((block) => block.id === row.block.id))}
                   onDrop={() => {
-                    if (drag.sourceId !== null) void moveTo(drag.sourceId, blocks.findIndex((block) => block.id === row.block.id))
+                    const targetIndex = blocks.findIndex((block) => block.id === row.block.id)
+                    if (drag.sourceId !== null && targetIndex !== -1 && targetIndex !== sourceIndex) void moveTo(drag.sourceId, targetIndex)
                     clear()
                   }}
                   onDragEnd={clear}
+                  dragTarget={drag.targetIndex === blocks.findIndex((block) => block.id === row.block.id) && drag.sourceId !== row.block.id}
                 />
               )
             })}

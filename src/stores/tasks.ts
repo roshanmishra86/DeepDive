@@ -21,7 +21,7 @@ interface TasksState {
   subtaskError: Record<number, string | null>
   hydrate: (driver: SqlDriver | null) => Promise<void>
   hydrateActive: () => Promise<void>
-  hydrateArchived: () => Promise<void>
+  hydrateArchived: (driver?: SqlDriver | null) => Promise<void>
   addTask: (input: {
     title: string
     notes?: string
@@ -63,7 +63,8 @@ function replaceTask(tasks: Task[], updated: Task): Task[] {
 }
 
 export const useTasksStore = create<TasksState>()((set, get) => {
-  const hydrateList = async (archived: boolean) => {
+  const hydrateList = async (archived: boolean, driverOverride?: SqlDriver | null) => {
+    if (driverOverride !== undefined) persistenceDriver = driverOverride
     const loadingKey = archived ? 'loadingArchived' : 'loading'
     const errorKey = archived ? 'errorArchived' : 'error'
     set({ [loadingKey]: true, [errorKey]: null } as Partial<TasksState>)
@@ -73,7 +74,22 @@ export const useTasksStore = create<TasksState>()((set, get) => {
     }
     try {
       const rows = await tasksRepo.listTasks(persistenceDriver, { archived })
-      set(archived ? { archivedTasks: rows, loadingArchived: false } : { tasks: sortTasks(rows), loading: false })
+      if (archived) {
+        const subtasks = await subtasksRepo.listSubtasksForTasks(persistenceDriver, rows.map((task) => task.id))
+        const byTask = new Map<number, Subtask[]>()
+        for (const task of rows) byTask.set(task.id, [])
+        for (const subtask of subtasks) byTask.get(subtask.taskId)?.push(subtask)
+        set((state) => ({
+          archivedTasks: rows,
+          loadingArchived: false,
+          subtasksByTask: {
+            ...state.subtasksByTask,
+            ...Object.fromEntries(byTask),
+          },
+        }))
+      } else {
+        set({ tasks: sortTasks(rows), loading: false })
+      }
     } catch (err) {
       set({ [loadingKey]: false, [errorKey]: messageFor(err, 'Could not load tasks') } as Partial<TasksState>)
     }
@@ -96,7 +112,7 @@ export const useTasksStore = create<TasksState>()((set, get) => {
       await hydrateList(false)
     },
     hydrateActive: async () => hydrateList(false),
-    hydrateArchived: async () => hydrateList(true),
+    hydrateArchived: async (driver) => hydrateList(true, driver),
 
     addTask: async (input) => {
       const localId = nextLocalId--

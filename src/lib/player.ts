@@ -19,14 +19,14 @@ export function resolveEndedAction(
   trackId: number | null,
   tracks: ReadonlyArray<Pick<Track, 'id'>>
 ): EndedAction {
-  if (mode === 'one' && trackId !== null) return { type: 'replay' }
+  if (mode === 'one') return trackId === null ? { type: 'stop' } : { type: 'replay' }
 
   if (queue.length > 0) {
     const start = queueIndex < 0 ? 0 : queueIndex + 1
     for (let offset = 0; offset < queue.length; offset += 1) {
       const index = start + offset
       if (index >= queue.length) break
-      if (tracks.some((track) => track.id === queue[index])) return { type: 'queue', index: queue[index] === undefined ? -1 : index }
+      if (tracks.some((track) => track.id === queue[index])) return { type: 'queue', index }
     }
     if (mode === 'queue') {
       for (let offset = 0; offset < queue.length; offset += 1) {

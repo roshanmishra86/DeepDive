@@ -4,13 +4,12 @@ import { useTodayStore } from '../../stores/today'
 import { useAppStore } from '../../stores/app'
 import type { Task } from '../../db/types'
 import { taskMeta, blockDraftFromTask } from '../../lib/week'
-import { nextFreeStart, checkShutdown } from '../../lib/today'
-import { minutesToClock } from '../../lib/time'
 import { Trash } from '@phosphor-icons/react/dist/csr/Trash'
 import { Pencil } from '@phosphor-icons/react/dist/csr/Pencil'
 import { NotePencil } from '@phosphor-icons/react/dist/csr/NotePencil'
 import { Archive } from '@phosphor-icons/react/dist/csr/Archive'
 import { SubtaskList } from './SubtaskList'
+import { useScheduleTodayBlock } from './useScheduleTodayBlock'
 
 interface TaskRowProps {
   task: Task
@@ -22,19 +21,21 @@ interface TaskRowProps {
   onDrop?: () => void
   onDragEnd?: () => void
   dragTarget?: boolean
+  onMoveUp?: () => void
+  onMoveDown?: () => void
+  canMoveUp?: boolean
+  canMoveDown?: boolean
 }
 
-export function TaskRow({ task, isDrop = false, onEdit, now, onDragStart, onDragOver, onDrop, onDragEnd, dragTarget = false }: TaskRowProps) {
+export function TaskRow({ task, isDrop = false, onEdit, now, onDragStart, onDragOver, onDrop, onDragEnd, dragTarget = false, onMoveUp, onMoveDown, canMoveUp = false, canMoveDown = false }: TaskRowProps) {
   const toggleImportant = useTasksStore((s) => s.toggleImportant)
   const toggleUrgent = useTasksStore((s) => s.toggleUrgent)
   const toggleDone = useTasksStore((s) => s.toggleDone)
   const removeTask = useTasksStore((s) => s.removeTask)
-  const addBlock = useTodayStore((s) => s.addBlock)
   const blocks = useTodayStore((s) => s.blocks)
-  const shutdownMin = useTodayStore((s) => s.shutdownMin)
-  const setView = useAppStore((s) => s.setView)
   const openPlan = useAppStore((s) => s.openPlan)
   const archiveTask = useTasksStore((s) => s.archiveTask)
+  const { schedule } = useScheduleTodayBlock(now)
 
   const [deleteConfirm, setDeleteConfirm] = useState(false)
   const [shutdownWarning, setShutdownWarning] = useState<string | null>(null)
@@ -45,26 +46,12 @@ export function TaskRow({ task, isDrop = false, onEdit, now, onDragStart, onDrag
 
   const handlePlanToday = async () => {
     const draft = blockDraftFromTask(task, loadedSubtasks)
-    // `blockDraftFromTask` never sets a startMin, so addBlock places the block
-    // at nextFreeStart(blocks, fromMin, durationMin). Anchor that on the
-    // current minute rather than letting it default to 0 — otherwise planning
-    // a task on an empty day would schedule it at 12:00 AM. `now` is already
-    // passed in and refreshed by WeekView, so this component never reads the
-    // clock itself.
-    const fromMin = now.getHours() * 60 + now.getMinutes()
-    const prospectiveStart = nextFreeStart(blocks, fromMin, draft.durationMin)
-    const check = checkShutdown(prospectiveStart, draft.durationMin, shutdownMin)
-    if (!check.fits) {
-      setShutdownWarning(
-        shutdownMin !== null
-          ? `Doesn't fit before shutdown (${minutesToClock(shutdownMin)})`
-          : "Doesn't fit before shutdown"
-      )
+    const result = await schedule(draft)
+    if (!result.ok) {
+      setShutdownWarning(result.preview.reason ?? 'Could not schedule this task.')
       return
     }
     setShutdownWarning(null)
-    await addBlock({ ...draft, fromMin })
-    setView('today')
   }
 
   const handleDelete = async () => {
@@ -76,6 +63,8 @@ export function TaskRow({ task, isDrop = false, onEdit, now, onDragStart, onDrag
     <div className={['task-row', isDrop && 'task-row-drop', dragTarget && 'task-row-drag-target'].filter(Boolean).join(' ')} onDragOver={(event) => { event.preventDefault(); onDragOver?.() }} onDrop={(event) => { event.preventDefault(); onDrop?.() }}>
       <div className="task-row-left">
         <button type="button" className="task-drag-handle" draggable onDragStart={(event) => { event.stopPropagation(); onDragStart?.() }} onDragEnd={onDragEnd} aria-label={`Drag ${task.title}`} title="Drag to reorder">⠿</button>
+        <button type="button" className="btn-icon task-order-btn" onClick={() => void onMoveUp?.()} disabled={!onMoveUp || !canMoveUp} aria-label={`Move ${task.title} up`} title="Move up">↑</button>
+        <button type="button" className="btn-icon task-order-btn" onClick={() => void onMoveDown?.()} disabled={!onMoveDown || !canMoveDown} aria-label={`Move ${task.title} down`} title="Move down">↓</button>
         <input
           type="checkbox"
           className="task-check"
@@ -175,7 +164,7 @@ export function TaskRow({ task, isDrop = false, onEdit, now, onDragStart, onDrag
           )}
         </div>
       </div>
-      <SubtaskList task={task} />
+      <SubtaskList task={task} now={now} />
     </div>
   )
 }
