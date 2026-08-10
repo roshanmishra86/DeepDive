@@ -266,6 +266,28 @@ describe('templates repository', () => {
       expect(after?.blocks.length).toBe(before?.blocks.length)
     })
 
+    it('rolls back the new template when copying its blocks fails', async () => {
+      // Force only the second statement in duplicateTemplate's transaction
+      // to fail. The template-row INSERT succeeds by itself, so this proves
+      // the transaction removes that partial row too.
+      await driver.execute(`
+        CREATE TRIGGER reject_copied_blocks
+        BEFORE INSERT ON template_block
+        WHEN NEW.template_id != 1
+        BEGIN
+          SELECT RAISE(ABORT, 'copy blocked');
+        END
+      `)
+
+      await expect(templates.duplicateTemplate(driver, 1)).rejects.toThrow('copy blocked')
+
+      const copies = await driver.select<{ id: number }>(
+        'SELECT id FROM template WHERE name = ?',
+        ['Maker Day (copy)']
+      )
+      expect(copies).toEqual([])
+    })
+
     it('throws a clear error when the source template does not exist', async () => {
       await expect(templates.duplicateTemplate(driver, 999999)).rejects.toThrow()
     })

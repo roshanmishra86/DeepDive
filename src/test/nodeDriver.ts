@@ -52,17 +52,22 @@ class NodeSqliteDriver implements SqlDriver {
   // Phase 11 P0-1 via the `execute_transaction` Rust command
   // (src-tauri/src/tx.rs), which owns one fresh connection per
   // transaction — the two drivers' rollback semantics now match.
-  transaction(statements: { sql: string; params?: unknown[] }[]): Promise<void> {
-    if (statements.length === 0) return Promise.resolve()
+  transaction(statements: { sql: string; params?: unknown[] }[]): Promise<SqlResult[]> {
+    if (statements.length === 0) return Promise.resolve([])
 
     this.db.exec('BEGIN')
     try {
+      const results: SqlResult[] = []
       for (const { sql, params } of statements) {
         const stmt = this.db.prepare(sql)
-        stmt.run(...((params ?? []) as Parameters<typeof stmt.run>))
+        const info = stmt.run(...((params ?? []) as Parameters<typeof stmt.run>))
+        results.push({
+          rowsAffected: Number(info.changes),
+          lastInsertId: Number(info.lastInsertRowid),
+        })
       }
       this.db.exec('COMMIT')
-      return Promise.resolve()
+      return Promise.resolve(results)
     } catch (err) {
       this.db.exec('ROLLBACK')
       return Promise.reject(err instanceof Error ? err : new Error(String(err)))

@@ -449,5 +449,39 @@ describe('useRitualsStore', () => {
       )
       expect(rows[0].active).toBe(1)
     })
+
+    it('does not restore another ritual that was removed successfully while this removal failed', async () => {
+      const day = '2026-08-03'
+      let rejectFirstRemoval: ((error: Error) => void) | null = null
+      const firstRemoval = new Promise<never>((_resolve, reject) => {
+        rejectFirstRemoval = reject
+      })
+      const delayedFailureDriver: SqlDriver = {
+        execute: (sql, params) => {
+          if (sql.startsWith('UPDATE ritual SET active = 0') && params?.[0] === 1) {
+            return firstRemoval
+          }
+          return driver.execute(sql, params)
+        },
+        select: (sql, params) => driver.select(sql, params),
+        transaction: (statements) => driver.transaction(statements),
+      }
+      await useRitualsStore.getState().hydrate(delayedFailureDriver, day)
+
+      const removeFirst = useRitualsStore.getState().remove(1)
+      await Promise.resolve() // Let the first removal reach its delayed write.
+      await useRitualsStore.getState().remove(2)
+      rejectFirstRemoval!(new Error('first removal failed'))
+      await removeFirst
+
+      // Ritual 2's write committed; the failed removal of ritual 1 must not
+      // put it back into Zustand state from an old full-list snapshot.
+      expect(useRitualsStore.getState().rituals.map((r) => r.id)).toEqual([1, 3])
+      const rows = await driver.select<{ id: number; active: number }>(
+        'SELECT id, active FROM ritual WHERE id IN (?, ?) ORDER BY id',
+        [1, 2]
+      )
+      expect(rows).toEqual([{ id: 1, active: 1 }, { id: 2, active: 0 }])
+    })
   })
 })

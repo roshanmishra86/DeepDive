@@ -334,23 +334,26 @@ export async function duplicateTemplate(driver: SqlDriver, id: number): Promise<
   }
   const original = rows[0]
 
-  // Create the copy row, following the same INSERT ... SELECT ... ORDER BY
-  // sort style as saveDayAsTemplate above.
-  const result = await driver.execute(
-    'INSERT INTO template (name, description, start_min, weekdays) VALUES (?, ?, ?, ?)',
-    [`${original.name} (copy)`, original.description, original.start_min, original.weekdays]
-  )
-  const newTemplateId = result.lastInsertId
-
-  // Copy all of the original template's blocks to the new template id.
-  await driver.execute(
-    `INSERT INTO template_block (template_id, title, kind, start_min, duration_min, pomodoros, sort)
-     SELECT ?, title, kind, start_min, duration_min, pomodoros, sort
-     FROM template_block
-     WHERE template_id = ?
-     ORDER BY sort`,
-    [newTemplateId, id]
-  )
+  // The copy row and all its blocks must commit together. The second
+  // statement runs on the transaction's same SQLite connection, so
+  // last_insert_rowid() is the template inserted by the first statement.
+  // Returning the first statement's insert metadata avoids a racy re-query
+  // for the new id after the transaction commits.
+  const [templateInsert] = await driver.transaction([
+    {
+      sql: 'INSERT INTO template (name, description, start_min, weekdays) VALUES (?, ?, ?, ?)',
+      params: [`${original.name} (copy)`, original.description, original.start_min, original.weekdays],
+    },
+    {
+      sql: `INSERT INTO template_block (template_id, title, kind, start_min, duration_min, pomodoros, sort)
+            SELECT last_insert_rowid(), title, kind, start_min, duration_min, pomodoros, sort
+            FROM template_block
+            WHERE template_id = ?
+            ORDER BY sort`,
+      params: [id],
+    },
+  ])
+  const newTemplateId = templateInsert.lastInsertId
 
   return newTemplateId
 }

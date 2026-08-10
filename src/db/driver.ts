@@ -18,7 +18,8 @@ export interface SqlDriver {
    * carry: `TauriDriver.transaction` now forwards to the app's
    * `execute_transaction` Rust command (src-tauri/src/tx.rs), which owns
    * one fresh connection per transaction — begin, run every statement,
-   * commit, or genuinely roll back on any failure.
+   * commit, or genuinely roll back on any failure. Returns one result per
+   * statement in execution order after a successful commit.
    */
-  transaction(statements: { sql: string; params?: unknown[] }[]): Promise<void>
+  transaction(statements: { sql: string; params?: unknown[] }[]): Promise<SqlResult[]>
 }
