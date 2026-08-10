@@ -220,6 +220,79 @@ describe('templates repository', () => {
     expect(template?.description).toBe('My custom description')
   })
 
+  describe('duplicateTemplate', () => {
+    it('copies the template row with "(copy)" appended to the name', async () => {
+      const id = await templates.createTemplate(driver, {
+        name: 'Original',
+        description: 'Some description',
+        startMin: 480,
+        weekdays: 31,
+      })
+
+      const newId = await templates.duplicateTemplate(driver, id)
+      expect(newId).not.toBe(id)
+
+      const copy = await templates.getTemplate(driver, newId)
+      expect(copy?.name).toBe('Original (copy)')
+      expect(copy?.description).toBe('Some description')
+      expect(copy?.startMin).toBe(480)
+      expect(copy?.weekdays).toBe(31)
+    })
+
+    it('copies all blocks to the new template id, preserving sort order', async () => {
+      const id = 1 // Maker Day, seeded with 5 blocks
+
+      const newId = await templates.duplicateTemplate(driver, id)
+
+      const original = await templates.getTemplate(driver, id)
+      const copy = await templates.getTemplate(driver, newId)
+
+      expect(copy?.blocks.length).toBe(original?.blocks.length)
+      expect(copy?.blocks.every((b) => b.templateId === newId)).toBe(true)
+      // getTemplate() reads ORDER BY sort — the copy's block titles/kinds
+      // must land in the exact same order as the original.
+      expect(copy?.blocks.map((b) => b.title)).toEqual(original?.blocks.map((b) => b.title))
+      expect(copy?.blocks.map((b) => b.sort)).toEqual(original?.blocks.map((b) => b.sort))
+    })
+
+    it('leaves the original template and its blocks unchanged', async () => {
+      const id = 1 // Maker Day
+      const before = await templates.getTemplate(driver, id)
+
+      await templates.duplicateTemplate(driver, id)
+
+      const after = await templates.getTemplate(driver, id)
+      expect(after?.name).toBe(before?.name)
+      expect(after?.blocks.length).toBe(before?.blocks.length)
+    })
+
+    it('rolls back the new template when copying its blocks fails', async () => {
+      // Force only the second statement in duplicateTemplate's transaction
+      // to fail. The template-row INSERT succeeds by itself, so this proves
+      // the transaction removes that partial row too.
+      await driver.execute(`
+        CREATE TRIGGER reject_copied_blocks
+        BEFORE INSERT ON template_block
+        WHEN NEW.template_id != 1
+        BEGIN
+          SELECT RAISE(ABORT, 'copy blocked');
+        END
+      `)
+
+      await expect(templates.duplicateTemplate(driver, 1)).rejects.toThrow('copy blocked')
+
+      const copies = await driver.select<{ id: number }>(
+        'SELECT id FROM template WHERE name = ?',
+        ['Maker Day (copy)']
+      )
+      expect(copies).toEqual([])
+    })
+
+    it('throws a clear error when the source template does not exist', async () => {
+      await expect(templates.duplicateTemplate(driver, 999999)).rejects.toThrow()
+    })
+  })
+
   // Phase 6 F1 (TASKS.md): moveBlock used to persist the swapped startMin
   // values and the sort renumbering as two separate awaited round trips —
   // if the second failed, SQLite kept the first's write with no way to

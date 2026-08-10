@@ -66,6 +66,7 @@ interface TemplatesState {
   removeBlock: (id: number) => Promise<void>
   moveBlock: (id: number, direction: -1 | 1) => Promise<void>
   saveDayAsTemplate: (day: string, name: string) => Promise<number | null>
+  duplicateTemplate: (id: number) => Promise<number | null>
 }
 
 // Optimistic local ids for rows not yet persisted. Negative and
@@ -544,6 +545,42 @@ export const useTemplatesStore = create<TemplatesState>()((set, get) => ({
       const message = err instanceof Error ? err.message : 'Unknown error'
       set({ error: message, loading: false })
       console.error('Failed to save day as template:', err)
+      return null
+    }
+  },
+
+  duplicateTemplate: async (id) => {
+    // Unlike saveDayAsTemplate, this deliberately does NOT touch `loading`.
+    // saveDayAsTemplate is only ever invoked from the Today view's
+    // SaveTemplateModal, where the `loading` branch of TemplatesView is
+    // never on screen — but duplicateTemplate is invoked from a button
+    // inside TemplatesView itself, which early-returns a full-page "Loading
+    // templates…" screen whenever `loading` is true. Setting it here would
+    // blank and remount the whole Templates page on every duplicate click.
+    set({ error: null })
+
+    // Duplicating requires the DB, same as saveDayAsTemplate — there's no
+    // sensible in-memory-only duplication story since the new row needs a
+    // real id to select into.
+    if (!persistenceDriver) {
+      set({ error: 'No database connection' })
+      return null
+    }
+
+    try {
+      const driver = persistenceDriver
+      const newId = await templatesRepo.duplicateTemplate(driver, id)
+      // Refresh the templates list and select the copy, same shape as
+      // saveDayAsTemplate — block stats for the new row come from the
+      // requery rather than a targeted derive.
+      const templates = await templatesRepo.listTemplates(driver)
+      set({ templates })
+      await get().select(newId)
+      return newId
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Unknown error'
+      set({ error: message })
+      console.error('Failed to duplicate template:', err)
       return null
     }
   },

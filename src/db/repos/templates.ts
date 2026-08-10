@@ -327,6 +327,37 @@ export async function removeTemplateBlockAtomic(
 }
 
 
+export async function duplicateTemplate(driver: SqlDriver, id: number): Promise<number> {
+  const rows = await driver.select<TemplateRow>('SELECT * FROM template WHERE id = ?', [id])
+  if (rows.length === 0) {
+    throw new Error(`duplicateTemplate: no template found for id ${id}`)
+  }
+  const original = rows[0]
+
+  // The copy row and all its blocks must commit together. The second
+  // statement runs on the transaction's same SQLite connection, so
+  // last_insert_rowid() is the template inserted by the first statement.
+  // Returning the first statement's insert metadata avoids a racy re-query
+  // for the new id after the transaction commits.
+  const [templateInsert] = await driver.transaction([
+    {
+      sql: 'INSERT INTO template (name, description, start_min, weekdays) VALUES (?, ?, ?, ?)',
+      params: [`${original.name} (copy)`, original.description, original.start_min, original.weekdays],
+    },
+    {
+      sql: `INSERT INTO template_block (template_id, title, kind, start_min, duration_min, pomodoros, sort)
+            SELECT last_insert_rowid(), title, kind, start_min, duration_min, pomodoros, sort
+            FROM template_block
+            WHERE template_id = ?
+            ORDER BY sort`,
+      params: [id],
+    },
+  ])
+  const newTemplateId = templateInsert.lastInsertId
+
+  return newTemplateId
+}
+
 export async function saveDayAsTemplate(
   driver: SqlDriver,
   day: string,

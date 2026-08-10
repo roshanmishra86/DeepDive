@@ -8,7 +8,7 @@
 //! on any failure — then drop the connection. Per-call connections also
 //! mean no connection state can leak between transactions.
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use sqlx::{Connection, SqliteConnection};
 use std::path::Path;
 use tauri::Manager;
@@ -20,11 +20,21 @@ pub struct TxStatement {
     params: Vec<serde_json::Value>,
 }
 
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TxResult {
+    rows_affected: u64,
+    last_insert_id: i64,
+}
+
 /// Core logic, separated from the command so `#[cfg(test)]` tests can drive
 /// it against a temp file without an AppHandle.
-pub async fn run_in_transaction(db_path: &Path, statements: &[TxStatement]) -> Result<(), String> {
+pub async fn run_in_transaction(
+    db_path: &Path,
+    statements: &[TxStatement],
+) -> Result<Vec<TxResult>, String> {
     if statements.is_empty() {
-        return Ok(());
+        return Ok(vec![]);
     }
     // Deliberately NO create_if_missing: the plugin pool creates and
     // migrates the database on first open, long before any transaction can
@@ -39,6 +49,7 @@ pub async fn run_in_transaction(db_path: &Path, statements: &[TxStatement]) -> R
         .map_err(|e| format!("connect: {e}"))?;
     let mut tx = conn.begin().await.map_err(|e| format!("begin: {e}"))?;
 
+    let mut results = Vec::with_capacity(statements.len());
     for (i, stmt) in statements.iter().enumerate() {
         let mut query = sqlx::query(&stmt.sql);
         for value in &stmt.params {
@@ -58,23 +69,30 @@ pub async fn run_in_transaction(db_path: &Path, statements: &[TxStatement]) -> R
                 other => return Err(format!("statement {i}: unsupported param type {other}")),
             };
         }
-        if let Err(e) = query.execute(&mut *tx).await {
-            // Best-effort rollback; the connection is dropped right after
-            // either way, so nothing can be left stranded for later users.
-            let _ = tx.rollback().await;
-            return Err(format!(
-                "statement {i} failed, transaction rolled back: {e}"
-            ));
+        match query.execute(&mut *tx).await {
+            Ok(result) => results.push(TxResult {
+                rows_affected: result.rows_affected(),
+                last_insert_id: result.last_insert_rowid(),
+            }),
+            Err(e) => {
+                // Best-effort rollback; the connection is dropped right after
+                // either way, so nothing can be left stranded for later users.
+                let _ = tx.rollback().await;
+                return Err(format!(
+                    "statement {i} failed, transaction rolled back: {e}"
+                ));
+            }
         }
     }
-    tx.commit().await.map_err(|e| format!("commit: {e}"))
+    tx.commit().await.map_err(|e| format!("commit: {e}"))?;
+    Ok(results)
 }
 
 #[tauri::command]
 pub async fn execute_transaction(
     app: tauri::AppHandle,
     statements: Vec<TxStatement>,
-) -> Result<(), String> {
+) -> Result<Vec<TxResult>, String> {
     // Must match tauri-plugin-sql's path_mapper for "sqlite:deepwork.db":
     // app_config_dir() + the filename from the connection string.
     let dir = app
@@ -133,9 +151,12 @@ mod tests {
         let _ = std::fs::remove_file(&path);
         setup_schema(&path).await;
 
-        run_in_transaction(&path, &[insert_stmt(1), insert_stmt(2)])
+        let results = run_in_transaction(&path, &[insert_stmt(1), insert_stmt(2)])
             .await
             .expect("transaction should succeed");
+        assert_eq!(results.len(), 2);
+        assert_eq!(results[0].last_insert_id, 1);
+        assert_eq!(results[1].last_insert_id, 2);
 
         let rows = read_all_n(&path).await;
         assert_eq!(rows, vec![1, 2]);

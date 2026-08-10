@@ -10,7 +10,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 // connection) is proven natively by the Rust tests in src-tauri/src/tx.rs
 // against a real SQLite file.
 const executeMock = vi.fn().mockResolvedValue({ rowsAffected: 0, lastInsertId: 0 })
-const invokeMock = vi.fn().mockResolvedValue(undefined)
+const invokeMock = vi.fn().mockResolvedValue([{ rowsAffected: 1, lastInsertId: 42 }])
 
 vi.mock('@tauri-apps/plugin-sql', () => ({
   default: class MockDatabase {
@@ -44,7 +44,7 @@ describe('TauriDriver.transaction', () => {
         params: [0, 2, 5],
       },
     ]
-    await driver.transaction(statements)
+    const results = await driver.transaction(statements)
 
     expect(invokeMock).toHaveBeenCalledTimes(1)
     expect(invokeMock).toHaveBeenCalledWith('execute_transaction', { statements })
@@ -52,6 +52,7 @@ describe('TauriDriver.transaction', () => {
     const passed = invokeMock.mock.calls[0][1].statements
     expect(passed[0].params).toEqual([999, 1])
     expect(passed[1].params).toEqual([0, 2, 5])
+    expect(results).toEqual([{ rowsAffected: 1, lastInsertId: 42 }])
   })
 
   it('is a no-op for an empty statement list', async () => {

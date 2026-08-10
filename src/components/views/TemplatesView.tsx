@@ -10,6 +10,7 @@ export function TemplatesView() {
   const selectedId = useTemplatesStore((s) => s.selectedId)
   const detail = useTemplatesStore((s) => s.detail)
   const select = useTemplatesStore((s) => s.select)
+  const duplicateTemplate = useTemplatesStore((s) => s.duplicateTemplate)
   const hydrate = useTemplatesStore((s) => s.hydrate)
   const loading = useTemplatesStore((s) => s.loading)
   // P2-A: createTemplate never throws — it reports failure via `null` and
@@ -85,6 +86,7 @@ export function TemplatesView() {
                     template={template}
                     isSelected={selectedId === template.id}
                     onSelect={() => select(template.id)}
+                    onDuplicate={() => void duplicateTemplate(template.id)}
                   />
                 ))}
               </div>

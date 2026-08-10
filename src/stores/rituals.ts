@@ -18,11 +18,14 @@ interface RitualsState {
   rituals: Ritual[]
   toggle: (id: number) => void
   add: (title: string) => Promise<void>
+  remove: (id: number) => Promise<void>
   hydrate: (driver: SqlDriver | null, day: string) => Promise<void>
 }
 
 let nextId = 4
 let persistenceDriver: SqlDriver | null = null
+let nextRemovalToken = 1
+const removalTokens = new Map<number, number>()
 // The calendar day the store last hydrated against. `toggle` must persist
 // against this day, not whatever the machine's clock says "now" is — the two
 // can disagree if the day is displayed via a different source than Date.now()
@@ -73,6 +76,39 @@ export const useRitualsStore = create<RitualsState>()((set) => ({
       const ritual = { id: nextId++, title, done: false }
       return { rituals: [...s.rituals, ritual] }
     })
+  },
+  remove: async (id) => {
+    const prior = useRitualsStore.getState().rituals
+    const removedIndex = prior.findIndex((r) => r.id === id)
+    const removed = prior[removedIndex]
+    if (!removed) return
+    const removalToken = nextRemovalToken++
+    removalTokens.set(id, removalToken)
+    // Optimistically drop the ritual from state.
+    set((s) => ({ rituals: s.rituals.filter((r) => r.id !== id) }))
+
+    if (persistenceDriver) {
+      const driver = persistenceDriver
+      try {
+        // Soft delete — sets active=0, preserves ritual_log history. Never
+        // deleteRitual, which would drop the FK-referenced log rows too.
+        await ritualsRepo.deactivateRitual(driver, id)
+      } catch (err) {
+        console.error('Failed to persist ritual removal:', err)
+        // Restore only this item. Restoring the whole `prior` snapshot would
+        // resurrect independent changes (such as another ritual successfully
+        // removed while this write was in flight). A newer removal of this
+        // same item owns the current state, so an older failure must not undo
+        // it either.
+        if (removalTokens.get(id) !== removalToken) return
+        set((state) => {
+          if (state.rituals.some((r) => r.id === id)) return state
+          const rituals = [...state.rituals]
+          rituals.splice(Math.min(removedIndex, rituals.length), 0, removed)
+          return { rituals }
+        })
+      }
+    }
   },
   hydrate: async (driver, day) => {
     persistenceDriver = driver

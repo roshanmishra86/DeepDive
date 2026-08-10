@@ -38,9 +38,9 @@ export class TauriDriver implements SqlDriver {
    * and can never strand a pooled connection. Real atomicity is proven by
    * the Rust tests in tx.rs against a real SQLite file.
    */
-  async transaction(statements: { sql: string; params?: unknown[] }[]): Promise<void> {
-    if (statements.length === 0) return
+  async transaction(statements: { sql: string; params?: unknown[] }[]): Promise<SqlResult[]> {
+    if (statements.length === 0) return []
     if (!this.db) throw new Error('Database not connected')
-    await invoke('execute_transaction', { statements })
+    return invoke<SqlResult[]>('execute_transaction', { statements })
   }
 }

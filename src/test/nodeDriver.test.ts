@@ -13,7 +13,7 @@ describe('NodeSqliteDriver.transaction', () => {
       "INSERT INTO template (name, description, start_min, weekdays) VALUES ('Probe', '', 300, 0)"
     )
 
-    await driver.transaction([
+    const results = await driver.transaction([
       {
         sql: 'INSERT INTO template_block (template_id, title, kind, start_min, duration_min, pomodoros, sort) VALUES (?, ?, ?, ?, ?, ?, ?)',
         params: [templateId, 'A', 'deep', 300, 90, 0, 0],
@@ -23,6 +23,10 @@ describe('NodeSqliteDriver.transaction', () => {
         params: [templateId, 'B', 'break', 390, 30, 0, 1],
       },
     ])
+
+    expect(results).toHaveLength(2)
+    expect(results[0].lastInsertId).toBeGreaterThan(0)
+    expect(results[1].lastInsertId).toBeGreaterThan(results[0].lastInsertId)
 
     const rows = await driver.select<{ title: string }>(
       'SELECT title FROM template_block WHERE template_id = ? ORDER BY sort',
