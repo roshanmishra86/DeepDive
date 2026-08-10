@@ -327,6 +327,34 @@ export async function removeTemplateBlockAtomic(
 }
 
 
+export async function duplicateTemplate(driver: SqlDriver, id: number): Promise<number> {
+  const rows = await driver.select<TemplateRow>('SELECT * FROM template WHERE id = ?', [id])
+  if (rows.length === 0) {
+    throw new Error(`duplicateTemplate: no template found for id ${id}`)
+  }
+  const original = rows[0]
+
+  // Create the copy row, following the same INSERT ... SELECT ... ORDER BY
+  // sort style as saveDayAsTemplate above.
+  const result = await driver.execute(
+    'INSERT INTO template (name, description, start_min, weekdays) VALUES (?, ?, ?, ?)',
+    [`${original.name} (copy)`, original.description, original.start_min, original.weekdays]
+  )
+  const newTemplateId = result.lastInsertId
+
+  // Copy all of the original template's blocks to the new template id.
+  await driver.execute(
+    `INSERT INTO template_block (template_id, title, kind, start_min, duration_min, pomodoros, sort)
+     SELECT ?, title, kind, start_min, duration_min, pomodoros, sort
+     FROM template_block
+     WHERE template_id = ?
+     ORDER BY sort`,
+    [newTemplateId, id]
+  )
+
+  return newTemplateId
+}
+
 export async function saveDayAsTemplate(
   driver: SqlDriver,
   day: string,

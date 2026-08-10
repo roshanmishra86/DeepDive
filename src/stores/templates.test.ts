@@ -684,4 +684,92 @@ describe('templates store', () => {
     expect(state.templates.some((t) => t.id === templateId)).toBe(true)
   })
 
+  // --- duplicateTemplate --------------------------------------------------
+
+  it('duplicateTemplate returns the new id and adds a "(copy)" row with matching stats', async () => {
+    await useTemplatesStore.getState().hydrate(driver)
+    const original = useTemplatesStore.getState().templates.find((t) => t.name === 'Maker Day')!
+
+    const newId = await useTemplatesStore.getState().duplicateTemplate(original.id)
+
+    expect(newId).not.toBeNull()
+    expect(newId).not.toBe(original.id)
+
+    const copy = useTemplatesStore.getState().templates.find((t) => t.id === newId)
+    expect(copy).not.toBeUndefined()
+    expect(copy?.name).toBe(`${original.name} (copy)`)
+    expect(copy?.totalMin).toBe(original.totalMin)
+    expect(copy?.blockCount).toBe(original.blockCount)
+  })
+
+  it('duplicateTemplate selects the copy afterwards, with detail holding the copied blocks in order', async () => {
+    await useTemplatesStore.getState().hydrate(driver)
+    const original = useTemplatesStore.getState().templates.find((t) => t.name === 'Maker Day')!
+    await useTemplatesStore.getState().select(original.id)
+    const originalBlocks = useTemplatesStore.getState().detail!.blocks
+
+    const newId = await useTemplatesStore.getState().duplicateTemplate(original.id)
+
+    const state = useTemplatesStore.getState()
+    expect(state.selectedId).toBe(newId)
+    expect(state.detail?.id).toBe(newId)
+    expect(state.detail?.blocks.map((b) => b.title)).toEqual(originalBlocks.map((b) => b.title))
+    expect(state.detail?.blocks.every((b) => b.templateId === newId)).toBe(true)
+  })
+
+  it('duplicateTemplate leaves the original template unchanged', async () => {
+    await useTemplatesStore.getState().hydrate(driver)
+    const original = useTemplatesStore.getState().templates.find((t) => t.name === 'Maker Day')!
+
+    await useTemplatesStore.getState().duplicateTemplate(original.id)
+
+    const stillThere = useTemplatesStore.getState().templates.find((t) => t.id === original.id)
+    expect(stillThere?.name).toBe('Maker Day')
+    expect(stillThere?.totalMin).toBe(original.totalMin)
+    expect(stillThere?.blockCount).toBe(original.blockCount)
+  })
+
+  it('duplicateTemplate never throws; it reports failure via return value and `error`', async () => {
+    await useTemplatesStore.getState().hydrate(driver)
+    const templateId = useTemplatesStore.getState().templates[0].id
+
+    const failingDriver: SqlDriver = {
+      execute: async () => {
+        throw new Error('boom')
+      },
+      select: (sql, params) => driver.select(sql, params),
+      transaction: async () => {
+        throw new Error('boom')
+      },
+    }
+    await useTemplatesStore.getState().hydrate(failingDriver)
+
+    const result = await useTemplatesStore.getState().duplicateTemplate(templateId)
+    expect(result).toBeNull()
+    expect(useTemplatesStore.getState().error).toBe('boom')
+  })
+
+  it('duplicateTemplate does not set `loading` — TemplatesView early-returns a full-page loading screen while it is true, which would blank the page on every click', async () => {
+    await useTemplatesStore.getState().hydrate(driver)
+    const templateId = useTemplatesStore.getState().templates[0].id
+    expect(useTemplatesStore.getState().loading).toBe(false)
+
+    const promise = useTemplatesStore.getState().duplicateTemplate(templateId)
+    // Loading must never flip true, not even transiently, while the
+    // duplicate is in flight.
+    expect(useTemplatesStore.getState().loading).toBe(false)
+
+    await promise
+    expect(useTemplatesStore.getState().loading).toBe(false)
+  })
+
+  it('duplicateTemplate with no driver returns null and sets an error', async () => {
+    await useTemplatesStore.getState().hydrate(null)
+
+    const result = await useTemplatesStore.getState().duplicateTemplate(1)
+    expect(result).toBeNull()
+    expect(useTemplatesStore.getState().error).toBe('No database connection')
+    expect(useTemplatesStore.getState().loading).toBe(false)
+  })
+
 })

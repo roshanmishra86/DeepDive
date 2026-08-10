@@ -18,6 +18,7 @@ interface RitualsState {
   rituals: Ritual[]
   toggle: (id: number) => void
   add: (title: string) => Promise<void>
+  remove: (id: number) => Promise<void>
   hydrate: (driver: SqlDriver | null, day: string) => Promise<void>
 }
 
@@ -73,6 +74,24 @@ export const useRitualsStore = create<RitualsState>()((set) => ({
       const ritual = { id: nextId++, title, done: false }
       return { rituals: [...s.rituals, ritual] }
     })
+  },
+  remove: async (id) => {
+    const prior = useRitualsStore.getState().rituals
+    // Optimistically drop the ritual from state.
+    set((s) => ({ rituals: s.rituals.filter((r) => r.id !== id) }))
+
+    if (persistenceDriver) {
+      const driver = persistenceDriver
+      try {
+        // Soft delete — sets active=0, preserves ritual_log history. Never
+        // deleteRitual, which would drop the FK-referenced log rows too.
+        await ritualsRepo.deactivateRitual(driver, id)
+      } catch (err) {
+        console.error('Failed to persist ritual removal:', err)
+        // Revert optimistic removal
+        set({ rituals: prior })
+      }
+    }
   },
   hydrate: async (driver, day) => {
     persistenceDriver = driver

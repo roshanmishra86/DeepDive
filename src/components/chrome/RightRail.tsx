@@ -10,6 +10,7 @@ import { formatClock } from '../../lib/time'
 import { activeWorkBlock, displayPomodoroTarget, isFreshCycle } from '../../lib/timer'
 import { upcomingTasks, taskMeta } from '../../lib/week'
 import { ArrowCounterClockwise } from '@phosphor-icons/react/dist/csr/ArrowCounterClockwise'
+import { X } from '@phosphor-icons/react/dist/csr/X'
 
 const RING_R = 86
 const RING_C = 540.35 // 2π · 86
@@ -140,14 +141,24 @@ function PomodoroWidget() {
   )
 }
 
+// Stable ids for parked entries — a module-scope counter, not the array
+// index, so removing an entry doesn't reassign keys to the remaining items
+// and trigger React reconciliation bugs (e.g. an input mid-edit jumping to
+// the wrong row).
+let nextParkedId = 1
+
 function DistractionLog() {
-  const [parked, setParked] = useState<string[]>([])
+  const [parked, setParked] = useState<{ id: number; text: string }[]>([])
   const [draft, setDraft] = useState('')
 
   const park = () => {
     const text = draft.trim()
-    if (text) setParked((p) => [...p, text])
+    if (text) setParked((p) => [...p, { id: nextParkedId++, text }])
     setDraft('')
+  }
+
+  const removeParked = (id: number) => {
+    setParked((p) => p.filter((entry) => entry.id !== id))
   }
 
   return (
@@ -160,8 +171,19 @@ function DistractionLog() {
       </div>
       {parked.length > 0 && (
         <ul className="distraction-list">
-          {parked.map((text, i) => (
-            <li key={i}>{text}</li>
+          {parked.map(({ id, text }) => (
+            <li key={id} className="distraction-item">
+              <span className="distraction-text">{text}</span>
+              <button
+                type="button"
+                className="distraction-remove"
+                onClick={() => removeParked(id)}
+                aria-label={`Remove ${text}`}
+                data-testid={`distraction-remove-${id}`}
+              >
+                <X size={10} />
+              </button>
+            </li>
           ))}
         </ul>
       )}

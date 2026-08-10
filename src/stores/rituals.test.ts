@@ -3,6 +3,7 @@ import { useRitualsStore } from './rituals'
 import { createTestDb } from '../test/nodeDriver'
 import { toDayKey } from '../lib/time'
 import type { SqlDriver } from '../db/driver'
+import * as ritualsRepo from '../db/repos/rituals'
 
 describe('useRitualsStore', () => {
   beforeEach(() => {
@@ -129,6 +130,30 @@ describe('useRitualsStore', () => {
       const toggled = useRitualsStore.getState().rituals[0]
       expect(toggled.id).toBe(originalRitual.id)
       expect(toggled.title).toBe(originalRitual.title)
+    })
+  })
+
+  describe('remove', () => {
+    it('optimistically removes the ritual from state', () => {
+      useRitualsStore.getState().remove(1)
+      const rituals = useRitualsStore.getState().rituals
+      expect(rituals).toHaveLength(2)
+      expect(rituals.find((r) => r.id === 1)).toBeUndefined()
+    })
+
+    it('only removes the targeted ritual', () => {
+      useRitualsStore.getState().remove(2)
+      const rituals = useRitualsStore.getState().rituals
+      expect(rituals.map((r) => r.id)).toEqual([1, 3])
+    })
+
+    it('in-memory fallback (no driver) removal works', async () => {
+      // No driver has been hydrated in this describe block, so `remove`
+      // hits the in-memory-only path.
+      await useRitualsStore.getState().remove(3)
+      const rituals = useRitualsStore.getState().rituals
+      expect(rituals).toHaveLength(2)
+      expect(rituals.find((r) => r.id === 3)).toBeUndefined()
     })
   })
 
@@ -368,6 +393,61 @@ describe('useRitualsStore', () => {
         )
         expect(wrongDayRows).toHaveLength(0)
       }
+    })
+
+    // --- remove: persistence ------------------------------------------
+
+    it('remove persists via deactivateRitual (active=0), and the ritual disappears from a subsequent listRitualsForDay', async () => {
+      const day = '2026-08-03'
+      await useRitualsStore.getState().hydrate(driver, day)
+
+      await useRitualsStore.getState().remove(1)
+
+      // Optimistic removal landed.
+      expect(useRitualsStore.getState().rituals.find((r) => r.id === 1)).toBeUndefined()
+
+      // Soft delete: the row still exists but is inactive.
+      const rows = await driver.select<{ active: number }>(
+        'SELECT active FROM ritual WHERE id = ?',
+        [1]
+      )
+      expect(rows).toHaveLength(1)
+      expect(rows[0].active).toBe(0)
+
+      // And it no longer shows up via the same query the store hydrates from.
+      const listed = await ritualsRepo.listRitualsForDay(driver, day)
+      expect(listed.find((r) => r.id === 1)).toBeUndefined()
+    })
+
+    it('reverts the optimistic removal when persistence fails', async () => {
+      const day = '2026-08-03'
+      await useRitualsStore.getState().hydrate(driver, day)
+      const before = useRitualsStore.getState().rituals
+
+      const failingDriver: SqlDriver = {
+        execute: async () => {
+          throw new Error('boom')
+        },
+        select: (sql, params) => driver.select(sql, params),
+        transaction: (statements) => driver.transaction(statements),
+      }
+      // Re-hydrate against the failing driver (its `select` still delegates
+      // to the real driver, so the hydrated list is unchanged) so `remove`
+      // exercises the failure path via `execute`.
+      await useRitualsStore.getState().hydrate(failingDriver, day)
+
+      await useRitualsStore.getState().remove(1)
+
+      const state = useRitualsStore.getState()
+      expect(state.rituals).toEqual(before)
+      expect(state.rituals.find((r) => r.id === 1)).toBeDefined()
+
+      // Nothing was actually persisted.
+      const rows = await driver.select<{ active: number }>(
+        'SELECT active FROM ritual WHERE id = ?',
+        [1]
+      )
+      expect(rows[0].active).toBe(1)
     })
   })
 })

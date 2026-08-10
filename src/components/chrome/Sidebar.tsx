@@ -12,6 +12,7 @@ import { MusicNotes } from '@phosphor-icons/react/dist/csr/MusicNotes'
 import { Gear } from '@phosphor-icons/react/dist/csr/Gear'
 import { Plus } from '@phosphor-icons/react/dist/csr/Plus'
 import { Check } from '@phosphor-icons/react/dist/csr/Check'
+import { X } from '@phosphor-icons/react/dist/csr/X'
 
 const NAV_ITEMS: { view: View; label: string; icon: ReactElement }[] = [
   {
@@ -45,6 +46,7 @@ function RitualChecklist() {
   const rituals = useRitualsStore((s) => s.rituals)
   const toggle = useRitualsStore((s) => s.toggle)
   const add = useRitualsStore((s) => s.add)
+  const remove = useRitualsStore((s) => s.remove)
   const [adding, setAdding] = useState(false)
   const [draft, setDraft] = useState('')
 
@@ -60,20 +62,30 @@ function RitualChecklist() {
       <div className="sidebar-label">Today's ritual</div>
       <div className="ritual-list">
         {rituals.map((r) => (
-          <button
-            key={r.id}
-            type="button"
-            className={`ritual-item${r.done ? ' ritual-item-done' : ''}`}
-            onClick={() => toggle(r.id)}
-            data-testid={`ritual-${r.id}`}
-          >
-            <span className="ritual-check" aria-hidden>
-              {r.done && (
-                <Check size={8} weight="bold" color="#fff" />
-              )}
-            </span>
-            {r.title}
-          </button>
+          <div key={r.id} className="ritual-row">
+            <button
+              type="button"
+              className={`ritual-item${r.done ? ' ritual-item-done' : ''}`}
+              onClick={() => toggle(r.id)}
+              data-testid={`ritual-${r.id}`}
+            >
+              <span className="ritual-check" aria-hidden>
+                {r.done && (
+                  <Check size={8} weight="bold" color="#fff" />
+                )}
+              </span>
+              {r.title}
+            </button>
+            <button
+              type="button"
+              className="ritual-remove"
+              onClick={() => void remove(r.id)}
+              aria-label={`Remove ${r.title}`}
+              data-testid={`ritual-remove-${r.id}`}
+            >
+              <X size={10} />
+            </button>
+          </div>
         ))}
         {adding ? (
           <input
