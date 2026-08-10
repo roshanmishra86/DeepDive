@@ -12,6 +12,7 @@ export type SessionPhase = 'focus' | 'rest'
 // Phase 7 review in TASKS.md.
 export type DayStatus = 'full' | 'part' | 'miss' | 'note'
 export type BlockRepeat = 'once' | 'daily' | 'weekdays'
+export type RepeatMode = 'off' | 'queue' | 'one'
 
 export interface Task {
   id: number
@@ -24,12 +25,26 @@ export interface Task {
   done: boolean
   createdAt: string
   archived: boolean
+  sort: number
+  completedAt: string | null
+  archivedAt: string | null
+}
+
+export interface Subtask {
+  id: number
+  taskId: number
+  title: string
+  estimateMin: number
+  done: boolean
+  sort: number
+  createdAt: string
 }
 
 export interface DayBlock {
   id: number
   day: string
   taskId: number | null
+  subtaskId: number | null
   title: string
   kind: BlockKind
   startMin: number

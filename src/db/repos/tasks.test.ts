@@ -100,10 +100,13 @@ describe('tasks repository', () => {
       createdAt: new Date().toISOString(),
     })
 
-    await tasks.archiveTask(driver, id)
+    await tasks.setTaskDone(driver, id, true, '2026-08-10T10:00:00.000Z')
+    expect(await tasks.archiveTask(driver, id, '2026-08-10T11:00:00.000Z')).toBe(true)
 
     const archived = await tasks.listTasks(driver, { archived: true })
     expect(archived.some((t) => t.id === id)).toBe(true)
+    expect(archived.find((t) => t.id === id)?.completedAt).toBe('2026-08-10T10:00:00.000Z')
+    expect(archived.find((t) => t.id === id)?.archivedAt).toBe('2026-08-10T11:00:00.000Z')
   })
 
   it('lists non-archived tasks', async () => {

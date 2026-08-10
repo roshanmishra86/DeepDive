@@ -490,6 +490,7 @@ function makeCandidate(id: number, overrides: Partial<DayBlock> = {}): DayBlock 
     id,
     day: '2026-08-10',
     taskId: null,
+    subtaskId: null,
     title: `Block ${id}`,
     kind: 'deep',
     startMin: 300,
@@ -516,6 +517,7 @@ function resetPlayerStore() {
     durationSec: 0,
     missing: false,
     restPaused: false,
+    repeatMode: 'off',
   })
 }
 
@@ -526,7 +528,6 @@ function resetLibraryStore() {
     error: null,
     fadeInSec: 8,
     silenceDuringRest: true,
-    loopUntilBlockEnd: true,
   })
 }
 

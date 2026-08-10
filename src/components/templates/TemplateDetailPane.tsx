@@ -26,6 +26,7 @@ export function TemplateDetailPane({ template }: TemplateDetailPaneProps) {
   const setWeekday = useTemplatesStore((s) => s.setWeekday)
   const removeBlock = useTemplatesStore((s) => s.removeBlock)
   const moveBlock = useTemplatesStore((s) => s.moveBlock)
+  const moveBlockTo = useTemplatesStore((s) => s.moveBlockTo)
   const applyTemplate = useTodayStore((s) => s.applyTemplate)
   const todayBlocks = useTodayStore((s) => s.blocks)
   // P2-A: applyTemplate reports failure via the today store's `error` field
@@ -41,6 +42,7 @@ export function TemplateDetailPane({ template }: TemplateDetailPaneProps) {
   // confirm dialog BlockModal uses, rather than deleting immediately. See
   // the Phase 6 F2 defect in TASKS.md.
   const [deleteConfirmBlockId, setDeleteConfirmBlockId] = useState<number | null>(null)
+  const [draggingBlockId, setDraggingBlockId] = useState<number | null>(null)
 
   const subtitle = templateSubtitle(template.weekdays, template.startMin)
   const deleteConfirmBlock = template.blocks.find((b) => b.id === deleteConfirmBlockId) ?? null
@@ -62,6 +64,12 @@ export function TemplateDetailPane({ template }: TemplateDetailPaneProps) {
 
   const handleBlockMove = async (blockId: number, direction: -1 | 1) => {
     await moveBlock(blockId, direction)
+  }
+
+  const handleBlockDrop = async (targetIndex: number) => {
+    if (draggingBlockId === null) return
+    await moveBlockTo(draggingBlockId, targetIndex)
+    setDraggingBlockId(null)
   }
 
   return (
@@ -109,7 +117,8 @@ export function TemplateDetailPane({ template }: TemplateDetailPaneProps) {
             </div>
           ) : (
             template.blocks.map((block, index) => (
-              <div key={block.id} className="tpl-block-row">
+              <div key={block.id} className="tpl-block-row" onDragOver={(event) => { event.preventDefault() }} onDrop={(event) => { event.preventDefault(); void handleBlockDrop(index) }}>
+                <button type="button" className="tpl-block-drag-handle" draggable onDragStart={() => setDraggingBlockId(block.id)} onDragEnd={() => setDraggingBlockId(null)} aria-label={`Drag ${block.title}`}>⠿</button>
                 <span className="tpl-block-time">{minutesToClock(block.startMin)}</span>
                 <span className="tpl-block-title">{block.title}</span>
                 {block.pomodoros > 0 && (

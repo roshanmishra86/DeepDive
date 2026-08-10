@@ -236,9 +236,10 @@ describe('tasks store', () => {
     await useTasksStore.getState().hydrate(driver)
 
     const state = useTasksStore.getState()
-    // Should be sorted by dueAt
-    expect(state.tasks[0].id).toBe(id2)
-    expect(state.tasks[1].id).toBe(id1)
+    // New tasks use dense manual order, so insertion order is stable until a
+    // reorder action explicitly changes it.
+    expect(state.tasks[0].id).toBe(id1)
+    expect(state.tasks[1].id).toBe(id2)
   })
 
   it('re-sorts tasks after edit', async () => {

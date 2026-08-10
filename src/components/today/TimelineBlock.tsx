@@ -4,6 +4,8 @@ import { blockProgress } from '../../lib/today'
 import { formatDuration } from '../../lib/time'
 import type { DayBlock } from '../../db/types'
 import type { BlockState } from '../../lib/today'
+import { useAppStore } from '../../stores/app'
+import { NotePencil } from '@phosphor-icons/react/dist/csr/NotePencil'
 
 interface TimelineBlockProps {
   block: DayBlock
@@ -13,6 +15,10 @@ interface TimelineBlockProps {
   onEdit: () => void
   /** Minutes this block overlaps its predecessor, if any (see `conflicts()`). */
   overlapMin?: number
+  onDragStart?: () => void
+  onDragOver?: () => void
+  onDrop?: () => void
+  onDragEnd?: () => void
 }
 
 const NUDGE_MIN = 5
@@ -24,12 +30,17 @@ export function TimelineBlock({
   nowMin,
   onEdit,
   overlapMin,
+  onDragStart,
+  onDragOver,
+  onDrop,
+  onDragEnd,
 }: TimelineBlockProps) {
   const toggleCompleted = useTodayStore((s) => s.toggleCompleted)
   const removeBlock = useTodayStore((s) => s.removeBlock)
   const move = useTodayStore((s) => s.move)
   const nudgeBlock = useTodayStore((s) => s.nudgeBlock)
   const blocks = useTodayStore((s) => s.blocks)
+  const openPlan = useAppStore((s) => s.openPlan)
 
   // Whether nudging this block ripples the shift to later blocks (default)
   // or is confined to just this block. Per-block so different blocks can be
@@ -63,7 +74,7 @@ export function TimelineBlock({
   const handleNudgeLater = () => nudgeBlock(block.id, NUDGE_MIN, ripple)
 
   return (
-    <div className={classNames} style={{ height: `${height}px` }}>
+    <div className={classNames} style={{ height: `${height}px` }} onDragOver={(event) => { event.preventDefault(); onDragOver?.() }} onDrop={(event) => { event.preventDefault(); onDrop?.() }}>
       {isCompact ? (
         // Compact layout: single row
         <div className="timeline-block-compact-inner">
@@ -137,6 +148,7 @@ export function TimelineBlock({
 
       {/* Controls overlay */}
       <div className="timeline-block-controls">
+        <button type="button" className="timeline-drag-handle" draggable onDragStart={(event) => { event.stopPropagation(); onDragStart?.() }} onDragEnd={onDragEnd} aria-label={`Drag ${block.title}`} title="Drag to reorder">⠿</button>
         <button
           className={`btn-icon${ripple ? ' btn-icon-active' : ''}`}
           onClick={() => setRipple((r) => !r)}
@@ -148,6 +160,14 @@ export function TimelineBlock({
             <path d="M2 7c1.5-2 3-3 5-3s3.5 1 5 3c-1.5 2-3 3-5 3s-3.5-1-5-3z" />
             <circle cx="7" cy="7" r="1.4" fill="currentColor" stroke="none" />
           </svg>
+        </button>
+        <button
+          className="btn-icon"
+          onClick={() => openPlan(block.taskId ? { kind: 'task', id: block.taskId } : { kind: 'block', id: block.id })}
+          aria-label={`Open plan for ${block.title}`}
+          title="Open plan"
+        >
+          <NotePencil size={14} weight={block.note ? 'fill' : 'regular'} />
         </button>
         <button
           className="btn-icon"

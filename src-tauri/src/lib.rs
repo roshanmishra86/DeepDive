@@ -42,6 +42,12 @@ pub fn run() {
                                 sql: include_str!("../migrations/0004_block_composer.sql"),
                                 kind: MigrationKind::Up,
                             },
+                            Migration {
+                                version: 5,
+                                description: "Task planning and repeat modes",
+                                sql: include_str!("../migrations/0005_task_planning.sql"),
+                                kind: MigrationKind::Up,
+                            },
                         ],
                     )
                     .build(),

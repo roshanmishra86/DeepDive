@@ -32,17 +32,19 @@ export interface HeadlineStats {
 
 /**
  * True iff the archive has anything to show at all: any `day_block` row OR
- * any `day_note` row WITH A NON-EMPTY NOTE. These are exactly the two sources
+ * any `day_note` row WITH A NON-EMPTY NOTE. Archived tasks are an additional
+ * independent source and keep the archive non-empty even when no day record exists.
  * `dayStatuses` derives the calendar from — including its `note != ''`
  * filter, because setDayShutdown upserts rows with the schema-default empty
  * note — so this is false precisely when every month's calendar would be
  * dotless: the fresh-install case the view renders an empty state for.
- * Two EXISTS clauses, no full counts.
+ * Three EXISTS clauses, no full counts.
  */
 export async function hasAnyRecords(driver: SqlDriver): Promise<boolean> {
   const rows = await driver.select<{ has: number }>(
     `SELECT EXISTS(SELECT 1 FROM day_block)
-        OR EXISTS(SELECT 1 FROM day_note WHERE note != '') as has`
+        OR EXISTS(SELECT 1 FROM day_note WHERE note != '')
+        OR EXISTS(SELECT 1 FROM task WHERE archived = 1) as has`
   )
   return rows[0].has === 1
 }

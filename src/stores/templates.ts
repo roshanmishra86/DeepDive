@@ -3,7 +3,7 @@ import type { SqlDriver } from '../db/driver'
 import type { Template, TemplateBlock } from '../db/types'
 import * as templatesRepo from '../db/repos/templates'
 import type { TemplateWithStats, TemplateDetail } from '../db/repos/templates'
-import { moveBlock as moveBlockPure, sortBlocks } from '../lib/today'
+import { moveBlockTo as moveBlockToPure, sortBlocks } from '../lib/today'
 import { nextTemplateBlockStart, toggleWeekday, templateTotals } from '../lib/templates'
 
 // TemplateWithStats and TemplateDetail are defined once, in
@@ -65,6 +65,7 @@ interface TemplatesState {
   editBlock: (id: number, patch: Partial<Omit<TemplateBlock, 'id' | 'templateId'>>) => Promise<void>
   removeBlock: (id: number) => Promise<void>
   moveBlock: (id: number, direction: -1 | 1) => Promise<void>
+  moveBlockTo: (id: number, targetIndex: number) => Promise<void>
   saveDayAsTemplate: (day: string, name: string) => Promise<number | null>
   duplicateTemplate: (id: number) => Promise<number | null>
 }
@@ -477,7 +478,17 @@ export const useTemplatesStore = create<TemplatesState>()((set, get) => ({
     const index = state.detail.blocks.findIndex((b) => b.id === id)
     if (index === -1) return
 
-    const moved = moveBlockPure(state.detail.blocks, index, direction)
+    await get().moveBlockTo(id, index + direction)
+  },
+
+  moveBlockTo: async (id, targetIndex) => {
+    const state = get()
+    if (!state.selectedId || !state.detail) return
+
+    const index = state.detail.blocks.findIndex((b) => b.id === id)
+    if (index === -1) return
+
+    const moved = moveBlockToPure(state.detail.blocks, index, targetIndex)
     if (moved === state.detail.blocks) return // No-op at boundary
 
     // Stamp sort to match the final array position

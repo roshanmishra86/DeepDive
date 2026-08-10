@@ -5,6 +5,7 @@ import { openDatabase } from '../../db/index'
 import { layout, daySummary, blockState, conflicts, nextFreeStart } from '../../lib/today'
 import { formatDuration, minutesToClock, parseClock } from '../../lib/time'
 import { TimelineBlock } from '../today/TimelineBlock'
+import { useDragList } from '../common/useDragList'
 import { BlockComposer } from '../today/BlockComposer'
 import { ApplyTemplateMenu } from '../today/ApplyTemplateMenu'
 import { SaveTemplateModal } from '../templates/SaveTemplateModal'
@@ -26,6 +27,8 @@ export function TodayView() {
     const d = new Date()
     return d.getHours() * 60 + d.getMinutes()
   })
+  const { drag, start, clear } = useDragList<number>()
+  const moveTo = useTodayStore((s) => s.moveTo)
 
   const [composerState, setComposerState] = useState<ComposerState>({ mode: 'closed' })
   const [templateMenuOpen, setTemplateMenuOpen] = useState(false)
@@ -266,6 +269,13 @@ export function TodayView() {
                   nowMin={nowMin}
                   onEdit={() => openEditComposer(row.block.id)}
                   overlapMin={overlapByBlockId.get(row.block.id)}
+                  onDragStart={() => start(row.block.id)}
+                  onDragOver={() => undefined}
+                  onDrop={() => {
+                    if (drag.sourceId !== null) void moveTo(drag.sourceId, blocks.findIndex((block) => block.id === row.block.id))
+                    clear()
+                  }}
+                  onDragEnd={clear}
                 />
               )
             })}

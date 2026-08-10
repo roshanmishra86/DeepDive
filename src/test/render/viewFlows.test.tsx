@@ -97,7 +97,6 @@ function resetLibraryStore() {
     error: null,
     fadeInSec: 8,
     silenceDuringRest: true,
-    loopUntilBlockEnd: true,
   })
 }
 
@@ -114,7 +113,7 @@ function resetPlayerStore() {
     restPaused: false,
     queue: [],
     queueIndex: -1,
-    repeat: false,
+    repeatMode: 'off',
   })
 }
 

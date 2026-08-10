@@ -52,6 +52,8 @@ export type {
   BlockKind,
   SessionPhase,
   DayStatus,
+  Subtask,
+  RepeatMode,
 } from './types'
 
 // Re-export all repositories
@@ -64,3 +66,4 @@ export * as notes from './repos/notes'
 export * as tracks from './repos/tracks'
 export * as settings from './repos/settings'
 export * as archive from './repos/archive'
+export * as subtasks from './repos/subtasks'

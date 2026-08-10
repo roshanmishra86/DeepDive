@@ -15,7 +15,6 @@ function resetLibraryStore() {
     error: null,
     fadeInSec: 8,
     silenceDuringRest: true,
-    loopUntilBlockEnd: true,
   })
 }
 
@@ -53,7 +52,6 @@ describe('library store', () => {
     // Seeded defaults from 0002_seed.sql
     expect(state.fadeInSec).toBe(8)
     expect(state.silenceDuringRest).toBe(true)
-    expect(state.loopUntilBlockEnd).toBe(true)
   })
 
   it('hydrate(null) leaves an empty, non-loading library', async () => {
@@ -229,17 +227,6 @@ describe('library store', () => {
     expect(await settingsRepo.getSetting(driver, 'silenceDuringRest')).toBe('1')
   })
 
-  it('setLoopUntilBlockEnd persists 1/0', async () => {
-    await useLibraryStore.getState().hydrate(driver)
-
-    expect(await useLibraryStore.getState().setLoopUntilBlockEnd(false)).toBe(true)
-    expect(useLibraryStore.getState().loopUntilBlockEnd).toBe(false)
-    expect(await settingsRepo.getSetting(driver, 'loopUntilBlockEnd')).toBe('0')
-
-    expect(await useLibraryStore.getState().setLoopUntilBlockEnd(true)).toBe(true)
-    expect(await settingsRepo.getSetting(driver, 'loopUntilBlockEnd')).toBe('1')
-  })
-
   it('rolls back a toggle and reports failure when persistence fails', async () => {
     await useLibraryStore.getState().hydrate(driver)
     const failing: SqlDriver = {
@@ -249,10 +236,10 @@ describe('library store', () => {
     }
     await useLibraryStore.getState().hydrate(failing)
 
-    const ok = await useLibraryStore.getState().setLoopUntilBlockEnd(false)
+    const ok = await useLibraryStore.getState().setSilenceDuringRest(false)
 
     expect(ok).toBe(false)
-    expect(useLibraryStore.getState().loopUntilBlockEnd).toBe(true)
+    expect(useLibraryStore.getState().silenceDuringRest).toBe(true)
     expect(useLibraryStore.getState().error).toContain('disk full')
   })
 

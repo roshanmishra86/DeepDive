@@ -6,6 +6,10 @@ import { toDayKey } from '../../lib/time'
 import { MonthCalendar } from '../archive/MonthCalendar'
 import { DeepHoursHistogram } from '../archive/DeepHoursHistogram'
 import { DayRecordPane } from '../archive/DayRecordPane'
+import { useTasksStore } from '../../stores/tasks'
+import { SubtaskList } from '../week/SubtaskList'
+import { NotePencil } from '@phosphor-icons/react/dist/csr/NotePencil'
+import { ArrowUUpLeft } from '@phosphor-icons/react/dist/csr/ArrowUUpLeft'
 
 export function ArchiveView() {
   const hydrate = useArchiveStore((s) => s.hydrate)
@@ -14,6 +18,12 @@ export function ArchiveView() {
   const headline = useArchiveStore((s) => s.headline)
   const hasRecords = useArchiveStore((s) => s.hasRecords)
   const setView = useAppStore((s) => s.setView)
+  const openPlan = useAppStore((s) => s.openPlan)
+  const archivedTasks = useTasksStore((s) => s.archivedTasks)
+  const hydrateArchived = useTasksStore((s) => s.hydrateArchived)
+  const unarchiveTask = useTasksStore((s) => s.unarchiveTask)
+
+  useEffect(() => { void hydrateArchived() }, [hydrateArchived])
 
   useEffect(() => {
     let mounted = true
@@ -155,6 +165,24 @@ export function ArchiveView() {
       </div>
 
       <div className="arc-body">
+        {archivedTasks.length > 0 && (
+          <section className="arc-task-section" aria-label="Completed tasks">
+            <div className="arc-section-label">Completed tasks</div>
+            {archivedTasks.map((task) => (
+              <div className="arc-task-row" key={task.id}>
+                <div className="arc-task-main">
+                  <button type="button" className="arc-task-title" onClick={() => openPlan({ kind: 'task', id: task.id })}>{task.title}</button>
+                  <span className="arc-task-meta">completed {task.completedAt ?? 'Unknown'} · archived {task.archivedAt ?? 'Unknown'}</span>
+                  <SubtaskList task={task} />
+                </div>
+                <div className="arc-task-actions">
+                  <button type="button" className="btn-icon" onClick={() => openPlan({ kind: 'task', id: task.id })} aria-label={`Open plan for ${task.title}`}><NotePencil size={16} weight={task.notes ? 'fill' : 'regular'} /></button>
+                  <button type="button" className="btn-icon" onClick={() => { if (window.confirm(`Restore ${task.title}?`)) void unarchiveTask(task.id) }} aria-label={`Restore ${task.title}`}><ArrowUUpLeft size={16} /></button>
+                </div>
+              </div>
+            ))}
+          </section>
+        )}
         <div className="arc-left-column">
           <MonthCalendar />
           <DeepHoursHistogram />

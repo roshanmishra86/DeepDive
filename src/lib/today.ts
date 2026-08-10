@@ -184,11 +184,14 @@ export function nudge<T extends Schedulable>(blocks: T[], id: number, deltaMin: 
  * No-op if index is at the boundary in the given direction.
  * Returns a new array; does not mutate the input.
  */
-export function moveBlock<T extends Schedulable>(blocks: T[], index: number, direction: -1 | 1): T[] {
-  const newIndex = index + direction
-  if (newIndex < 0 || newIndex >= blocks.length) {
-    return blocks // At boundary; no-op
-  }
+export function moveBlockTo<T extends Schedulable>(blocks: T[], fromIndex: number, toIndex: number): T[] {
+  if (
+    fromIndex < 0 ||
+    toIndex < 0 ||
+    fromIndex >= blocks.length ||
+    toIndex >= blocks.length ||
+    fromIndex === toIndex
+  ) return blocks
 
   // Capture the gap each block currently has to its predecessor in the array order
   const gaps = new Map<number, number>()
@@ -199,9 +202,10 @@ export function moveBlock<T extends Schedulable>(blocks: T[], index: number, dir
 
   const originalDayStart = blocks[0].startMin
 
-  // Swap in the array order
+  // Remove and insert in the array order.
   const result = [...blocks]
-  ;[result[index], result[newIndex]] = [result[newIndex], result[index]]
+  const [moved] = result.splice(fromIndex, 1)
+  result.splice(toIndex, 0, moved)
 
   // Recompute startMin to preserve each block's gap-to-its-new-predecessor,
   // anchored on the day's original first start time (not the new first
@@ -217,6 +221,10 @@ export function moveBlock<T extends Schedulable>(blocks: T[], index: number, dir
     currentEnd = newStart + block.durationMin
     return { ...block, startMin: newStart }
   })
+}
+
+export function moveBlock<T extends Schedulable>(blocks: T[], index: number, direction: -1 | 1): T[] {
+  return moveBlockTo(blocks, index, index + direction)
 }
 
 /**

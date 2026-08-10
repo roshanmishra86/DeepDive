@@ -1,15 +1,12 @@
 import { useState, useEffect, useRef } from 'react'
 import { useTasksStore } from '../../stores/tasks'
-import { composeDueAt, decomposeDueAt } from '../../lib/week'
+import { composeDueAt, decomposeDueAt, MIN_ESTIMATE_HOURS, MAX_ESTIMATE_HOURS } from '../../lib/week'
 
 /**
  * The estimate is captured in hours (quarter-hour steps) but stored in
  * minutes — `Task.estimateMin` is what the scheduler and every other view
  * read, so the conversion lives here at the edge.
  */
-const MIN_ESTIMATE_HOURS = 0.25
-const MAX_ESTIMATE_HOURS = 24
-
 function minutesToHoursField(minutes: number | null | undefined): string {
   if (minutes === null || minutes === undefined) return ''
   // Two decimals covers quarter-hours exactly; trailing zeros are trimmed so
@@ -33,7 +30,6 @@ export function TaskEditor({ taskId, onClose }: TaskEditorProps) {
   const task = taskId ? tasks.find((t) => t.id === taskId) : null
 
   const [title, setTitle] = useState(task?.title || '')
-  const [notes, setNotes] = useState(task?.notes || '')
   const [important, setImportant] = useState(task?.important || false)
   const [urgent, setUrgent] = useState(task?.urgent || false)
   const initialDue = task?.dueAt ? decomposeDueAt(task.dueAt) : { date: '', time: '17:00' }
@@ -47,7 +43,6 @@ export function TaskEditor({ taskId, onClose }: TaskEditorProps) {
   useEffect(() => {
     if (task) {
       setTitle(task.title)
-      setNotes(task.notes)
       setImportant(task.important)
       setUrgent(task.urgent)
       const due = task.dueAt ? decomposeDueAt(task.dueAt) : { date: '', time: '17:00' }
@@ -56,7 +51,6 @@ export function TaskEditor({ taskId, onClose }: TaskEditorProps) {
       setEstimateHours(minutesToHoursField(task.estimateMin))
     } else {
       setTitle('')
-      setNotes('')
       setImportant(false)
       setUrgent(false)
       setDueDate('')
@@ -76,7 +70,7 @@ export function TaskEditor({ taskId, onClose }: TaskEditorProps) {
     }
     if (estimateHours) {
       const hours = Number.parseFloat(estimateHours)
-      if (!Number.isFinite(hours) || hours < MIN_ESTIMATE_HOURS || hours > MAX_ESTIMATE_HOURS) {
+      if (!Number.isFinite(hours) || hours < MIN_ESTIMATE_HOURS || hours > MAX_ESTIMATE_HOURS || Math.round(hours * 4) !== hours * 4) {
         setError(`Estimate must be between ${MIN_ESTIMATE_HOURS} and ${MAX_ESTIMATE_HOURS} hours`)
         return false
       }
@@ -101,7 +95,6 @@ export function TaskEditor({ taskId, onClose }: TaskEditorProps) {
         // Edit existing task
         await editTask(task.id, {
           title: title.trim(),
-          notes,
           important,
           urgent,
           dueAt,
@@ -111,7 +104,6 @@ export function TaskEditor({ taskId, onClose }: TaskEditorProps) {
         // Create new task
         await addTask({
           title: title.trim(),
-          notes,
           important,
           urgent,
           dueAt,
@@ -201,20 +193,6 @@ export function TaskEditor({ taskId, onClose }: TaskEditorProps) {
               value={title}
               onChange={(e) => setTitle(e.target.value)}
               placeholder="What needs to be done?"
-            />
-          </div>
-
-          <div className="task-editor-field">
-            <label htmlFor="task-notes" className="task-editor-label">
-              Notes
-            </label>
-            <textarea
-              id="task-notes"
-              className="task-editor-textarea"
-              value={notes}
-              onChange={(e) => setNotes(e.target.value)}
-              placeholder="Additional context…"
-              rows={3}
             />
           </div>
 

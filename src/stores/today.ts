@@ -4,7 +4,7 @@ import type { DayBlock, BlockRepeat } from '../db/types'
 import * as blocksRepo from '../db/repos/blocks'
 import * as notesRepo from '../db/repos/notes'
 import * as settingsRepo from '../db/repos/settings'
-import { nudge, moveBlock as moveBlockPure, sortBlocks, nextFreeStart, shiftFrom } from '../lib/today'
+import { nudge, moveBlockTo as moveBlockToPure, sortBlocks, nextFreeStart, shiftFrom } from '../lib/today'
 
 /**
  * Today's blocks store. Hydrates from the database via `day_block` table.
@@ -39,6 +39,7 @@ interface TodayState {
     fromMin?: number
     pomodoros?: number
     taskId?: number | null
+    subtaskId?: number | null
     note?: string
     repeat?: BlockRepeat
     trackId?: number | null
@@ -48,6 +49,8 @@ interface TodayState {
   editBlock: (id: number, patch: Partial<Omit<DayBlock, 'id' | 'day' | 'sort'>>, ripple?: boolean) => Promise<void>
   removeBlock: (id: number) => Promise<void>
   move: (id: number, direction: -1 | 1) => Promise<void>
+  moveTo: (id: number, targetIndex: number) => Promise<void>
+  saveBlockNote: (id: number, note: string) => Promise<boolean>
   toggleCompleted: (id: number) => Promise<void>
   // P2-A (PR review, stores/templates.ts): returns `true`/`false` rather
   // than throwing — never rejects, same as every other action in this
@@ -81,6 +84,7 @@ const PERSISTABLE_BLOCK_FIELDS: Record<keyof Omit<DayBlock, 'id' | 'day' | 'sort
   pomodoros: true,
   completed: true,
   taskId: true,
+  subtaskId: true,
   note: true,
   repeat: true,
   trackId: true,
@@ -150,6 +154,7 @@ export const useTodayStore = create<TodayState>()((set, get) => ({
       id: localId,
       day: state.day,
       taskId: input.taskId ?? null,
+      subtaskId: input.subtaskId ?? null,
       title: input.title,
       kind: input.kind,
       startMin,
@@ -173,6 +178,7 @@ export const useTodayStore = create<TodayState>()((set, get) => ({
         const realId = await blocksRepo.createBlock(driver, {
           day,
           taskId: input.taskId ?? null,
+          subtaskId: input.subtaskId ?? null,
           title: input.title,
           kind: input.kind,
           startMin,
@@ -294,15 +300,19 @@ export const useTodayStore = create<TodayState>()((set, get) => ({
 
   move: async (id, direction) => {
     const state = get()
+    const index = state.blocks.findIndex((b) => b.id === id)
+    if (index === -1) return
+    await get().moveTo(id, index + direction)
+  },
+
+  moveTo: async (id, targetIndex) => {
+    const state = get()
     if (!state.day) return
 
-    // state.blocks is kept in canonical order (see sortBlocks) by every
-    // mutation in this store, so this index matches what the timeline and
-    // its up/down controls display — moveBlockPure requires that.
     const index = state.blocks.findIndex((b) => b.id === id)
     if (index === -1) return
 
-    const moved = moveBlockPure(state.blocks, index, direction)
+    const moved = moveBlockToPure(state.blocks, index, targetIndex)
     if (moved === state.blocks) return // No-op at boundary
     // Stamp `sort` to match the final array position. moveBlockPure only
     // touches startMin, so without this the in-memory blocks would keep
@@ -319,23 +329,37 @@ export const useTodayStore = create<TodayState>()((set, get) => ({
       try {
         const driver = persistenceDriver
         const day = hydratedDay
-        // Persist only the startMin values that changed
         const changed = blocks.filter((b) => {
           const before = state.blocks.find((sb) => sb.id === b.id)
           return before !== undefined && before.startMin !== b.startMin
         })
-        for (const block of changed) {
-          await blocksRepo.updateBlock(driver, block.id, { startMin: block.startMin })
-        }
-        // Also update sort order to match the new canonical order
         const orderedIds = blocks.map((b) => b.id)
-        await blocksRepo.reorderBlocks(driver, day, orderedIds)
+        await blocksRepo.moveDayBlocksAtomic(
+          driver,
+          day,
+          changed.map((block) => ({ id: block.id, startMin: block.startMin })),
+          orderedIds
+        )
       } catch (err) {
         set((_s) => ({ error: err instanceof Error ? err.message : 'Reorder failed' }))
         console.error('Failed to persist move:', err)
         // Revert optimistic update
         set({ blocks: state.blocks })
       }
+    }
+  },
+
+  saveBlockNote: async (id, note) => {
+    const previous = get().blocks
+    if (!previous.some((block) => block.id === id)) return false
+    set({ blocks: previous.map((block) => block.id === id ? { ...block, note } : block) })
+    if (!persistenceDriver) return true
+    try {
+      await blocksRepo.updateBlock(persistenceDriver, id, { note })
+      return true
+    } catch (err) {
+      set({ blocks: previous, error: err instanceof Error ? err.message : 'Could not save block note' })
+      return false
     }
   },
 

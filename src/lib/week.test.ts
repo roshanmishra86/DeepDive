@@ -31,6 +31,9 @@ const makeTask = (
   done: false,
   createdAt: '2026-08-04T00:00:00.000Z',
   archived: false,
+  sort: 0,
+  completedAt: null,
+  archivedAt: null,
   ...overrides,
 })
 
@@ -55,26 +58,24 @@ describe('sortTasks', () => {
     expect(sorted[1].id).toBe(1)
   })
 
-  it('sorts by dueAt ascending within same done state', () => {
+  it('sorts by manual order within the same done state', () => {
     const tasks = [
       makeTask(1, { done: false, dueAt: due('2026-08-10') }),
       makeTask(2, { done: false, dueAt: due('2026-08-05') }),
       makeTask(3, { done: false, dueAt: due('2026-08-08') }),
     ]
     const sorted = sortTasks(tasks)
-    expect(sorted.map((t) => t.id)).toEqual([2, 3, 1])
+    expect(sorted.map((t) => t.id)).toEqual([1, 2, 3])
   })
 
-  it('puts tasks with null dueAt at the end', () => {
+  it('uses id as a stable tie-breaker when manual order is equal', () => {
     const tasks = [
       makeTask(1, { done: false, dueAt: null }),
       makeTask(2, { done: false, dueAt: due('2026-08-05') }),
       makeTask(3, { done: false, dueAt: null }),
     ]
     const sorted = sortTasks(tasks)
-    expect(sorted[0].id).toBe(2)
-    expect(sorted[1].id).toBe(1)
-    expect(sorted[2].id).toBe(3)
+    expect(sorted.map((task) => task.id)).toEqual([1, 2, 3])
   })
 
   it('breaks ties by id ascending', () => {

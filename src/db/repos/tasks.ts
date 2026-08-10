@@ -18,6 +18,9 @@ interface TaskRow {
   done: number
   created_at: string
   archived: number
+  sort: number
+  completed_at: string | null
+  archived_at: string | null
 }
 
 function rowToTask(row: TaskRow): Task {
@@ -32,6 +35,9 @@ function rowToTask(row: TaskRow): Task {
     done: row.done === 1,
     createdAt: row.created_at,
     archived: row.archived === 1,
+    sort: row.sort,
+    completedAt: row.completed_at,
+    archivedAt: row.archived_at,
   }
 }
 
@@ -41,8 +47,10 @@ export async function listTasks(
 ): Promise<Task[]> {
   const archived = options?.archived ?? false
   const rows = await driver.select<TaskRow>(
-    'SELECT * FROM task WHERE archived = ? ORDER BY created_at DESC',
-    [archived ? 1 : 0]
+    archived
+      ? 'SELECT * FROM task WHERE archived = 1 ORDER BY archived_at IS NULL, archived_at DESC, id ASC'
+      : 'SELECT * FROM task WHERE archived = 0 ORDER BY sort ASC, id ASC',
+    []
   )
   return rows.map(rowToTask)
 }
@@ -68,16 +76,10 @@ export async function createTask(
   }
 ): Promise<number> {
   const result = await driver.execute(
-    'INSERT INTO task (title, notes, important, urgent, due_at, estimate_min, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
-    [
-      input.title,
-      input.notes ?? '',
-      input.important ? 1 : 0,
-      input.urgent ? 1 : 0,
-      input.dueAt ?? null,
-      input.estimateMin ?? null,
-      input.createdAt,
-    ]
+    `INSERT INTO task (title, notes, important, urgent, due_at, estimate_min, created_at, sort)
+     VALUES (?, ?, ?, ?, ?, ?, ?, COALESCE((SELECT MAX(sort) + 1 FROM task WHERE archived = 0), 0))`,
+    [input.title, input.notes ?? '', input.important ? 1 : 0, input.urgent ? 1 : 0,
+      input.dueAt ?? null, input.estimateMin ?? null, input.createdAt]
   )
   return result.lastInsertId
 }
@@ -118,6 +120,18 @@ export async function updateTask(
     updates.push('done = ?')
     values.push(patch.done ? 1 : 0)
   }
+  if (patch.sort !== undefined) {
+    updates.push('sort = ?')
+    values.push(patch.sort)
+  }
+  if (patch.completedAt !== undefined) {
+    updates.push('completed_at = ?')
+    values.push(patch.completedAt)
+  }
+  if (patch.archivedAt !== undefined) {
+    updates.push('archived_at = ?')
+    values.push(patch.archivedAt)
+  }
 
   if (updates.length === 0) return
 
@@ -157,15 +171,60 @@ export async function setTaskFlags(
 export async function setTaskDone(
   driver: SqlDriver,
   id: number,
-  done: boolean
+  done: boolean,
+  completedAt: string | null = done ? new Date().toISOString() : null
 ): Promise<void> {
-  await driver.execute('UPDATE task SET done = ? WHERE id = ?', [done ? 1 : 0, id])
+  await driver.execute(
+    'UPDATE task SET done = ?, completed_at = ? WHERE id = ?',
+    [done ? 1 : 0, done ? completedAt : null, id]
+  )
 }
 
 export async function deleteTask(driver: SqlDriver, id: number): Promise<void> {
   await driver.execute('DELETE FROM task WHERE id = ?', [id])
 }
 
-export async function archiveTask(driver: SqlDriver, id: number): Promise<void> {
-  await driver.execute('UPDATE task SET archived = 1 WHERE id = ?', [id])
+export async function archiveTask(
+  driver: SqlDriver,
+  id: number,
+  archivedAt: string = new Date().toISOString()
+): Promise<boolean> {
+  const result = await driver.execute(
+    'UPDATE task SET archived = 1, archived_at = ? WHERE id = ? AND done = 1 AND archived = 0',
+    [archivedAt, id]
+  )
+  return result.rowsAffected > 0
+}
+
+export async function unarchiveTask(driver: SqlDriver, id: number): Promise<boolean> {
+  const result = await driver.execute(
+    `UPDATE task
+     SET archived = 0,
+         archived_at = NULL,
+         sort = COALESCE((SELECT MAX(sort) + 1 FROM task WHERE archived = 0), 0)
+     WHERE id = ? AND archived = 1`,
+    [id]
+  )
+  return result.rowsAffected > 0
+}
+
+export async function reorderTasksAtomic(
+  driver: SqlDriver,
+  orderedIds: number[],
+  flagPatch?: { id: number; important: boolean; urgent: boolean }
+): Promise<void> {
+  const statements = [] as { sql: string; params: unknown[] }[]
+  if (flagPatch) {
+    statements.push({
+      sql: 'UPDATE task SET important = ?, urgent = ? WHERE id = ? AND archived = 0',
+      params: [flagPatch.important ? 1 : 0, flagPatch.urgent ? 1 : 0, flagPatch.id],
+    })
+  }
+  statements.push(
+    ...orderedIds.map((id, index) => ({
+      sql: 'UPDATE task SET sort = ? WHERE id = ? AND archived = 0',
+      params: [index, id],
+    }))
+  )
+  await driver.transaction(statements)
 }

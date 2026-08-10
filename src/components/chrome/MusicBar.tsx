@@ -8,6 +8,7 @@ import { Play } from '@phosphor-icons/react/dist/csr/Play'
 import { Pause } from '@phosphor-icons/react/dist/csr/Pause'
 import { SpeakerHigh } from '@phosphor-icons/react/dist/csr/SpeakerHigh'
 import { Repeat } from '@phosphor-icons/react/dist/csr/Repeat'
+import { RepeatOnce } from '@phosphor-icons/react/dist/csr/RepeatOnce'
 
 /**
  * 66px footer. Renders the player store: real elapsed/duration times, a
@@ -29,7 +30,7 @@ export function MusicBar() {
   const seek = usePlayerStore((s) => s.seek)
   const next = usePlayerStore((s) => s.next)
   const prev = usePlayerStore((s) => s.prev)
-  const repeat = usePlayerStore((s) => s.repeat)
+  const repeatMode = usePlayerStore((s) => s.repeatMode)
   const toggleRepeat = usePlayerStore((s) => s.toggleRepeat)
   const queueLength = usePlayerStore((s) => s.queue.length)
   const setView = useAppStore((s) => s.setView)
@@ -120,14 +121,13 @@ export function MusicBar() {
             loaded track. */}
         <button
           type="button"
-          className={repeat ? 'musicbar-repeat musicbar-repeat-on' : 'musicbar-repeat'}
-          aria-label={repeat ? 'Repeat on' : 'Repeat off'}
-          aria-pressed={repeat}
-          title={repeat ? 'Repeat queue: on' : 'Repeat queue: off'}
+          className={repeatMode !== 'off' ? 'musicbar-repeat musicbar-repeat-on' : 'musicbar-repeat'}
+          aria-label={repeatMode === 'off' ? 'Repeat off' : repeatMode === 'queue' ? 'Repeat queue' : 'Repeat one'}
+          title={repeatMode === 'off' ? 'Repeat off' : repeatMode === 'queue' ? 'Repeat queue' : 'Repeat one'}
           onClick={toggleRepeat}
           data-testid="musicbar-repeat"
         >
-          <Repeat size={14} weight="bold" />
+          {repeatMode === 'one' ? <RepeatOnce size={14} weight="bold" /> : <Repeat size={14} weight="bold" />}
         </button>
         {queueLength > 0 && (
           <span className="musicbar-queue-count" title={`${queueLength} in queue`}>

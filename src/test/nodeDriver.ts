@@ -12,7 +12,7 @@ import type { SqlDriver, SqlResult } from '../db/driver'
 class NodeSqliteDriver implements SqlDriver {
   private db: DatabaseSync
 
-  constructor() {
+  constructor(maxMigration = Number.POSITIVE_INFINITY) {
     this.db = new DatabaseSync(':memory:')
     this.db.exec('PRAGMA foreign_keys = ON')
 
@@ -23,10 +23,14 @@ class NodeSqliteDriver implements SqlDriver {
       .filter((name) => name.endsWith('.sql'))
       .sort()
 
-    for (const file of migrationFiles) {
+    for (const file of migrationFiles.slice(0, maxMigration)) {
       const sql = readFileSync(join(migrationsDir, file), 'utf-8')
       this.db.exec(sql)
     }
+  }
+
+  applySql(sql: string): void {
+    this.db.exec(sql)
   }
 
   execute(sql: string, params?: unknown[]): Promise<SqlResult> {
@@ -75,10 +79,12 @@ class NodeSqliteDriver implements SqlDriver {
   }
 }
 
-export function createTestDb(): { driver: SqlDriver; close(): void } {
-  const driver = new NodeSqliteDriver()
+export function createTestDb(maxMigration?: number): { driver: SqlDriver; close(): void; applySql(sql: string): void } {
+  const nodeDriver = new NodeSqliteDriver(maxMigration)
+  const driver = nodeDriver
   return {
     driver,
+    applySql: (sql) => nodeDriver.applySql(sql),
     close: () => {
       // node:sqlite handles cleanup automatically
     },
