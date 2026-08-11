@@ -13,7 +13,7 @@ import {
   decomposeDueAt,
   QUADRANTS,
   DEADLINE_BUCKETS,
-} from './week'
+} from './todo'
 import { formatDuration } from './time'
 import type { Task } from '../db/types'
 

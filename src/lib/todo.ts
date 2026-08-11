@@ -1,5 +1,5 @@
 /**
- * Pure functions for This Week view logic. All functions are deterministic and
+ * Pure functions for the TODO (backlog) view logic. All functions are deterministic and
  * testable without DOM or React, using the node environment.
  *
  * Eisenhower matrix groups tasks by importance and urgency.

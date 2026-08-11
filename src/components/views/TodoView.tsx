@@ -1,13 +1,13 @@
 import { useEffect, useRef, useState } from 'react'
 import { useTasksStore } from '../../stores/tasks'
 import { openDatabase } from '../../db/index'
-import { groupByMatrix, groupByDeadline, QUADRANTS, DEADLINE_BUCKETS } from '../../lib/week'
+import { groupByMatrix, groupByDeadline, QUADRANTS, DEADLINE_BUCKETS } from '../../lib/todo'
 import type { Task } from '../../db/types'
-import { TaskRow } from '../week/TaskRow'
-import { TaskEditor } from '../week/TaskEditor'
+import { TaskRow } from '../todo/TaskRow'
+import { TaskEditor } from '../todo/TaskEditor'
 import { Plus } from '@phosphor-icons/react/dist/csr/Plus'
 
-export function WeekView() {
+export function TodoView() {
   const tasks = useTasksStore((s) => s.tasks)
   const groupBy = useTasksStore((s) => s.groupBy)
   const loading = useTasksStore((s) => s.loading)
@@ -87,8 +87,8 @@ export function WeekView() {
 
   if (loading) {
     return (
-      <div className="week-view">
-        <div className="week-body">
+      <div className="todo-view">
+        <div className="todo-body">
           <div className="view-empty">
             <div className="view-empty-title">Loading tasks…</div>
           </div>
@@ -99,8 +99,8 @@ export function WeekView() {
 
   if (error) {
     return (
-      <div className="week-view">
-        <div className="week-body">
+      <div className="todo-view">
+        <div className="todo-body">
           <div className="view-empty">
             <div className="view-empty-title" style={{ color: 'var(--danger)' }}>
               Error: {error}
@@ -112,17 +112,17 @@ export function WeekView() {
   }
 
   return (
-    <div className="week-view">
-      <div className="week-header">
+    <div className="todo-view">
+      <div className="todo-header">
         <div>
-          <h1 className="week-title">This week</h1>
-          <p className="week-subtitle">
-            A list to remember, not a schedule. Tag by urgency and importance, then pull what today can hold.
+          <h1 className="todo-title">TODO</h1>
+          <p className="todo-subtitle">
+            Capture everything. Organize by importance, add a tentative deadline, and break it down.
           </p>
         </div>
-        <div className="week-controls">
-          <div className="week-group-by">
-            <span className="week-group-label">Group by</span>
+        <div className="todo-controls">
+          <div className="todo-group-by">
+            <span className="todo-group-label">Group by</span>
             <div className="segmented-control">
               <button
                 type="button"
@@ -151,10 +151,10 @@ export function WeekView() {
         </div>
       </div>
 
-      <div className="week-body">
+      <div className="todo-body">
         {!hasAnyTasks ? (
-          <div className="week-empty">
-            <div className="week-empty-text">No tasks yet</div>
+          <div className="todo-empty">
+            <div className="todo-empty-text">No tasks yet</div>
             <button
               type="button"
               className="btn-accent"
@@ -164,7 +164,7 @@ export function WeekView() {
             </button>
           </div>
         ) : (
-          <div className="week-groups">
+          <div className="todo-groups">
             {groupBy === 'matrix'
               ? groupByMatrix(tasks).map((group) => {
                   const meta = QUADRANTS.find((q) => q.quadrant === group.quadrant)
@@ -172,13 +172,13 @@ export function WeekView() {
                   const isDrop = group.quadrant === 'drop'
 
                   return (
-                    <section key={group.quadrant} className="week-group">
-                      <div className="week-group-head">
-                        <span className="week-group-dot" style={{ backgroundColor: meta.dot }} />
-                        <h2 className="week-group-label">{meta.label}</h2>
+                    <section key={group.quadrant} className="todo-group">
+                      <div className="todo-group-head">
+                        <span className="todo-group-dot" style={{ backgroundColor: meta.dot }} />
+                        <h2 className="todo-group-label">{meta.label}</h2>
                       </div>
-                      <div className="week-group-rows" onDragOver={(event) => { if (group.tasks.length === 0) event.preventDefault() }} onDrop={(event) => { if (group.tasks.length === 0) { event.preventDefault(); void dropOn(group.quadrant, null) } }}>
-                        {group.tasks.length === 0 && draggingId !== null && <div className="week-empty-drop-zone">Drop here</div>}
+                      <div className="todo-group-rows" onDragOver={(event) => { if (group.tasks.length === 0) event.preventDefault() }} onDrop={(event) => { if (group.tasks.length === 0) { event.preventDefault(); void dropOn(group.quadrant, null) } }}>
+                        {group.tasks.length === 0 && draggingId !== null && <div className="todo-empty-drop-zone">Drop here</div>}
                         {group.tasks.map((task: Task) => (
                           <TaskRow
                             key={task.id}
@@ -206,13 +206,13 @@ export function WeekView() {
                   if (!meta) return null
 
                   return (
-                    <section key={group.bucket} className="week-group">
-                      <div className="week-group-head">
-                        <span className="week-group-dot" style={{ backgroundColor: meta.dot }} />
-                        <h2 className="week-group-label">{meta.label}</h2>
+                    <section key={group.bucket} className="todo-group">
+                      <div className="todo-group-head">
+                        <span className="todo-group-dot" style={{ backgroundColor: meta.dot }} />
+                        <h2 className="todo-group-label">{meta.label}</h2>
                       </div>
-                      <div className="week-group-rows" onDragOver={(event) => { if (group.tasks.length === 0) { event.preventDefault(); hoverDeadline(group.bucket) } }} onDrop={(event) => { if (group.tasks.length === 0) { event.preventDefault(); void dropOn(group.bucket, null) } }}>
-                        {group.tasks.length === 0 && draggingId !== null && <div className="week-empty-drop-zone">Drop here</div>}
+                      <div className="todo-group-rows" onDragOver={(event) => { if (group.tasks.length === 0) { event.preventDefault(); hoverDeadline(group.bucket) } }} onDrop={(event) => { if (group.tasks.length === 0) { event.preventDefault(); void dropOn(group.bucket, null) } }}>
+                        {group.tasks.length === 0 && draggingId !== null && <div className="todo-empty-drop-zone">Drop here</div>}
                         {group.tasks.map((task: Task) => (
                           <TaskRow
                             key={task.id}
@@ -237,9 +237,9 @@ export function WeekView() {
           </div>
         )}
 
-        {dropHint && <div className="week-drag-hint" role="status">{dropHint}</div>}
+        {dropHint && <div className="todo-drag-hint" role="status">{dropHint}</div>}
 
-        <div className="week-footer">
+        <div className="todo-footer">
           Tags decide the quadrant. Nothing here is scheduled — blocks only exist for today.
         </div>
       </div>

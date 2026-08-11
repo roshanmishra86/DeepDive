@@ -2392,8 +2392,8 @@ button:focus-visible {
   }
 }
 
-/* ─── This Week (task list) ─── */
-.week-view {
+/* ─── TODO (task backlog) ─── */
+.todo-view {
   flex: 1;
   min-height: 0;
   display: flex;
@@ -2401,7 +2401,7 @@ button:focus-visible {
   overflow: hidden;
 }
 
-.week-header {
+.todo-header {
   padding: 22px 30px 14px;
   border-bottom: 1px solid var(--border-subtle);
   display: flex;
@@ -2410,7 +2410,7 @@ button:focus-visible {
   gap: 20px;
 }
 
-.week-title {
+.todo-title {
   font-family: var(--font-display);
   font-size: 29px;
   line-height: 1.05;
@@ -2419,27 +2419,27 @@ button:focus-visible {
   padding: 0;
 }
 
-.week-subtitle {
+.todo-subtitle {
   font-size: 12.5px;
   color: var(--text-muted);
   margin-top: 5px;
   margin: 5px 0 0 0;
 }
 
-.week-controls {
+.todo-controls {
   display: flex;
   align-items: center;
   gap: 16px;
   flex: none;
 }
 
-.week-group-by {
+.todo-group-by {
   display: flex;
   align-items: center;
   gap: 9px;
 }
 
-.week-group-label {
+.todo-group-label {
   font-size: 11.5px;
   color: var(--text-muted);
 }
@@ -2479,7 +2479,7 @@ button:focus-visible {
   gap: 6px;
 }
 
-.week-body {
+.todo-body {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
@@ -2489,7 +2489,7 @@ button:focus-visible {
   gap: 22px;
 }
 
-.week-empty {
+.todo-empty {
   flex: 1;
   display: flex;
   flex-direction: column;
@@ -2498,38 +2498,38 @@ button:focus-visible {
   gap: 16px;
 }
 
-.week-empty-text {
+.todo-empty-text {
   font-size: 14px;
   color: var(--text-muted);
 }
 
-.week-groups {
+.todo-groups {
   display: flex;
   flex-direction: column;
   gap: 22px;
 }
 
-.week-group {
+.todo-group {
   display: flex;
   flex-direction: column;
   gap: 22px;
 }
 
-.week-group-head {
+.todo-group-head {
   display: flex;
   align-items: center;
   gap: 9px;
   margin-bottom: 10px;
 }
 
-.week-group-dot {
+.todo-group-dot {
   width: 7px;
   height: 7px;
   border-radius: 2px;
   flex: none;
 }
 
-.week-group-label {
+.todo-group-label {
   font-size: 10px;
   letter-spacing: 0.14em;
   text-transform: uppercase;
@@ -2539,7 +2539,7 @@ button:focus-visible {
   padding: 0;
 }
 
-.week-group-rows {
+.todo-group-rows {
   display: flex;
   flex-direction: column;
   gap: 6px;
@@ -2706,7 +2706,7 @@ button:focus-visible {
   padding: 4px 6px;
 }
 
-.week-footer {
+.todo-footer {
   border-top: 1px solid var(--border-subtle);
   padding-top: 16px;
   font-size: 12.5px;
@@ -4156,8 +4156,8 @@ button:focus-visible {
 .task-drag-handle:active, .timeline-drag-handle:active { cursor: grabbing; }
 .task-order-btn { width: 22px; height: 22px; padding: 0; font-size: 12px; }
 .task-row-drag-target { outline: 1px dashed var(--accent); outline-offset: 2px; }
-.week-empty-drop-zone { padding: 14px; border: 1px dashed var(--accent); color: var(--accent); text-align: center; font-size: 12px; }
-.week-drag-hint { margin-top: 12px; padding: 9px 12px; background: var(--bg-card); border-left: 2px solid var(--warn); color: var(--text-muted); font-size: 12px; }
+.todo-empty-drop-zone { padding: 14px; border: 1px dashed var(--accent); color: var(--accent); text-align: center; font-size: 12px; }
+.todo-drag-hint { margin-top: 12px; padding: 9px 12px; background: var(--bg-card); border-left: 2px solid var(--warn); color: var(--text-muted); font-size: 12px; }
 .today-drag-preview { margin-top: 5px; color: var(--accent); font-size: 11px; }
 .timeline-block-drag-target { border-color: var(--accent); box-shadow: inset 0 3px 0 var(--accent); }
 .timeline-block-drag-target::after { content: 'Drop here'; position: absolute; top: 5px; right: 8px; color: var(--accent); font-family: var(--font-mono); font-size: 9px; letter-spacing: .05em; }

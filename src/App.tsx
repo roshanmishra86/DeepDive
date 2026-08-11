@@ -20,14 +20,30 @@ import { MusicBar } from './components/chrome/MusicBar'
 import { SettingsPanel } from './components/chrome/SettingsPanel'
 import { SessionOverlay } from './components/chrome/SessionOverlay'
 import { TodayView } from './components/views/TodayView'
-import { WeekView } from './components/views/WeekView'
+import { TodoView } from './components/views/TodoView'
+import { ViewPlaceholder } from './components/views/ViewPlaceholder'
 import { TemplatesView } from './components/views/TemplatesView'
 import { ArchiveView } from './components/views/ArchiveView'
 import { LibraryView } from './components/views/LibraryView'
 
+/**
+ * The `week` slot stays on a placeholder until the This Week calendar lands
+ * (the redesign's Phase 8) — every other view is independently shippable.
+ */
+function WeekPlanPlaceholder() {
+  return (
+    <ViewPlaceholder
+      title="This Week"
+      subtitle="A Monday–Sunday calendar of real time blocks, with weekly analytics."
+      phase="the This Week phase"
+    />
+  )
+}
+
 const VIEWS = {
   today: TodayView,
-  week: WeekView,
+  todo: TodoView,
+  week: WeekPlanPlaceholder,
   templates: TemplatesView,
   archive: ArchiveView,
   library: LibraryView,

@@ -16,8 +16,8 @@ import { ArchiveView } from '../../components/views/ArchiveView'
 import { MusicBar } from '../../components/chrome/MusicBar'
 import { PlanPanel } from '../../components/plan/PlanPanel'
 import { TodayView } from '../../components/views/TodayView'
-import { TaskRow } from '../../components/week/TaskRow'
-import { SubtaskList } from '../../components/week/SubtaskList'
+import { TaskRow } from '../../components/todo/TaskRow'
+import { SubtaskList } from '../../components/todo/SubtaskList'
 import { DEFAULT_ACCENT } from '../../lib/accents'
 
 const dbMock = vi.hoisted(() => ({ driver: null as ReturnType<typeof createTestDb>['driver'] | null }))

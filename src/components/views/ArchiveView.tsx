@@ -7,10 +7,10 @@ import { MonthCalendar } from '../archive/MonthCalendar'
 import { DeepHoursHistogram } from '../archive/DeepHoursHistogram'
 import { DayRecordPane } from '../archive/DayRecordPane'
 import { useTasksStore } from '../../stores/tasks'
-import { SubtaskList } from '../week/SubtaskList'
+import { SubtaskList } from '../todo/SubtaskList'
 import { NotePencil } from '@phosphor-icons/react/dist/csr/NotePencil'
 import { ArrowUUpLeft } from '@phosphor-icons/react/dist/csr/ArrowUUpLeft'
-import { effectiveTaskEstimate } from '../../lib/week'
+import { effectiveTaskEstimate } from '../../lib/todo'
 import { formatDuration } from '../../lib/time'
 import { ConfirmActionModal } from '../common/ConfirmActionModal'
 
@@ -155,7 +155,7 @@ export function ArchiveView() {
       {restoreTask && (
         <ConfirmActionModal
           title={`Restore "${restoreTask.title}"?`}
-          description="This returns the completed task to This Week. Its completion time and plan will be preserved."
+          description="This returns the completed task to TODO. Its completion time and plan will be preserved."
           confirmLabel="Restore task"
           destructive={false}
           onCancel={() => setRestoreTaskId(null)}

@@ -49,7 +49,7 @@ import { SessionOverlay } from '../../components/chrome/SessionOverlay'
  * to return a seeded node driver and thereby exercise the REAL query path
  * (hasAnyRecords, headlineStats, dayStatuses, dayRecord). The error test
  * makes the mocked openDatabase reject, landing in ArchiveView's own catch
- * (the same setState error contract TodayView/WeekView use).
+ * (the same setState error contract TodayView/TodoView use).
  */
 const dbMock = vi.hoisted(() => ({
   driver: null as SqlDriver | null,

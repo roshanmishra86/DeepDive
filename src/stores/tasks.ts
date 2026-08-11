@@ -3,7 +3,7 @@ import type { SqlDriver } from '../db/driver'
 import type { Subtask, Task } from '../db/types'
 import * as tasksRepo from '../db/repos/tasks'
 import * as subtasksRepo from '../db/repos/subtasks'
-import { groupByDeadline, groupByMatrix, type DeadlineBucket, type Quadrant, sortTasks } from '../lib/week'
+import { groupByDeadline, groupByMatrix, type DeadlineBucket, type Quadrant, sortTasks } from '../lib/todo'
 
 type TaskEdit = Partial<Omit<Task, 'id' | 'createdAt' | 'archived'>>
 type TaskDestination = { group: Quadrant | DeadlineBucket; beforeId: number | null }

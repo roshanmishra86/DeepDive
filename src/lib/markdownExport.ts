@@ -1,5 +1,5 @@
 import type { Subtask, Task } from '../db/types'
-import { effectiveTaskEstimate } from './week'
+import { effectiveTaskEstimate } from './todo'
 import { formatDuration } from './time'
 
 export const NOTES_START = '<!-- deep-work:notes:start -->'

@@ -7,6 +7,7 @@ import { toDayKey, startOfWeek, splitDeepHours } from '../../lib/time'
 import { Clock } from '@phosphor-icons/react/dist/csr/Clock'
 import { CalendarBlank } from '@phosphor-icons/react/dist/csr/CalendarBlank'
 import { Cards } from '@phosphor-icons/react/dist/csr/Cards'
+import { ListChecks } from '@phosphor-icons/react/dist/csr/ListChecks'
 import { Archive } from '@phosphor-icons/react/dist/csr/Archive'
 import { MusicNotes } from '@phosphor-icons/react/dist/csr/MusicNotes'
 import { Gear } from '@phosphor-icons/react/dist/csr/Gear'
@@ -24,6 +25,11 @@ const NAV_ITEMS: { view: View; label: string; icon: ReactElement }[] = [
     view: 'week',
     label: 'This Week',
     icon: <CalendarBlank size={14} />,
+  },
+  {
+    view: 'todo',
+    label: 'TODO',
+    icon: <ListChecks size={14} />,
   },
   {
     view: 'templates',

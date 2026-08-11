@@ -8,7 +8,7 @@ import {
 } from '../../stores/timer'
 import { formatClock } from '../../lib/time'
 import { activeWorkBlock, displayPomodoroTarget, isFreshCycle } from '../../lib/timer'
-import { upcomingTasks, taskMeta } from '../../lib/week'
+import { upcomingTasks, taskMeta } from '../../lib/todo'
 import { ArrowCounterClockwise } from '@phosphor-icons/react/dist/csr/ArrowCounterClockwise'
 import { X } from '@phosphor-icons/react/dist/csr/X'
 
@@ -215,7 +215,7 @@ export function RightRail() {
       <div className="rail-scroll">
         <div className="rail-upcoming-head">
           <span className="rail-label">Upcoming this week</span>
-          <button type="button" className="rail-all" onClick={() => setView('week')}>
+          <button type="button" className="rail-all" onClick={() => setView('todo')}>
             All
           </button>
         </div>

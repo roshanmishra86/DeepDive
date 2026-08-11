@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { useTasksStore } from '../../stores/tasks'
-import { composeDueAt, decomposeDueAt, MIN_ESTIMATE_HOURS, MAX_ESTIMATE_HOURS } from '../../lib/week'
+import { composeDueAt, decomposeDueAt, MIN_ESTIMATE_HOURS, MAX_ESTIMATE_HOURS } from '../../lib/todo'
 
 /**
  * The estimate is captured in hours (quarter-hour steps) but stored in

@@ -3,7 +3,9 @@ import type { SqlDriver } from '../db/driver'
 import { ACCENTS, DEFAULT_ACCENT, type AccentKey } from '../lib/accents'
 import * as settingsRepo from '../db/repos/settings'
 
-export type View = 'today' | 'week' | 'templates' | 'archive' | 'library'
+// 'todo' is the Eisenhower backlog (formerly the 'week' view); 'week' is the
+// Mon–Sun calendar of real time blocks.
+export type View = 'today' | 'todo' | 'week' | 'templates' | 'archive' | 'library'
 export type TimerStyle = 'ring' | 'numeric' | 'bar'
 export type RepeatStyle = 'chip' | 'icon' | 'none'
 export type PlanTarget =

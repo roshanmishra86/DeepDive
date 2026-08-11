@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import type { Subtask, Task } from '../../db/types'
-import { blockDraftFromSubtask, effectiveTaskEstimate, remainingSubtaskEstimate } from '../../lib/week'
+import { blockDraftFromSubtask, effectiveTaskEstimate, remainingSubtaskEstimate } from '../../lib/todo'
 import { formatDuration, minutesToClock } from '../../lib/time'
 import { insertIdBefore } from '../../lib/dragList'
 import { useDragList } from '../common/useDragList'

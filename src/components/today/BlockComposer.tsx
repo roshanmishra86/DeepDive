@@ -571,7 +571,7 @@ export function BlockComposer({ blockId, startMin: startMinProp, onDone }: Block
             </div>
             <div className="composer-alert-actions">
               <button type="button" className="btn-primary" onClick={handleAddToThisWeek}>
-                Add to This Week
+                Add to TODO
               </button>
               {canShorten && (
                 <button type="button" className="btn-secondary" onClick={handleShorten}>
