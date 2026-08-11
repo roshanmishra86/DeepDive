@@ -108,8 +108,8 @@ describe('task planning release flows', () => {
     })
 
     expect(textarea.value).toBe('new local keystrokes')
-    expect(screen.getByRole('button', { name: 'Import Markdown' })).toBeDisabled()
-    expect(screen.getByRole('button', { name: 'Export Markdown' })).toBeDisabled()
+    expect((screen.getByRole('button', { name: 'Import Markdown' }) as HTMLButtonElement).disabled).toBe(true)
+    expect((screen.getByRole('button', { name: 'Export Markdown' }) as HTMLButtonElement).disabled).toBe(true)
   })
 
   it('exposes week ordering buttons as the keyboard-accessible alternative to drag', () => {
@@ -156,9 +156,11 @@ describe('task planning release flows', () => {
     expect(await screen.findByRole('dialog', { name: 'Schedule Research' })).toBeDefined()
     fireEvent.click(screen.getByRole('button', { name: 'Add to today' }))
 
-    await vi.waitFor(() => expect(useTodayStore.getState().blocks).toHaveLength(1))
+    await vi.waitFor(() => {
+      expect(useTodayStore.getState().blocks).toHaveLength(1)
+      expect(useAppStore.getState().view).toBe('today')
+    })
     expect(useTodayStore.getState().blocks[0]).toMatchObject({ taskId, subtaskId })
-    expect(useAppStore.getState().view).toBe('today')
   })
 
   it('uses accessible repeat labels for every repeat mode', () => {

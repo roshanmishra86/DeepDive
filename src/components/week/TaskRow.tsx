@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useTasksStore } from '../../stores/tasks'
 import { useTodayStore } from '../../stores/today'
 import { useAppStore } from '../../stores/app'
-import type { Task } from '../../db/types'
+import type { Subtask, Task } from '../../db/types'
 import { taskMeta, blockDraftFromTask } from '../../lib/week'
 import { Trash } from '@phosphor-icons/react/dist/csr/Trash'
 import { Pencil } from '@phosphor-icons/react/dist/csr/Pencil'
@@ -27,6 +27,8 @@ interface TaskRowProps {
   canMoveDown?: boolean
 }
 
+const NO_SUBTASKS: Subtask[] = []
+
 export function TaskRow({ task, isDrop = false, onEdit, now, onDragStart, onDragOver, onDrop, onDragEnd, dragTarget = false, onMoveUp, onMoveDown, canMoveUp = false, canMoveDown = false }: TaskRowProps) {
   const toggleImportant = useTasksStore((s) => s.toggleImportant)
   const toggleUrgent = useTasksStore((s) => s.toggleUrgent)
@@ -40,7 +42,7 @@ export function TaskRow({ task, isDrop = false, onEdit, now, onDragStart, onDrag
   const [deleteConfirm, setDeleteConfirm] = useState(false)
   const [shutdownWarning, setShutdownWarning] = useState<string | null>(null)
 
-  const loadedSubtasks = useTasksStore((s) => s.subtasksByTask[task.id] ?? [])
+  const loadedSubtasks = useTasksStore((s) => s.subtasksByTask[task.id] ?? NO_SUBTASKS)
   const meta = taskMeta(task, now, loadedSubtasks)
   const isPlanned = blocks.some((b) => b.taskId === task.id)
 

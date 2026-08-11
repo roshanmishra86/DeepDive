@@ -10,8 +10,11 @@ import { useTasksStore } from '../../stores/tasks'
 import { useTodayStore } from '../../stores/today'
 import { exportTaskMarkdown, importMarkdownNotes, markdownFilename } from '../../lib/markdownExport'
 import { isTauri } from '../../lib/platform'
+import type { Subtask } from '../../db/types'
 
 type SaveState = 'Saved' | 'Saving…' | 'Save failed'
+
+const NO_SUBTASKS: Subtask[] = []
 
 export function PlanPanel() {
   const target = useAppStore((state) => state.planTarget)
@@ -19,7 +22,7 @@ export function PlanPanel() {
   const task = useTasksStore((state) => target?.kind === 'task'
     ? state.tasks.find((item) => item.id === target.id) ?? state.archivedTasks.find((item) => item.id === target.id) ?? null
     : null)
-  const subtasks = useTasksStore((state) => target?.kind === 'task' ? state.subtasksByTask[target.id] ?? [] : [])
+  const subtasks = useTasksStore((state) => target?.kind === 'task' ? state.subtasksByTask[target.id] ?? NO_SUBTASKS : NO_SUBTASKS)
   const loadSubtasks = useTasksStore((state) => state.loadSubtasks)
   const saveTaskNotes = useTasksStore((state) => state.saveTaskNotes)
   const blocks = useTodayStore((state) => state.blocks)

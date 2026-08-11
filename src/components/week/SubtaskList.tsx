@@ -23,6 +23,8 @@ function hoursLabel(minutes: number): string {
   return `${(minutes / 60).toFixed(2).replace(/\.00$/, '')}h`
 }
 
+const NO_SUBTASKS: Subtask[] = []
+
 export function SubtaskList({ task, now }: SubtaskListProps) {
   const [expanded, setExpanded] = useState(false)
   const [title, setTitle] = useState('')
@@ -32,7 +34,7 @@ export function SubtaskList({ task, now }: SubtaskListProps) {
   const [scheduleError, setScheduleError] = useState<string | null>(null)
   const [deleteSubtaskId, setDeleteSubtaskId] = useState<number | null>(null)
   const titleTimers = useRef(new Map<number, ReturnType<typeof setTimeout>>())
-  const subtasks = useTasksStore((state) => state.subtasksByTask[task.id] ?? [])
+  const subtasks = useTasksStore((state) => state.subtasksByTask[task.id] ?? NO_SUBTASKS)
   const hasLoadedSubtasks = useTasksStore((state) => Object.hasOwn(state.subtasksByTask, task.id))
   const loading = useTasksStore((state) => state.subtaskLoading[task.id] ?? false)
   const error = useTasksStore((state) => state.subtaskError[task.id] ?? null)
