@@ -265,6 +265,45 @@ describe('blocks repository', () => {
     expect(block?.quiet).toBe(true)
   })
 
+  it('round-trips noteUpdatedAt, and updateBlock persists it alongside note', async () => {
+    const day = '2026-08-17'
+    const id = await blocks.createBlock(driver, {
+      day,
+      title: 'Noted block',
+      kind: 'deep',
+      startMin: 300,
+      durationMin: 90,
+      note: 'First draft',
+      noteUpdatedAt: '2026-08-17T09:00:00.000Z',
+    })
+
+    let block = (await blocks.listBlocksForDay(driver, day)).find((b) => b.id === id)
+    expect(block?.noteUpdatedAt).toBe('2026-08-17T09:00:00.000Z')
+
+    await blocks.updateBlock(driver, id, {
+      note: 'Second draft',
+      noteUpdatedAt: '2026-08-17T10:30:00.000Z',
+    })
+
+    block = (await blocks.listBlocksForDay(driver, day)).find((b) => b.id === id)
+    expect(block?.note).toBe('Second draft')
+    expect(block?.noteUpdatedAt).toBe('2026-08-17T10:30:00.000Z')
+  })
+
+  it('defaults noteUpdatedAt to null when not provided', async () => {
+    const day = '2026-08-18'
+    const id = await blocks.createBlock(driver, {
+      day,
+      title: 'Unnoted block',
+      kind: 'shallow',
+      startMin: 300,
+      durationMin: 30,
+    })
+
+    const block = (await blocks.listBlocksForDay(driver, day)).find((b) => b.id === id)
+    expect(block?.noteUpdatedAt).toBeNull()
+  })
+
   it('enforces the repeat CHECK constraint at the SQL boundary', async () => {
     const day = '2026-08-15'
     let error: unknown = null

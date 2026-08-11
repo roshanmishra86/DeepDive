@@ -499,6 +499,7 @@ function makeCandidate(id: number, overrides: Partial<DayBlock> = {}): DayBlock 
     completed: false,
     sort: 0,
     note: '',
+    noteUpdatedAt: null,
     repeat: 'once',
     trackId: null,
     quiet: false,

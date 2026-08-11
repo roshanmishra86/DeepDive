@@ -21,6 +21,7 @@ export interface BlockRow {
   completed: number
   sort: number
   note: string
+  note_updated_at: string | null
   repeat: BlockRepeat
   track_id: number | null
   quiet: number
@@ -40,6 +41,7 @@ export function rowToBlock(row: BlockRow): DayBlock {
     completed: row.completed === 1,
     sort: row.sort,
     note: row.note,
+    noteUpdatedAt: row.note_updated_at,
     repeat: row.repeat,
     trackId: row.track_id,
     quiet: row.quiet === 1,
@@ -75,13 +77,14 @@ export async function createBlock(
     pomodoros?: number
     sort?: number
     note?: string
+    noteUpdatedAt?: string | null
     repeat?: BlockRepeat
     trackId?: number | null
     quiet?: boolean
   }
 ): Promise<number> {
   const result = await driver.execute(
-    'INSERT INTO day_block (day, task_id, subtask_id, title, kind, start_min, duration_min, pomodoros, sort, note, "repeat", track_id, quiet) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+    'INSERT INTO day_block (day, task_id, subtask_id, title, kind, start_min, duration_min, pomodoros, sort, note, note_updated_at, "repeat", track_id, quiet) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
     [
       block.day,
       block.taskId ?? null,
@@ -93,6 +96,7 @@ export async function createBlock(
       block.pomodoros ?? 0,
       block.sort ?? 0,
       block.note ?? '',
+      block.noteUpdatedAt ?? null,
       block.repeat ?? 'once',
       block.trackId ?? null,
       block.quiet ? 1 : 0,
@@ -148,6 +152,12 @@ export async function updateBlock(
   if (patch.note !== undefined) {
     updates.push('note = ?')
     values.push(patch.note)
+  }
+  // Written alongside `note` in the same UPDATE — never as a separate statement,
+  // or a crash between the two makes "Last edited" describe the wrong revision.
+  if (patch.noteUpdatedAt !== undefined) {
+    updates.push('note_updated_at = ?')
+    values.push(patch.noteUpdatedAt)
   }
   if (patch.repeat !== undefined) {
     updates.push('"repeat" = ?')

@@ -26,6 +26,7 @@ const makeTask = (
   notes: '',
   important: false,
   urgent: false,
+  priority: 'medium',
   dueAt: null,
   estimateMin: null,
   done: false,

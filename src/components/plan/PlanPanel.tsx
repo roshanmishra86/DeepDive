@@ -74,7 +74,7 @@ export function PlanPanel() {
     writeChain.current = writeChain.current.then(async () => {
       const ok = targetAtRevision.kind === 'task'
         ? await saveTaskNotes(targetAtRevision.id, notes)
-        : await saveBlockNote(targetAtRevision.id, notes)
+        : await saveBlockNote(targetAtRevision.id, notes, new Date().toISOString())
       if (ok) {
         savedRevision.current = Math.max(savedRevision.current, rev)
         if (rev === revision.current) setSaveState('Saved')

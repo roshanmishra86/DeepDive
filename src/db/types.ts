@@ -13,6 +13,9 @@ export type SessionPhase = 'focus' | 'rest'
 export type DayStatus = 'full' | 'part' | 'miss' | 'note'
 export type BlockRepeat = 'once' | 'daily' | 'weekdays'
 export type RepeatMode = 'off' | 'queue' | 'one'
+// Backfilled once from the important/urgent quadrant by migration 0006, then
+// edited independently — moving a task between quadrants must not rewrite it.
+export type TaskPriority = 'high' | 'medium' | 'low'
 
 export interface Task {
   id: number
@@ -20,6 +23,7 @@ export interface Task {
   notes: string
   important: boolean
   urgent: boolean
+  priority: TaskPriority
   dueAt: string | null
   estimateMin: number | null
   done: boolean
@@ -38,6 +42,7 @@ export interface Subtask {
   done: boolean
   sort: number
   createdAt: string
+  dueAt: string | null
 }
 
 export interface DayBlock {
@@ -53,6 +58,8 @@ export interface DayBlock {
   completed: boolean
   sort: number
   note: string
+  // NULL until the note is first edited. Written in the same UPDATE as `note`.
+  noteUpdatedAt: string | null
   repeat: BlockRepeat
   trackId: number | null
   quiet: boolean

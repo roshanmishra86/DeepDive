@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import type { SqlDriver } from '../db/driver'
-import type { Subtask, Task } from '../db/types'
+import type { Subtask, Task, TaskPriority } from '../db/types'
 import * as tasksRepo from '../db/repos/tasks'
 import * as subtasksRepo from '../db/repos/subtasks'
 import { groupByDeadline, groupByMatrix, type DeadlineBucket, type Quadrant, sortTasks } from '../lib/todo'
@@ -27,6 +27,7 @@ interface TasksState {
     notes?: string
     important?: boolean
     urgent?: boolean
+    priority?: TaskPriority
     dueAt?: string | null
     estimateMin?: number | null
   }) => Promise<number | null>
@@ -40,8 +41,8 @@ interface TasksState {
   moveTask: (id: number, destination: TaskDestination) => Promise<boolean>
   saveTaskNotes: (id: number, notes: string) => Promise<boolean>
   loadSubtasks: (taskId: number) => Promise<void>
-  createSubtask: (input: { taskId: number; title: string; estimateMin: number; createdAt?: string }) => Promise<number | null>
-  updateSubtask: (id: number, taskId: number, patch: { title?: string; estimateMin?: number }) => Promise<boolean>
+  createSubtask: (input: { taskId: number; title: string; estimateMin: number; createdAt?: string; dueAt?: string | null }) => Promise<number | null>
+  updateSubtask: (id: number, taskId: number, patch: { title?: string; estimateMin?: number; dueAt?: string | null }) => Promise<boolean>
   setSubtaskDone: (id: number, taskId: number, done: boolean) => Promise<boolean>
   deleteSubtask: (id: number, taskId: number) => Promise<boolean>
   reorderSubtasks: (taskId: number, orderedIds: number[]) => Promise<boolean>
@@ -74,11 +75,15 @@ export const useTasksStore = create<TasksState>()((set, get) => {
     }
     try {
       const rows = await tasksRepo.listTasks(persistenceDriver, { archived })
+      // Bulk-load subtasks for BOTH branches. Active tasks used to arrive with
+      // no subtasks at all, leaving inline subtask rows and the right rail's
+      // "≈Xh left" rollup silently incomplete until the per-task lazy
+      // loadSubtasks fired. That lazy path stays as the archive/edge fallback.
+      const subtasks = await subtasksRepo.listSubtasksForTasks(persistenceDriver, rows.map((task) => task.id))
+      const byTask = new Map<number, Subtask[]>()
+      for (const task of rows) byTask.set(task.id, [])
+      for (const subtask of subtasks) byTask.get(subtask.taskId)?.push(subtask)
       if (archived) {
-        const subtasks = await subtasksRepo.listSubtasksForTasks(persistenceDriver, rows.map((task) => task.id))
-        const byTask = new Map<number, Subtask[]>()
-        for (const task of rows) byTask.set(task.id, [])
-        for (const subtask of subtasks) byTask.get(subtask.taskId)?.push(subtask)
         set((state) => ({
           archivedTasks: rows,
           loadingArchived: false,
@@ -88,7 +93,14 @@ export const useTasksStore = create<TasksState>()((set, get) => {
           },
         }))
       } else {
-        set({ tasks: sortTasks(rows), loading: false })
+        set((state) => ({
+          tasks: sortTasks(rows),
+          loading: false,
+          subtasksByTask: {
+            ...state.subtasksByTask,
+            ...Object.fromEntries(byTask),
+          },
+        }))
       }
     } catch (err) {
       set({ [loadingKey]: false, [errorKey]: messageFor(err, 'Could not load tasks') } as Partial<TasksState>)
@@ -123,6 +135,7 @@ export const useTasksStore = create<TasksState>()((set, get) => {
         notes: input.notes ?? '',
         important: input.important ?? false,
         urgent: input.urgent ?? false,
+        priority: input.priority ?? 'medium',
         dueAt: input.dueAt ?? null,
         estimateMin: input.estimateMin ?? null,
         done: false,
@@ -313,7 +326,7 @@ export const useTasksStore = create<TasksState>()((set, get) => {
         const id = persistenceDriver
           ? await subtasksRepo.createSubtask(persistenceDriver, { ...input, createdAt: input.createdAt ?? new Date().toISOString() })
           : nextLocalSubtaskId--
-        const created: Subtask = { id, taskId: input.taskId, title: input.title.trim(), estimateMin: input.estimateMin, done: false, sort: (get().subtasksByTask[input.taskId] ?? []).length, createdAt: input.createdAt ?? new Date().toISOString() }
+        const created: Subtask = { id, taskId: input.taskId, title: input.title.trim(), estimateMin: input.estimateMin, done: false, sort: (get().subtasksByTask[input.taskId] ?? []).length, createdAt: input.createdAt ?? new Date().toISOString(), dueAt: input.dueAt ?? null }
         set((state) => ({ subtasksByTask: { ...state.subtasksByTask, [input.taskId]: [...(state.subtasksByTask[input.taskId] ?? []), created] } }))
         return id
       } catch (err) {

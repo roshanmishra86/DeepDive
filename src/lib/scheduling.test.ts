@@ -15,6 +15,7 @@ const block = (id: number, startMin: number, durationMin: number): DayBlock => (
   completed: false,
   sort: id,
   note: '',
+  noteUpdatedAt: null,
   repeat: 'once',
   trackId: null,
   quiet: false,

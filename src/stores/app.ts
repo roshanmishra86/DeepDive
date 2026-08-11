@@ -13,6 +13,9 @@ export type PlanTarget =
   | { kind: 'block'; id: number }
   | null
 
+// 20 h of planned deep work per week — matches migration 0006's seeded value.
+export const DEFAULT_WEEKLY_GOAL_MIN = 1200
+
 // Module-level driver reference for persistence callbacks
 let persistenceDriver: SqlDriver | null = null
 let planFlush: (() => Promise<boolean>) | null = null
@@ -39,6 +42,7 @@ interface AppState {
   accent: AccentKey
   timerStyle: TimerStyle
   repeatStyle: RepeatStyle
+  weeklyGoalMin: number
   settingsOpen: boolean
   planTarget: PlanTarget
   sessionOpen: boolean
@@ -46,6 +50,7 @@ interface AppState {
   setAccent: (accent: AccentKey) => void
   setTimerStyle: (style: TimerStyle) => void
   setRepeatStyle: (style: RepeatStyle) => void
+  setWeeklyGoalMin: (minutes: number) => void
   openSettings: () => void
   closeSettings: () => void
   openPlan: (target: Exclude<PlanTarget, null>) => void
@@ -61,6 +66,7 @@ export const useAppStore = create<AppState>()((set) => ({
   accent: DEFAULT_ACCENT,
   timerStyle: 'ring',
   repeatStyle: 'chip',
+  weeklyGoalMin: DEFAULT_WEEKLY_GOAL_MIN,
   settingsOpen: false,
   planTarget: null,
   sessionOpen: false,
@@ -89,6 +95,15 @@ export const useAppStore = create<AppState>()((set) => ({
     if (persistenceDriver) {
       settingsRepo.setSetting(persistenceDriver, 'repeatStyle', repeatStyle).catch((err) =>
         console.error('Failed to persist repeatStyle:', err)
+      )
+    }
+  },
+  setWeeklyGoalMin: (weeklyGoalMin) => {
+    set({ weeklyGoalMin })
+    // Fire-and-forget persistence
+    if (persistenceDriver) {
+      settingsRepo.setSetting(persistenceDriver, 'weeklyGoalMin', String(weeklyGoalMin)).catch((err) =>
+        console.error('Failed to persist weeklyGoalMin:', err)
       )
     }
   },
@@ -142,10 +157,19 @@ export const useAppStore = create<AppState>()((set) => ({
           ? (repeatStyleValue as RepeatStyle)
           : 'chip'
 
+      // Validate and apply weeklyGoalMin — a corrupt or absent row falls back
+      // to the default rather than putting NaN in front of a progress bar.
+      const weeklyGoalValue = Number(settings.weeklyGoalMin)
+      const validWeeklyGoalMin =
+        Number.isFinite(weeklyGoalValue) && weeklyGoalValue > 0
+          ? Math.round(weeklyGoalValue)
+          : DEFAULT_WEEKLY_GOAL_MIN
+
       set({
         accent: validAccent,
         timerStyle: validTimerStyle,
         repeatStyle: validRepeatStyle,
+        weeklyGoalMin: validWeeklyGoalMin,
       })
     } catch (err) {
       console.error('Failed to hydrate app store:', err)

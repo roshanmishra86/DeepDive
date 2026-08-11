@@ -48,6 +48,12 @@ pub fn run() {
                                 sql: include_str!("../migrations/0005_task_planning.sql"),
                                 kind: MigrationKind::Up,
                             },
+                            Migration {
+                                version: 6,
+                                description: "Notes timestamps, task priority, and weekly goal",
+                                sql: include_str!("../migrations/0006_notes_priority_and_week.sql"),
+                                kind: MigrationKind::Up,
+                            },
                         ],
                     )
                     .build(),

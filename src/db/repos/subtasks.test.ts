@@ -25,6 +25,13 @@ describe('subtasks repository', () => {
     await expect(subtasks.createSubtask(driver, { taskId, title: 'Bad', estimateMin: 20, createdAt: 'now' })).rejects.toThrow()
   })
 
+  it('round-trips dueAt through create and update', async () => {
+    const id = await subtasks.createSubtask(driver, { taskId, title: 'Dated', estimateMin: 30, createdAt: '2026-08-10T08:01:00Z', dueAt: '2026-08-12' })
+    expect((await subtasks.listSubtasks(driver, taskId)).find((item) => item.id === id)?.dueAt).toBe('2026-08-12')
+    await subtasks.updateSubtask(driver, id, { dueAt: '2026-08-15' })
+    expect((await subtasks.listSubtasks(driver, taskId)).find((item) => item.id === id)?.dueAt).toBe('2026-08-15')
+  })
+
   it('computes allocation across days', async () => {
     const id = await subtasks.createSubtask(driver, { taskId, title: 'Research', estimateMin: 120, createdAt: 'now' })
     await blocks.createBlock(driver, { day: '2026-08-10', taskId, subtaskId: id, title: 'Research', kind: 'deep', startMin: 300, durationMin: 45 })

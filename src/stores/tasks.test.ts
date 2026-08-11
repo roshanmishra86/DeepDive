@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach } from 'vitest'
 import { createTestDb } from '../test/nodeDriver'
 import type { SqlDriver } from '../db/driver'
 import * as tasksRepo from '../db/repos/tasks'
+import * as subtasksRepo from '../db/repos/subtasks'
 import { useTasksStore } from './tasks'
 
 describe('tasks store', () => {
@@ -16,6 +17,7 @@ describe('tasks store', () => {
       groupBy: 'matrix',
       loading: false,
       error: null,
+      subtasksByTask: {},
     })
   })
 
@@ -37,6 +39,21 @@ describe('tasks store', () => {
     expect(state.tasks).toHaveLength(2)
     expect(state.tasks[0].id).toBe(id1)
     expect(state.tasks[1].id).toBe(id2)
+  })
+
+  it('bulk-loads subtasks for ACTIVE tasks during hydrate, without loadSubtasks', async () => {
+    const taskId = await tasksRepo.createTask(driver, {
+      title: 'Task with subtasks',
+      createdAt: new Date().toISOString(),
+    })
+    await subtasksRepo.createSubtask(driver, { taskId, title: 'First', estimateMin: 30, createdAt: new Date().toISOString() })
+    await subtasksRepo.createSubtask(driver, { taskId, title: 'Second', estimateMin: 45, createdAt: new Date().toISOString() })
+
+    await useTasksStore.getState().hydrate(driver)
+
+    // Regression guard: active tasks used to hydrate with no subtasks until a
+    // per-task loadSubtasks fired. Nothing calls loadSubtasks here.
+    expect(useTasksStore.getState().subtasksByTask[taskId]).toHaveLength(2)
   })
 
   it('adds a task and persists it', async () => {

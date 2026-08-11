@@ -2,8 +2,8 @@ import { describe, expect, it } from 'vitest'
 import type { Subtask, Task } from '../db/types'
 import { exportTaskMarkdown, importMarkdownNotes, markdownFilename } from './markdownExport'
 
-const task: Task = { id: 4, title: 'Ship feature', notes: 'Write the plan', important: true, urgent: false, dueAt: null, estimateMin: 60, done: true, createdAt: 'now', archived: true, sort: 0, completedAt: 'done', archivedAt: 'archived' }
-const subtasks: Subtask[] = [{ id: 1, taskId: 4, title: 'Test it', estimateMin: 30, done: false, sort: 0, createdAt: 'now' }]
+const task: Task = { id: 4, title: 'Ship feature', notes: 'Write the plan', important: true, urgent: false, priority: 'high', dueAt: null, estimateMin: 60, done: true, createdAt: 'now', archived: true, sort: 0, completedAt: 'done', archivedAt: 'archived' }
+const subtasks: Subtask[] = [{ id: 1, taskId: 4, title: 'Test it', estimateMin: 30, done: false, sort: 0, createdAt: 'now', dueAt: null }]
 
 describe('markdown plan helpers', () => {
   it('exports stable metadata, checklists, and markers', () => {

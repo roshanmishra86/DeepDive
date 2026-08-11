@@ -50,7 +50,12 @@ interface TodayState {
   removeBlock: (id: number) => Promise<void>
   move: (id: number, direction: -1 | 1) => Promise<void>
   moveTo: (id: number, targetIndex: number) => Promise<void>
-  saveBlockNote: (id: number, note: string) => Promise<boolean>
+  /**
+   * `updatedAt` is the "last edited" instant, supplied by the caller for the
+   * same reason as `addBlock`'s `fromMin` — the store must never read the
+   * clock itself. Persisted in the same UPDATE as `note`.
+   */
+  saveBlockNote: (id: number, note: string, updatedAt: string) => Promise<boolean>
   toggleCompleted: (id: number) => Promise<void>
   // P2-A (PR review, stores/templates.ts): returns `true`/`false` rather
   // than throwing — never rejects, same as every other action in this
@@ -86,6 +91,7 @@ const PERSISTABLE_BLOCK_FIELDS: Record<keyof Omit<DayBlock, 'id' | 'day' | 'sort
   taskId: true,
   subtaskId: true,
   note: true,
+  noteUpdatedAt: true,
   repeat: true,
   trackId: true,
   quiet: true,
@@ -163,6 +169,10 @@ export const useTodayStore = create<TodayState>()((set, get) => ({
       completed: false,
       sort: blocks.length,
       note: input.note ?? '',
+      // A block created with a note has not been *edited*, so there is no
+      // truthful "last edited" instant yet. The first saveBlockNote stamps it
+      // with the instant its caller supplies.
+      noteUpdatedAt: null,
       repeat: input.repeat ?? 'once',
       trackId: input.trackId ?? null,
       quiet: input.quiet ?? false,
@@ -349,13 +359,15 @@ export const useTodayStore = create<TodayState>()((set, get) => ({
     }
   },
 
-  saveBlockNote: async (id, note) => {
+  saveBlockNote: async (id, note, updatedAt) => {
     const previous = get().blocks
     if (!previous.some((block) => block.id === id)) return false
-    set({ blocks: previous.map((block) => block.id === id ? { ...block, note } : block) })
+    set({ blocks: previous.map((block) => block.id === id ? { ...block, note, noteUpdatedAt: updatedAt } : block) })
     if (!persistenceDriver) return true
     try {
-      await blocksRepo.updateBlock(persistenceDriver, id, { note })
+      // Both fields in ONE patch: updateBlock emits a single UPDATE, so the
+      // note and its "last edited" stamp can never diverge.
+      await blocksRepo.updateBlock(persistenceDriver, id, { note, noteUpdatedAt: updatedAt })
       return true
     } catch (err) {
       set({ blocks: previous, error: err instanceof Error ? err.message : 'Could not save block note' })

@@ -30,6 +30,7 @@ describe('migrations', () => {
       'idx_task_archived_at',
       'idx_subtask_task_id_sort',
       'idx_day_block_subtask_id',
+      'idx_subtask_due_at',
     ].sort()
     expect(indexNames).toEqual(expected)
   })
@@ -83,12 +84,69 @@ describe('migrations', () => {
     expect(blocks[0].count).toBe(5)
   })
 
-  it('seeds 7 settings', async () => {
+  it('seeds 8 settings', async () => {
     const settings = await driver.select<{ count: number }>(
       'SELECT COUNT(*) as count FROM setting',
       []
     )
-    expect(settings[0].count).toBe(7)
+    expect(settings[0].count).toBe(8)
+  })
+
+  it('seeds weeklyGoalMin at 20 hours', async () => {
+    const rows = await driver.select<{ value: string }>(
+      'SELECT value FROM setting WHERE key = ?',
+      ['weeklyGoalMin']
+    )
+    expect(rows).toEqual([{ value: '1200' }])
+  })
+
+  it('defaults task.priority to medium and enforces its CHECK constraint', async () => {
+    const inserted = await driver.execute(
+      'INSERT INTO task (title, created_at) VALUES (?, ?)',
+      ['Priority default', '2026-08-11T09:00:00Z']
+    )
+    const rows = await driver.select<{ priority: string }>(
+      'SELECT priority FROM task WHERE id = ?',
+      [inserted.lastInsertId]
+    )
+    expect(rows[0].priority).toBe('medium')
+
+    let error: unknown = null
+    try {
+      await driver.execute(
+        'INSERT INTO task (title, created_at, priority) VALUES (?, ?, ?)',
+        ['Bad priority', '2026-08-11T09:00:00Z', 'urgent']
+      )
+    } catch (e) {
+      error = e
+    }
+    expect(error).not.toBeNull()
+  })
+
+  it('adds nullable subtask.due_at and day_block.note_updated_at', async () => {
+    const task = await driver.execute(
+      'INSERT INTO task (title, created_at) VALUES (?, ?)',
+      ['Parent', '2026-08-11T09:00:00Z']
+    )
+    const subtask = await driver.execute(
+      'INSERT INTO subtask (task_id, title, estimate_min, created_at) VALUES (?, ?, ?, ?)',
+      [task.lastInsertId, 'Child', 30, '2026-08-11T09:00:00Z']
+    )
+    const subtaskRows = await driver.select<{ due_at: string | null }>(
+      'SELECT due_at FROM subtask WHERE id = ?',
+      [subtask.lastInsertId]
+    )
+    expect(subtaskRows[0].due_at).toBeNull()
+
+    const block = await driver.execute(
+      'INSERT INTO day_block (day, title, kind, start_min, duration_min) VALUES (?, ?, ?, ?, ?)',
+      ['2026-08-11', 'Block', 'deep', 540, 90]
+    )
+    const blockRows = await driver.select<{ note: string; note_updated_at: string | null }>(
+      'SELECT note, note_updated_at FROM day_block WHERE id = ?',
+      [block.lastInsertId]
+    )
+    expect(blockRows[0]).toEqual({ note: '', note_updated_at: null })
   })
 
   it('enforces CHECK constraint on day_block.kind', async () => {
