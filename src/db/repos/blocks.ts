@@ -12,6 +12,7 @@ export interface BlockRow {
   id: number
   day: string
   task_id: number | null
+  subtask_id: number | null
   title: string
   kind: BlockKind
   start_min: number
@@ -30,6 +31,7 @@ export function rowToBlock(row: BlockRow): DayBlock {
     id: row.id,
     day: row.day,
     taskId: row.task_id,
+    subtaskId: row.subtask_id,
     title: row.title,
     kind: row.kind,
     startMin: row.start_min,
@@ -65,6 +67,7 @@ export async function createBlock(
   block: {
     day: string
     taskId?: number | null
+    subtaskId?: number | null
     title: string
     kind: BlockKind
     startMin: number
@@ -78,10 +81,11 @@ export async function createBlock(
   }
 ): Promise<number> {
   const result = await driver.execute(
-    'INSERT INTO day_block (day, task_id, title, kind, start_min, duration_min, pomodoros, sort, note, "repeat", track_id, quiet) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+    'INSERT INTO day_block (day, task_id, subtask_id, title, kind, start_min, duration_min, pomodoros, sort, note, "repeat", track_id, quiet) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
     [
       block.day,
       block.taskId ?? null,
+      block.subtaskId ?? null,
       block.title,
       block.kind,
       block.startMin,
@@ -108,6 +112,10 @@ export async function updateBlock(
   if (patch.taskId !== undefined) {
     updates.push('task_id = ?')
     values.push(patch.taskId)
+  }
+  if (patch.subtaskId !== undefined) {
+    updates.push('subtask_id = ?')
+    values.push(patch.subtaskId)
   }
   if (patch.title !== undefined) {
     updates.push('title = ?')
@@ -192,6 +200,25 @@ export async function reorderBlocks(
   }
 }
 
+export async function moveDayBlocksAtomic(
+  driver: SqlDriver,
+  day: string,
+  changedStarts: { id: number; startMin: number }[],
+  orderedIds: number[]
+): Promise<void> {
+  const statements = [
+    ...changedStarts.map(({ id, startMin }) => ({
+      sql: 'UPDATE day_block SET start_min = ? WHERE id = ? AND day = ?',
+      params: [startMin, id, day],
+    })),
+    ...orderedIds.map((id, index) => ({
+      sql: 'UPDATE day_block SET sort = ? WHERE id = ? AND day = ?',
+      params: [index, id, day],
+    })),
+  ]
+  await driver.transaction(statements)
+}
+
 export async function applyTemplateToDay(
   driver: SqlDriver,
   templateId: number,
@@ -202,8 +229,8 @@ export async function applyTemplateToDay(
 
   // Copy template blocks to day blocks
   await driver.execute(
-    `INSERT INTO day_block (day, title, kind, start_min, duration_min, pomodoros, sort)
-     SELECT ?, title, kind, start_min, duration_min, pomodoros, sort
+    `INSERT INTO day_block (day, task_id, subtask_id, title, kind, start_min, duration_min, pomodoros, sort)
+     SELECT ?, NULL, NULL, title, kind, start_min, duration_min, pomodoros, sort
      FROM template_block
      WHERE template_id = ?
      ORDER BY sort`,

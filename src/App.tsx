@@ -15,6 +15,7 @@ import { spaceTogglesTimer, escapeExitsSession } from './lib/shortcuts'
 import { TitleBar } from './components/chrome/TitleBar'
 import { Sidebar } from './components/chrome/Sidebar'
 import { RightRail } from './components/chrome/RightRail'
+import { PlanPanel } from './components/plan/PlanPanel'
 import { MusicBar } from './components/chrome/MusicBar'
 import { SettingsPanel } from './components/chrome/SettingsPanel'
 import { SessionOverlay } from './components/chrome/SessionOverlay'
@@ -86,6 +87,7 @@ function App() {
   const accent = useAppStore((s) => s.accent)
   const settingsOpen = useAppStore((s) => s.settingsOpen)
   const sessionOpen = useAppStore((s) => s.sessionOpen)
+  const planTarget = useAppStore((s) => s.planTarget)
 
   // On mount, open the database and hydrate stores. Render normally while
   // it resolves; failures are logged but non-fatal.
@@ -143,7 +145,7 @@ function App() {
         <main className="app-main">
           <ActiveView />
         </main>
-        <RightRail />
+        {planTarget ? <PlanPanel /> : <RightRail />}
       </div>
       <MusicBar />
       {settingsOpen && <SettingsPanel />}

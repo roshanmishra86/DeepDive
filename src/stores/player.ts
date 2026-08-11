@@ -1,12 +1,13 @@
 import { create } from 'zustand'
 import { convertFileSrc } from '@tauri-apps/api/core'
 import type { SqlDriver } from '../db/driver'
-import type { Track } from '../db/types'
+import type { RepeatMode, Track } from '../db/types'
 import * as settingsRepo from '../db/repos/settings'
 import { isTauri } from '../lib/platform'
 import { isSrcFailure, nextTrackId, trackMeta as describeTrack } from '../lib/library'
 import { builtinSrc, isBuiltinPath } from '../lib/builtinTracks'
 import { useLibraryStore } from './library'
+import { nextRepeatMode, resolveEndedAction } from '../lib/player'
 
 /**
  * Playback store driving the music bar. Plays against ONE lazily-created
@@ -49,7 +50,7 @@ interface PlayerState {
    * ends (and with an empty queue, the current track replays). Off: playback
    * stops at the end of the queue.
    */
-  repeat: boolean
+  repeatMode: RepeatMode
 
   // Loads the persisted volume. Never autoplays and never loads a track.
   hydrate: (driver: SqlDriver | null) => Promise<void>
@@ -73,13 +74,9 @@ interface PlayerState {
   // Drops a track from the queue, keeping queueIndex pointing at the same
   // entry it did before.
   dequeue: (trackId: number) => void
+  clearQueue: () => void
 
   toggleRepeat: () => void
-
-  // Applies the loop session default to the live element. Called by the
-  // library store's setLoopUntilBlockEnd so toggling it mid-playback takes
-  // effect immediately instead of at the next playTrack.
-  setLoop: (on: boolean) => void
 
   // Clears the current track and halts playback. Called by the library
   // store's removeTrack when the removed track is the one playing.
@@ -220,41 +217,26 @@ async function playQueueFrom(from: number, wrap: boolean): Promise<boolean> {
   return false
 }
 
-function handleEnded() {
-  // `ended` only fires when `loop` is false.
+function applyLoopFlag() {
+  if (!audio) return
   const state = usePlayerStore.getState()
+  audio.loop = state.repeatMode === 'one'
+}
 
-  // With a queue, the queue is the running order: advance through it, wrap
-  // back to the top when repeat is on, and stop at its end when it is off.
-  if (state.queue.length > 0) {
-    const from = state.queueIndex + 1 // -1 (off-queue) starts at the head
-    void (async () => {
-      if (await playQueueFrom(from, false)) return
-      if (state.repeat && (await playQueueFrom(0, false))) return
-      haltPlayback()
-    })()
-    return
-  }
-
-  // No queue. Repeat replays the current track; otherwise advance to the
-  // next library track if one exists, else stop. A single-track list wraps
-  // to itself, which is not "a next track", so playback stops.
-  if (state.repeat) {
-    const tracks = useLibraryStore.getState().tracks
-    const current = tracks.find((t) => t.id === state.trackId)
-    if (current) {
-      void state.playTrack(current)
-      return
-    }
-  }
-  const tracks = useLibraryStore.getState().tracks
-  const nextId = nextTrackId(tracks, state.trackId, 1)
-  const nextTrack = tracks.find((t) => t.id === nextId)
-  if (nextTrack && nextTrack.id !== state.trackId) {
-    void state.playTrack(nextTrack)
+function handleEnded() {
+  const state = usePlayerStore.getState()
+  const action = resolveEndedAction(state.repeatMode, state.queue, state.queueIndex, state.trackId, useLibraryStore.getState().tracks)
+  if (action.type === 'queue') {
+    void playQueueFrom(action.index, false)
+  } else if (action.type === 'library') {
+    const track = useLibraryStore.getState().tracks.find((item) => item.id === action.id)
+    if (track) void state.playTrack(track)
+  } else if (action.type === 'replay') {
+    const current = useLibraryStore.getState().tracks.find((item) => item.id === state.trackId)
+    if (current) void state.playTrack(current)
+    else haltPlayback()
   } else {
-    clearFade()
-    usePlayerStore.setState({ playing: false, positionSec: 0 })
+    haltPlayback()
   }
 }
 
@@ -270,7 +252,7 @@ export const usePlayerStore = create<PlayerState>()((set, get) => ({
   restPaused: false,
   queue: [],
   queueIndex: -1,
-  repeat: false,
+  repeatMode: 'off',
 
   hydrate: async (driver) => {
     persistenceDriver = driver
@@ -281,6 +263,9 @@ export const usePlayerStore = create<PlayerState>()((set, get) => ({
       if (Number.isFinite(parsed)) {
         set({ volume: Math.min(100, Math.max(0, Math.round(parsed * 100))) })
       }
+      const repeatRaw = await settingsRepo.getSetting(driver, 'repeatMode')
+      const repeatMode: RepeatMode = repeatRaw === 'queue' || repeatRaw === 'one' ? repeatRaw : 'off'
+      set({ repeatMode })
     } catch (err) {
       console.error('Failed to hydrate player store:', err)
     }
@@ -289,7 +274,7 @@ export const usePlayerStore = create<PlayerState>()((set, get) => ({
   playTrack: async (track, queueIndex) => {
     const el = ensureAudio()
     clearFade()
-    const { loopUntilBlockEnd, fadeInSec } = useLibraryStore.getState()
+    const { fadeInSec } = useLibraryStore.getState()
     set({
       trackId: track.id,
       // Playing a queued track directly (card play button) keeps the queue
@@ -308,7 +293,7 @@ export const usePlayerStore = create<PlayerState>()((set, get) => ({
       restPaused: false,
     })
     if (!el) return // no Audio in this environment; selection state still shows
-    el.loop = loopUntilBlockEnd
+    applyLoopFlag()
     // Three cases for resolving a track's playable src:
     //  1. Built-in track: a `builtin:<file>.mp3` path, resolved to the
     //     same-origin `/audio/<file>.mp3` URL Vite serves from `public/` —
@@ -418,6 +403,7 @@ export const usePlayerStore = create<PlayerState>()((set, get) => ({
     if (queue.includes(track.id)) return
     const nextQueue = [...queue, track.id]
     set({ queue: nextQueue })
+    applyLoopFlag()
     // Nothing loaded: the first queued track starts straight away, so the
     // queue button doubles as "play this" on an idle player.
     if (trackId === null) {
@@ -438,14 +424,23 @@ export const usePlayerStore = create<PlayerState>()((set, get) => ({
     // just before whatever slid into its slot.
     const nextIndex = queueIndex === -1 || index > queueIndex ? queueIndex : queueIndex - 1
     set({ queue: nextQueue, queueIndex: nextQueue.length === 0 ? -1 : nextIndex })
+    applyLoopFlag()
   },
 
   toggleRepeat: () => {
-    set({ repeat: !get().repeat })
+    const mode = nextRepeatMode(get().repeatMode)
+    set({ repeatMode: mode })
+    applyLoopFlag()
+    if (persistenceDriver) {
+      settingsRepo.setSetting(persistenceDriver, 'repeatMode', mode).catch((err) =>
+        console.error('Failed to persist repeat mode:', err)
+      )
+    }
   },
 
-  setLoop: (on) => {
-    if (audio) audio.loop = on
+  clearQueue: () => {
+    set({ queue: [], queueIndex: -1 })
+    applyLoopFlag()
   },
 
   stop: () => {
@@ -463,6 +458,7 @@ export const usePlayerStore = create<PlayerState>()((set, get) => ({
       // The queue itself survives — only the cursor into it is dropped.
       queueIndex: -1,
     })
+    applyLoopFlag()
   },
 
   markMissing: () => {

@@ -7,7 +7,7 @@
  * All functions read-only; no mutations.
  */
 
-import type { Task } from '../db/types'
+import type { Task, Subtask } from '../db/types'
 import { startOfWeek, formatDuration } from './time'
 
 /**
@@ -43,7 +43,7 @@ export function decomposeDueAt(iso: string): { date: string; time: string } {
 
 /**
  * The single canonical ordering for tasks: incomplete before done,
- * then by dueAt ascending (nulls last), then by id ascending for stability.
+ * then by the persisted manual sort position, then by id for stability.
  * Every consumer that needs "the order tasks appear in" must use this
  * same function. Returns a new array; does not mutate the input.
  */
@@ -51,13 +51,7 @@ export function sortTasks(tasks: Task[]): Task[] {
   return [...tasks].sort((a, b) => {
     // Incomplete before done
     if (a.done !== b.done) return a.done ? 1 : -1
-    // By dueAt ascending, nulls last
-    if ((a.dueAt === null) !== (b.dueAt === null)) return a.dueAt === null ? 1 : -1
-    if (a.dueAt !== null && b.dueAt !== null && a.dueAt !== b.dueAt) {
-      return a.dueAt.localeCompare(b.dueAt)
-    }
-    // By id ascending for stability
-    return a.id - b.id
+    return a.sort !== b.sort ? a.sort - b.sort : a.id - b.id
   })
 }
 
@@ -250,11 +244,12 @@ export function formatDueLabel(dueAt: string, now: Date): string {
  * "due {formatDueLabel}" when dueAt is set. Returns null when
  * both are absent.
  */
-export function taskMeta(task: Task, now: Date): string | null {
+export function taskMeta(task: Task, now: Date, subtasks: Subtask[] = []): string | null {
   const parts: string[] = []
+  const estimateMin = effectiveTaskEstimate(task, subtasks)
 
-  if (task.estimateMin) {
-    parts.push(`≈${formatDuration(task.estimateMin)} left`)
+  if (estimateMin) {
+    parts.push(`≈${formatDuration(estimateMin)} left`)
   }
 
   if (task.dueAt) {
@@ -273,14 +268,14 @@ export function taskMeta(task: Task, now: Date): string | null {
  * pomodoros: for deep, Math.max(1, Math.round(durationMin / 30)); for shallow, 0
  * taskId: task.id
  */
-export function blockDraftFromTask(task: Task): {
+export function blockDraftFromTask(task: Task, subtasks: Subtask[] = []): {
   title: string
   kind: 'deep' | 'shallow'
   durationMin: number
   pomodoros: number
   taskId: number
 } {
-  const durationMin = Math.max(5, task.estimateMin ?? 60)
+  const durationMin = Math.max(5, effectiveTaskEstimate(task, subtasks) ?? 60)
   const kind = task.important ? 'deep' : 'shallow'
   const pomodoros = kind === 'deep' ? Math.max(1, Math.round(durationMin / 30)) : 0
 
@@ -290,6 +285,43 @@ export function blockDraftFromTask(task: Task): {
     durationMin,
     pomodoros,
     taskId: task.id,
+  }
+}
+
+export const MIN_ESTIMATE_HOURS = 0.25
+export const MAX_ESTIMATE_HOURS = 24
+export const ESTIMATE_STEP_HOURS = 0.25
+
+export function effectiveTaskEstimate(task: Task, subtasks: Subtask[]): number | null {
+  return subtasks.length > 0
+    ? subtasks.reduce((total, subtask) => total + subtask.estimateMin, 0)
+    : task.estimateMin
+}
+
+export function remainingSubtaskEstimate(estimateMin: number, allocatedMin: number): number {
+  return Math.max(0, estimateMin - allocatedMin)
+}
+
+export function blockDraftFromSubtask(
+  task: Task,
+  subtask: Subtask,
+  durationMin: number
+): {
+  title: string
+  kind: 'deep' | 'shallow'
+  durationMin: number
+  pomodoros: number
+  taskId: number
+  subtaskId: number
+} {
+  const duration = Math.max(15, Math.round(durationMin / 15) * 15)
+  return {
+    title: `${task.title}: ${subtask.title}`,
+    kind: task.important ? 'deep' : 'shallow',
+    durationMin: duration,
+    pomodoros: task.important ? Math.max(1, Math.round(duration / 30)) : 0,
+    taskId: task.id,
+    subtaskId: subtask.id,
   }
 }
 

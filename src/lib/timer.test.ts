@@ -16,6 +16,7 @@ function makeBlock(id: number, overrides: Partial<DayBlock> = {}): DayBlock {
     id,
     day: '2026-08-10',
     taskId: null,
+    subtaskId: null,
     title: `Block ${id}`,
     kind: 'deep',
     startMin: 300,

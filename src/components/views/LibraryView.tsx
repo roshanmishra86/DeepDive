@@ -55,11 +55,9 @@ export function LibraryView() {
   const error = useLibraryStore((s) => s.error)
   const fadeInSec = useLibraryStore((s) => s.fadeInSec)
   const silenceDuringRest = useLibraryStore((s) => s.silenceDuringRest)
-  const loopUntilBlockEnd = useLibraryStore((s) => s.loopUntilBlockEnd)
   const registerTrack = useLibraryStore((s) => s.registerTrack)
   const setFadeIn = useLibraryStore((s) => s.setFadeIn)
   const setSilenceDuringRest = useLibraryStore((s) => s.setSilenceDuringRest)
-  const setLoopUntilBlockEnd = useLibraryStore((s) => s.setLoopUntilBlockEnd)
 
   const [notice, setNotice] = useState<string | null>(null)
   const [lastLoadedName, setLastLoadedName] = useState<string | null>(null)
@@ -283,20 +281,6 @@ export function LibraryView() {
               checked={silenceDuringRest}
               onChange={(on) => void setSilenceDuringRest(on)}
               label="Silence during rest"
-            />
-          </div>
-          <div className="lib-default-row">
-            <span
-              className={
-                loopUntilBlockEnd ? 'lib-default-label' : 'lib-default-label lib-default-label-off'
-              }
-            >
-              Loop the track until the block ends
-            </span>
-            <ToggleSwitch
-              checked={loopUntilBlockEnd}
-              onChange={(on) => void setLoopUntilBlockEnd(on)}
-              label="Loop the track until the block ends"
             />
           </div>
         </div>

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useTasksStore } from '../../stores/tasks'
 import { openDatabase } from '../../db/index'
 import { groupByMatrix, groupByDeadline, QUADRANTS, DEADLINE_BUCKETS } from '../../lib/week'
@@ -14,10 +14,14 @@ export function WeekView() {
   const error = useTasksStore((s) => s.error)
   const hydrate = useTasksStore((s) => s.hydrate)
   const setGroupBy = useTasksStore((s) => s.setGroupBy)
+  const moveTask = useTasksStore((s) => s.moveTask)
 
   const [editorOpen, setEditorOpen] = useState(false)
   const [editorTaskId, setEditorTaskId] = useState<number | null>(null)
   const [now, setNow] = useState(() => new Date())
+  const [draggingId, setDraggingId] = useState<number | null>(null)
+  const [dropHint, setDropHint] = useState<string | null>(null)
+  const dropCompleted = useRef(false)
 
   // Refresh `now` on an interval so deadline buckets and due labels don't
   // get stuck across the 48h boundary or midnight while the view stays open.
@@ -54,6 +58,32 @@ export function WeekView() {
   }
 
   const hasAnyTasks = tasks.length > 0
+  const beginDrag = (id: number) => { dropCompleted.current = false; setDraggingId(id); setDropHint(null) }
+  const finishDrag = () => {
+    setDraggingId(null)
+    if (!dropCompleted.current) setDropHint(null)
+  }
+  const dropOn = async (group: 'do' | 'plan' | 'delegate' | 'drop' | 'soon' | 'week' | 'later' | 'none', beforeId: number | null) => {
+    if (draggingId === null) return
+    const ok = await moveTask(draggingId, { group, beforeId })
+    dropCompleted.current = true
+    if (!ok && groupBy === 'deadline') setDropHint('Move by editing the due date')
+    else setDropHint(null)
+    setDraggingId(null)
+  }
+  const moveWithin = async (group: 'do' | 'plan' | 'delegate' | 'drop' | 'soon' | 'week' | 'later' | 'none', groupTasks: Task[], index: number, direction: -1 | 1) => {
+    const targetIndex = index + direction
+    if (targetIndex < 0 || targetIndex >= groupTasks.length) return
+    const beforeId = direction === -1
+      ? groupTasks[targetIndex].id
+      : groupTasks[targetIndex + 1]?.id ?? null
+    await moveTask(groupTasks[index].id, { group, beforeId })
+  }
+  const hoverDeadline = (bucket: 'soon' | 'week' | 'later' | 'none') => {
+    if (draggingId === null) return
+    const source = groupByDeadline(tasks, now).find((group) => group.tasks.some((task) => task.id === draggingId))?.bucket
+    setDropHint(source && source !== bucket ? 'Move by editing the due date' : null)
+  }
 
   if (loading) {
     return (
@@ -137,7 +167,6 @@ export function WeekView() {
           <div className="week-groups">
             {groupBy === 'matrix'
               ? groupByMatrix(tasks).map((group) => {
-                  if (group.tasks.length === 0) return null
                   const meta = QUADRANTS.find((q) => q.quadrant === group.quadrant)
                   if (!meta) return null
                   const isDrop = group.quadrant === 'drop'
@@ -148,7 +177,8 @@ export function WeekView() {
                         <span className="week-group-dot" style={{ backgroundColor: meta.dot }} />
                         <h2 className="week-group-label">{meta.label}</h2>
                       </div>
-                      <div className="week-group-rows">
+                      <div className="week-group-rows" onDragOver={(event) => { if (group.tasks.length === 0) event.preventDefault() }} onDrop={(event) => { if (group.tasks.length === 0) { event.preventDefault(); void dropOn(group.quadrant, null) } }}>
+                        {group.tasks.length === 0 && draggingId !== null && <div className="week-empty-drop-zone">Drop here</div>}
                         {group.tasks.map((task: Task) => (
                           <TaskRow
                             key={task.id}
@@ -156,6 +186,15 @@ export function WeekView() {
                             isDrop={isDrop}
                             onEdit={openEditor}
                             now={now}
+                            onDragStart={() => beginDrag(task.id)}
+                            onDragOver={() => setDropHint(null)}
+                            onDrop={() => void dropOn(group.quadrant, task.id)}
+                            onDragEnd={finishDrag}
+                            dragTarget={draggingId !== null && draggingId !== task.id}
+                            onMoveUp={() => moveWithin(group.quadrant, group.tasks, group.tasks.findIndex((item) => item.id === task.id), -1)}
+                            onMoveDown={() => moveWithin(group.quadrant, group.tasks, group.tasks.findIndex((item) => item.id === task.id), 1)}
+                            canMoveUp={group.tasks[0]?.id !== task.id}
+                            canMoveDown={group.tasks[group.tasks.length - 1]?.id !== task.id}
                           />
                         ))}
                       </div>
@@ -163,7 +202,6 @@ export function WeekView() {
                   )
                 })
               : groupByDeadline(tasks, now).map((group) => {
-                  if (group.tasks.length === 0) return null
                   const meta = DEADLINE_BUCKETS.find((b) => b.bucket === group.bucket)
                   if (!meta) return null
 
@@ -173,13 +211,23 @@ export function WeekView() {
                         <span className="week-group-dot" style={{ backgroundColor: meta.dot }} />
                         <h2 className="week-group-label">{meta.label}</h2>
                       </div>
-                      <div className="week-group-rows">
+                      <div className="week-group-rows" onDragOver={(event) => { if (group.tasks.length === 0) { event.preventDefault(); hoverDeadline(group.bucket) } }} onDrop={(event) => { if (group.tasks.length === 0) { event.preventDefault(); void dropOn(group.bucket, null) } }}>
+                        {group.tasks.length === 0 && draggingId !== null && <div className="week-empty-drop-zone">Drop here</div>}
                         {group.tasks.map((task: Task) => (
                           <TaskRow
                             key={task.id}
                             task={task}
                             onEdit={openEditor}
                             now={now}
+                            onDragStart={() => beginDrag(task.id)}
+                            onDragOver={() => hoverDeadline(group.bucket)}
+                            onDrop={() => void dropOn(group.bucket, task.id)}
+                            onDragEnd={finishDrag}
+                            dragTarget={draggingId !== null && draggingId !== task.id}
+                            onMoveUp={() => moveWithin(group.bucket, group.tasks, group.tasks.findIndex((item) => item.id === task.id), -1)}
+                            onMoveDown={() => moveWithin(group.bucket, group.tasks, group.tasks.findIndex((item) => item.id === task.id), 1)}
+                            canMoveUp={group.tasks[0]?.id !== task.id}
+                            canMoveDown={group.tasks[group.tasks.length - 1]?.id !== task.id}
                           />
                         ))}
                       </div>
@@ -188,6 +236,8 @@ export function WeekView() {
                 })}
           </div>
         )}
+
+        {dropHint && <div className="week-drag-hint" role="status">{dropHint}</div>}
 
         <div className="week-footer">
           Tags decide the quadrant. Nothing here is scheduled — blocks only exist for today.

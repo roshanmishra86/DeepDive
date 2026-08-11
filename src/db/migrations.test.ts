@@ -26,6 +26,10 @@ describe('migrations', () => {
       'idx_pomodoro_session_block_id',
       'idx_pomodoro_session_started_at',
       'idx_task_archived_done',
+      'idx_task_archived_sort',
+      'idx_task_archived_at',
+      'idx_subtask_task_id_sort',
+      'idx_day_block_subtask_id',
     ].sort()
     expect(indexNames).toEqual(expected)
   })
@@ -45,6 +49,7 @@ describe('migrations', () => {
       'ritual',
       'ritual_log',
       'setting',
+      'subtask',
       'task',
       'template',
       'template_block',

@@ -80,7 +80,7 @@ function resetPlayerStore() {
     restPaused: false,
     queue: [],
     queueIndex: -1,
-    repeat: false,
+    repeatMode: 'off',
   })
 }
 
@@ -91,7 +91,6 @@ function resetLibraryStore() {
     error: null,
     fadeInSec: 8,
     silenceDuringRest: true,
-    loopUntilBlockEnd: true,
   })
 }
 
@@ -175,12 +174,12 @@ describe('player store', () => {
     expect(usePlayerStore.getState().playing).toBe(true)
   })
 
-  it('playTrack applies the library loop default to the element', async () => {
-    useLibraryStore.setState({ loopUntilBlockEnd: false })
+  it('playTrack applies repeat-one mode to the element', async () => {
+    usePlayerStore.setState({ repeatMode: 'off' })
     await usePlayerStore.getState().playTrack(makeTrack(1))
     expect(fake.loop).toBe(false)
 
-    useLibraryStore.setState({ loopUntilBlockEnd: true })
+    usePlayerStore.setState({ repeatMode: 'one' })
     await usePlayerStore.getState().playTrack(makeTrack(2))
     expect(fake.loop).toBe(true)
   })
@@ -383,21 +382,24 @@ describe('player store', () => {
     expect(state.playing).toBe(true)
   })
 
-  it('toggling the loop session default applies to the live element', async () => {
-    useLibraryStore.setState({ loopUntilBlockEnd: true })
+  it('toggling repeat mode applies to the live element', async () => {
+    usePlayerStore.setState({ repeatMode: 'one' })
     await usePlayerStore.getState().playTrack(makeTrack(1))
     expect(fake.loop).toBe(true)
 
-    await useLibraryStore.getState().setLoopUntilBlockEnd(false)
+    usePlayerStore.getState().toggleRepeat()
     expect(fake.loop).toBe(false)
 
-    await useLibraryStore.getState().setLoopUntilBlockEnd(true)
+    usePlayerStore.getState().toggleRepeat()
+    expect(fake.loop).toBe(false)
+
+    usePlayerStore.getState().toggleRepeat()
     expect(fake.loop).toBe(true)
   })
 
   it('ended advances to the next library track when not looping', async () => {
     const tracks = [makeTrack(1), makeTrack(2)]
-    useLibraryStore.setState({ tracks, loopUntilBlockEnd: false })
+    useLibraryStore.setState({ tracks })
 
     await usePlayerStore.getState().playTrack(tracks[0])
     fake.emit('ended')
@@ -411,7 +413,7 @@ describe('player store', () => {
   })
 
   it('ended stops when there is no next track', async () => {
-    useLibraryStore.setState({ tracks: [makeTrack(1)], loopUntilBlockEnd: false })
+    useLibraryStore.setState({ tracks: [makeTrack(1)] })
 
     await usePlayerStore.getState().playTrack(makeTrack(1))
     fake.emit('ended')
@@ -440,7 +442,7 @@ describe('player store', () => {
 
   it('ended walks the queue and stops at its end when repeat is off', async () => {
     const tracks = [makeTrack(1), makeTrack(2), makeTrack(3)]
-    useLibraryStore.setState({ tracks, loopUntilBlockEnd: false })
+    useLibraryStore.setState({ tracks })
 
     await usePlayerStore.getState().enqueue(tracks[1])
     await usePlayerStore.getState().enqueue(tracks[2])
@@ -463,12 +465,12 @@ describe('player store', () => {
 
   it('ended wraps to the head of the queue when repeat is on', async () => {
     const tracks = [makeTrack(1), makeTrack(2)]
-    useLibraryStore.setState({ tracks, loopUntilBlockEnd: false })
+    useLibraryStore.setState({ tracks })
 
     await usePlayerStore.getState().enqueue(tracks[0])
     await usePlayerStore.getState().enqueue(tracks[1])
     usePlayerStore.getState().toggleRepeat()
-    expect(usePlayerStore.getState().repeat).toBe(true)
+    expect(usePlayerStore.getState().repeatMode).toBe('queue')
 
     fake.emit('ended')
     await vi.waitFor(() => {
@@ -485,7 +487,7 @@ describe('player store', () => {
 
   it('repeat replays the current track when the queue is empty', async () => {
     const tracks = [makeTrack(1), makeTrack(2)]
-    useLibraryStore.setState({ tracks, loopUntilBlockEnd: false })
+    useLibraryStore.setState({ tracks })
 
     await usePlayerStore.getState().playTrack(tracks[0])
     usePlayerStore.getState().toggleRepeat()
@@ -494,8 +496,8 @@ describe('player store', () => {
     await vi.waitFor(() => {
       expect(usePlayerStore.getState().playing).toBe(true)
     })
-    // Repeat beats the library auto-advance: track 1 plays again, not 2.
-    expect(usePlayerStore.getState().trackId).toBe(1)
+    // Queue repeat with an empty explicit queue wraps the library order.
+    expect(usePlayerStore.getState().trackId).toBe(2)
     expect(usePlayerStore.getState().positionSec).toBe(0)
   })
 
@@ -516,7 +518,7 @@ describe('player store', () => {
 
   it('the queue skips entries whose track has left the library', async () => {
     const tracks = [makeTrack(1), makeTrack(2), makeTrack(3)]
-    useLibraryStore.setState({ tracks, loopUntilBlockEnd: false })
+    useLibraryStore.setState({ tracks })
 
     await usePlayerStore.getState().enqueue(tracks[0])
     await usePlayerStore.getState().enqueue(tracks[1])
@@ -531,7 +533,7 @@ describe('player store', () => {
 
   it('dequeue removes an entry and keeps the cursor on the same track', async () => {
     const tracks = [makeTrack(1), makeTrack(2), makeTrack(3)]
-    useLibraryStore.setState({ tracks, loopUntilBlockEnd: false })
+    useLibraryStore.setState({ tracks })
 
     await usePlayerStore.getState().enqueue(tracks[0])
     await usePlayerStore.getState().enqueue(tracks[1])

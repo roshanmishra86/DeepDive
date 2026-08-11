@@ -11,9 +11,10 @@ import { usePlayerStore } from './player'
 const FADE_IN_DEFAULT_SEC = 8
 
 /**
- * Sound library store: the user's local audio files plus the three session
- * defaults (fade-in, silence during rest, loop until block ends) hydrated
- * from the `setting` table and persisted on toggle.
+ * Sound library store: the user's local audio files plus the two library
+ * session defaults (fade-in and silence during rest) hydrated from the
+ * `setting` table and persisted on toggle. Repeat behavior belongs solely to
+ * the player store.
  *
  * Error contract (P2-A): every mutator catches its own persistence errors,
  * sets `error`, reverts any optimistic update, and RETURNS — it never
@@ -31,7 +32,6 @@ interface LibraryState {
   /** Seconds of volume ramp when a track starts; 0 means fade-in is off. */
   fadeInSec: number
   silenceDuringRest: boolean
-  loopUntilBlockEnd: boolean
 
   hydrate: (driver: SqlDriver | null) => Promise<void>
 
@@ -47,7 +47,6 @@ interface LibraryState {
   setCategory: (id: number, category: string) => Promise<boolean>
   setFadeIn: (enabled: boolean) => Promise<boolean>
   setSilenceDuringRest: (on: boolean) => Promise<boolean>
-  setLoopUntilBlockEnd: (on: boolean) => Promise<boolean>
 }
 
 let persistenceDriver: SqlDriver | null = null
@@ -58,7 +57,6 @@ export const useLibraryStore = create<LibraryState>()((set, get) => ({
   error: null,
   fadeInSec: FADE_IN_DEFAULT_SEC,
   silenceDuringRest: true,
-  loopUntilBlockEnd: true,
 
   hydrate: async (driver) => {
     persistenceDriver = driver
@@ -77,7 +75,6 @@ export const useLibraryStore = create<LibraryState>()((set, get) => ({
         tracks,
         fadeInSec: Number.isFinite(fade) && fade >= 0 ? fade : FADE_IN_DEFAULT_SEC,
         silenceDuringRest: settings.silenceDuringRest !== '0',
-        loopUntilBlockEnd: settings.loopUntilBlockEnd !== '0',
         loading: false,
       })
 
@@ -235,21 +232,4 @@ export const useLibraryStore = create<LibraryState>()((set, get) => ({
     }
   },
 
-  setLoopUntilBlockEnd: async (on) => {
-    const prev = get().loopUntilBlockEnd
-    set({ loopUntilBlockEnd: on, error: null })
-    // Apply to the live element too — otherwise a mid-playback toggle would
-    // only take effect at the next playTrack. Deferred cross-store access;
-    // see the module doc comment.
-    usePlayerStore.getState().setLoop(on)
-    if (!persistenceDriver) return true
-    try {
-      await settingsRepo.setSetting(persistenceDriver, 'loopUntilBlockEnd', on ? '1' : '0')
-      return true
-    } catch (err) {
-      console.error('Failed to persist loop setting:', err)
-      set({ loopUntilBlockEnd: prev, error: String(err) })
-      return false
-    }
-  },
 }))

@@ -6,9 +6,22 @@ import * as settingsRepo from '../db/repos/settings'
 export type View = 'today' | 'week' | 'templates' | 'archive' | 'library'
 export type TimerStyle = 'ring' | 'numeric' | 'bar'
 export type RepeatStyle = 'chip' | 'icon' | 'none'
+export type PlanTarget =
+  | { kind: 'task'; id: number }
+  | { kind: 'block'; id: number }
+  | null
 
 // Module-level driver reference for persistence callbacks
 let persistenceDriver: SqlDriver | null = null
+let planFlush: (() => Promise<boolean>) | null = null
+let planSwitchRevision = 0
+
+export function registerPlanFlush(flush: (() => Promise<boolean>) | null): () => void {
+  planFlush = flush
+  return () => {
+    if (planFlush === flush) planFlush = null
+  }
+}
 
 /**
  * Cross-view chrome state: which view is showing, the three user settings
@@ -25,6 +38,7 @@ interface AppState {
   timerStyle: TimerStyle
   repeatStyle: RepeatStyle
   settingsOpen: boolean
+  planTarget: PlanTarget
   sessionOpen: boolean
   setView: (view: View) => void
   setAccent: (accent: AccentKey) => void
@@ -32,6 +46,9 @@ interface AppState {
   setRepeatStyle: (style: RepeatStyle) => void
   openSettings: () => void
   closeSettings: () => void
+  openPlan: (target: Exclude<PlanTarget, null>) => void
+  closePlan: () => void
+  setPlanTarget: (target: Exclude<PlanTarget, null>) => void
   enterSession: () => void
   exitSession: () => void
   hydrate: (driver: SqlDriver | null) => Promise<void>
@@ -43,6 +60,7 @@ export const useAppStore = create<AppState>()((set) => ({
   timerStyle: 'ring',
   repeatStyle: 'chip',
   settingsOpen: false,
+  planTarget: null,
   sessionOpen: false,
   setView: (view) => set({ view }),
   setAccent: (accent) => {
@@ -72,8 +90,29 @@ export const useAppStore = create<AppState>()((set) => ({
       )
     }
   },
-  openSettings: () => set({ settingsOpen: true }),
+  openSettings: () => {
+    const switchRevision = ++planSwitchRevision
+    if (!planFlush) {
+      set({ settingsOpen: true, planTarget: null })
+      return
+    }
+    void planFlush().then((ok) => {
+      if (ok && switchRevision === planSwitchRevision) set({ settingsOpen: true, planTarget: null })
+    })
+  },
   closeSettings: () => set({ settingsOpen: false }),
+  openPlan: (planTarget) => {
+    const switchRevision = ++planSwitchRevision
+    if (!planFlush) {
+      set({ planTarget, settingsOpen: false })
+      return
+    }
+    void planFlush().then((ok) => {
+      if (ok && switchRevision === planSwitchRevision) set({ planTarget, settingsOpen: false })
+    })
+  },
+  closePlan: () => set({ planTarget: null }),
+  setPlanTarget: (planTarget) => set({ planTarget, settingsOpen: false }),
   enterSession: () => set({ sessionOpen: true }),
   exitSession: () => set({ sessionOpen: false }),
   hydrate: async (driver) => {

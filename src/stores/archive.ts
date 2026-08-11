@@ -23,9 +23,12 @@ interface ArchiveState {
   headline: HeadlineStats | null
   trend: { weekStart: string; hours: number }[]
   // Global "does the archive have anything at all" flag (any day_block or
-  // day_note row). Drives the fresh-install empty state. Populated once in
-  // hydrate — setMonth does not recompute it (it is not per-month).
+  // day_note row or archived task). Drives the overall empty state.
+  // Populated once in hydrate — setMonth does not recompute it.
   hasRecords: boolean
+  // Day-record-specific flag. Archived tasks can make the overall archive
+  // non-empty without giving the calendar anything to render.
+  hasDayRecords: boolean
   loading: boolean
   error: string | null
 
@@ -62,6 +65,7 @@ export const useArchiveStore = create<ArchiveState>()((set, get) => ({
   headline: null,
   trend: [],
   hasRecords: false,
+  hasDayRecords: false,
   // Starts true: the view always hydrates on mount, and starting false would
   // let the first paint fall through to the empty-state branch ("No recorded
   // days yet") for users WITH records, one effect-cycle before hydrate runs.
@@ -80,7 +84,10 @@ export const useArchiveStore = create<ArchiveState>()((set, get) => ({
 
       // Fetch headline stats and the global has-records flag in the same pass
       const headline = await archiveRepo.headlineStats(driver, today)
-      const hasRecords = await archiveRepo.hasAnyRecords(driver)
+      const [hasRecords, hasDayRecords] = await Promise.all([
+        archiveRepo.hasAnyRecords(driver),
+        archiveRepo.hasAnyDayRecords(driver),
+      ])
 
       // Fetch 12-week trend. The repo buckets Mon–Sun from the anchor it is
       // given, so the anchor must be the Monday of today's week — the same
@@ -134,6 +141,7 @@ export const useArchiveStore = create<ArchiveState>()((set, get) => ({
         headline,
         trend,
         hasRecords,
+        hasDayRecords,
         selectedDay,
         record,
         loading: false,

@@ -9,6 +9,8 @@ import { BlockModal } from './BlockModal'
 import { EditTemplateModal } from './EditTemplateModal'
 import { ApplyTemplateConfirmModal } from './ApplyTemplateConfirmModal'
 import { ConfirmDeleteBlockModal } from './ConfirmDeleteBlockModal'
+import { moveBlockTo as previewMoveBlockTo } from '../../lib/today'
+import { useDragList } from '../common/useDragList'
 
 interface TemplateDetailPaneProps {
   template: TemplateDetail
@@ -26,6 +28,7 @@ export function TemplateDetailPane({ template }: TemplateDetailPaneProps) {
   const setWeekday = useTemplatesStore((s) => s.setWeekday)
   const removeBlock = useTemplatesStore((s) => s.removeBlock)
   const moveBlock = useTemplatesStore((s) => s.moveBlock)
+  const moveBlockTo = useTemplatesStore((s) => s.moveBlockTo)
   const applyTemplate = useTodayStore((s) => s.applyTemplate)
   const todayBlocks = useTodayStore((s) => s.blocks)
   // P2-A: applyTemplate reports failure via the today store's `error` field
@@ -41,9 +44,14 @@ export function TemplateDetailPane({ template }: TemplateDetailPaneProps) {
   // confirm dialog BlockModal uses, rather than deleting immediately. See
   // the Phase 6 F2 defect in TASKS.md.
   const [deleteConfirmBlockId, setDeleteConfirmBlockId] = useState<number | null>(null)
+  const { drag, start, over, clear } = useDragList<number>()
 
   const subtitle = templateSubtitle(template.weekdays, template.startMin)
   const deleteConfirmBlock = template.blocks.find((b) => b.id === deleteConfirmBlockId) ?? null
+  const sourceIndex = drag.sourceId === null ? -1 : template.blocks.findIndex((block) => block.id === drag.sourceId)
+  const previewBlocks = sourceIndex !== -1 && drag.targetIndex !== null
+    ? previewMoveBlockTo(template.blocks, sourceIndex, drag.targetIndex)
+    : template.blocks
 
   const handleApply = async () => {
     // P2-A: applyTemplate never throws — it reports success via its return
@@ -62,6 +70,12 @@ export function TemplateDetailPane({ template }: TemplateDetailPaneProps) {
 
   const handleBlockMove = async (blockId: number, direction: -1 | 1) => {
     await moveBlock(blockId, direction)
+  }
+
+  const handleBlockDrop = async (targetIndex: number) => {
+    if (drag.sourceId === null || targetIndex === sourceIndex) return
+    await moveBlockTo(drag.sourceId, targetIndex)
+    clear()
   }
 
   return (
@@ -108,8 +122,9 @@ export function TemplateDetailPane({ template }: TemplateDetailPaneProps) {
               </div>
             </div>
           ) : (
-            template.blocks.map((block, index) => (
-              <div key={block.id} className="tpl-block-row">
+            previewBlocks.map((block, index) => (
+              <div key={block.id} className={`tpl-block-row ${drag.targetIndex === template.blocks.findIndex((item) => item.id === block.id) && drag.sourceId !== block.id ? 'tpl-block-row-drag-target' : ''}`} onDragOver={(event) => { event.preventDefault(); over(template.blocks.findIndex((item) => item.id === block.id)) }} onDrop={(event) => { event.preventDefault(); void handleBlockDrop(template.blocks.findIndex((item) => item.id === block.id)) }}>
+                <button type="button" className="tpl-block-drag-handle" draggable onDragStart={() => start(block.id)} onDragEnd={clear} aria-label={`Drag ${block.title}`}>⠿</button>
                 <span className="tpl-block-time">{minutesToClock(block.startMin)}</span>
                 <span className="tpl-block-title">{block.title}</span>
                 {block.pomodoros > 0 && (
@@ -130,7 +145,7 @@ export function TemplateDetailPane({ template }: TemplateDetailPaneProps) {
                       ↑
                     </button>
                   )}
-                  {index < template.blocks.length - 1 && (
+                  {index < previewBlocks.length - 1 && (
                     <button
                       className="tpl-block-control-btn"
                       onClick={() => handleBlockMove(block.id, 1)}
