@@ -1,5 +1,6 @@
 import type { DayBlock } from '../db/types'
 import { checkShutdown, nextFreeStart } from './today'
+import { minutesToClock } from './time'
 
 export interface TodaySchedulePreview {
   valid: boolean
@@ -49,6 +50,6 @@ export function previewTodaySchedule(
     startMin,
     endMin: startMin + durationMin,
     shutdownMin,
-    reason: shutdown.fits ? null : `Doesn't fit before shutdown${shutdownMin === null ? '' : ` (${shutdownMin})`}.`,
+    reason: shutdown.fits ? null : `Doesn't fit before shutdown${shutdownMin === null ? '' : ` (${minutesToClock(shutdownMin)})`}.`,
   }
 }

@@ -37,6 +37,7 @@ describe('previewTodaySchedule', () => {
       fits: false,
       startMin: 1140,
       endMin: 1230,
+      reason: 'Doesn\'t fit before shutdown (8:00 PM).',
     })
   })
 })

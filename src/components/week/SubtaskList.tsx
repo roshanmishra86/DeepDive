@@ -175,7 +175,7 @@ export function SubtaskList({ task, now }: SubtaskListProps) {
             <input type="number" min="0.25" max="24" step="0.25" value={String(allocationDraft.durationMin / 60)} onChange={(event) => setAllocationDraft((draft) => draft ? { ...draft, durationMin: Math.round(Number(event.target.value) * 60) } : null)} aria-label="Allocation duration in hours" />
           </label>
           {remaining <= 0 && <div className="subtask-allocation-warning">Fully allocated already — this will be recorded as extra time.</div>}
-          {!allocationPreview.fits && <div className="subtask-allocation-warning">{allocationPreview.shutdownMin === null ? allocationPreview.reason : `Doesn't fit before shutdown (${minutesToClock(allocationPreview.shutdownMin)}).`}</div>}
+          {!allocationPreview.fits && <div className="subtask-allocation-warning">{allocationPreview.reason}</div>}
           {scheduleError && <div className="subtask-error" role="alert">{scheduleError}</div>}
           <div className="subtask-allocation-actions">
             <button type="button" className="btn-secondary" onClick={() => { setAllocationDraft(null); setScheduleError(null) }}>Cancel</button>
