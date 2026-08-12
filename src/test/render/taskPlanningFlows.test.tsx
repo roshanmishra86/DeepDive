@@ -19,6 +19,9 @@ import { PlanPanel } from '../../components/plan/PlanPanel'
 import { TodayView } from '../../components/views/TodayView'
 import { TaskRow } from '../../components/todo/TaskRow'
 import { SubtaskList } from '../../components/todo/SubtaskList'
+import { NotesEditor } from '../../components/common/NotesEditor'
+import { importMarkdownNotes } from '../../lib/markdownExport'
+import { notePlainText, parseNote } from '../../lib/richText'
 import { DEFAULT_ACCENT } from '../../lib/accents'
 
 const DAY = '2026-08-10'
@@ -109,15 +112,75 @@ describe('task planning release flows', () => {
     useAppStore.setState({ planTarget: { kind: 'task', id: task.id } })
     render(<PlanPanel />)
 
-    const textarea = screen.getByRole('textbox', { name: 'Plan notes for Plan task' }) as HTMLTextAreaElement
-    fireEvent.change(textarea, { target: { value: 'new local keystrokes' } })
+    // A legacy plain-text note must render as text, not as an empty editor.
+    const surface = screen.getByRole('textbox', { name: 'Plan notes for Plan task' })
+    expect(surface.textContent).toBe('saved value')
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Bullet list' }))
+    })
+    expect(surface.querySelector('ul')).not.toBeNull()
+
     await act(async () => {
       useTasksStore.setState({ tasks: [{ ...task, notes: 'older saved write' }] })
     })
 
-    expect(textarea.value).toBe('new local keystrokes')
+    expect(surface.textContent).toBe('saved value')
+    expect(surface.querySelector('ul')).not.toBeNull()
     expect((screen.getByRole('button', { name: 'Import Markdown' }) as HTMLButtonElement).disabled).toBe(true)
     expect((screen.getByRole('button', { name: 'Export Markdown' }) as HTMLButtonElement).disabled).toBe(true)
+  })
+
+  it('moves the plan save indicator from Saving… back to Saved after the debounce', async () => {
+    const task = makeTask(1, { title: 'Indicator task', notes: 'note body' })
+    useTasksStore.setState({ tasks: [task] })
+    useAppStore.setState({ planTarget: { kind: 'task', id: task.id } })
+    render(<PlanPanel />)
+
+    const indicator = document.querySelector('.plan-panel-state')!
+    expect(indicator.textContent).toBe('Saved')
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Bullet list' }))
+    })
+    expect(indicator.textContent).toBe('Saving…')
+    await vi.waitFor(() => expect(indicator.textContent).toBe('Saved'), { timeout: 3000 })
+    expect(useTasksStore.getState().tasks[0].notes).toContain('bulletList')
+  })
+
+  it('loads an externally changed note without emitting a spurious onChange', async () => {
+    const onChange = vi.fn()
+    const { rerender } = render(<NotesEditor value="first note" onChange={onChange} ariaLabel="Notes" />)
+    const surface = screen.getByRole('textbox', { name: 'Notes' })
+    expect(surface.textContent).toBe('first note')
+
+    // A markdown import replaces `value` from outside. Echoing that back
+    // through onChange would loop the editor against its own parent.
+    const imported = importMarkdownNotes('second **note**')
+    onChange.mockClear()
+    await act(async () => {
+      rerender(<NotesEditor value={imported} onChange={onChange} ariaLabel="Notes" />)
+    })
+
+    expect(surface.textContent).toBe('second note')
+    expect(onChange).not.toHaveBeenCalled()
+  })
+
+  it('emits a stored rich-text envelope when a toolbar toggle is used', async () => {
+    const onChange = vi.fn()
+    render(<NotesEditor value="alpha" onChange={onChange} ariaLabel="Notes" />)
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Bullet list' }))
+    })
+
+    expect(onChange).toHaveBeenCalled()
+    const stored = onChange.mock.calls[onChange.mock.calls.length - 1][0] as string
+    expect(parseNote(stored).content?.[0].type).toBe('bulletList')
+    // StarterKit's TrailingNode leaves an empty paragraph after the list.
+    expect(notePlainText(stored).trim()).toBe('alpha')
+    await vi.waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Bullet list' }).getAttribute('aria-pressed')).toBe('true')
+    }, { timeout: 3000 })
   })
 
   it('exposes week ordering buttons as the keyboard-accessible alternative to drag', () => {

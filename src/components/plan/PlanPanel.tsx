@@ -11,6 +11,8 @@ import { useBlocksStore } from '../../stores/blocks'
 import { useDayStore } from '../../stores/day'
 import { useTodayBlocks } from '../../stores/useTodayBlocks'
 import { exportTaskMarkdown, importMarkdownNotes, markdownFilename } from '../../lib/markdownExport'
+import { notePlainText } from '../../lib/richText'
+import { NotesEditor } from '../common/NotesEditor'
 import { isTauri } from '../../lib/platform'
 import type { Subtask } from '../../db/types'
 
@@ -127,6 +129,10 @@ export function PlanPanel() {
 
   const title = noteOwner?.title ?? block?.title ?? 'Plan'
   const context = noteOwner?.archived ? 'Archived task' : noteOwner ? 'Task' : 'Today block'
+  // `draft` is now a JSON envelope, so its own length would count the markup.
+  const plain = notePlainText(draft)
+  const words = plain.trim() ? plain.trim().split(/\s+/).length : 0
+  const characters = plain.length
 
   const onChange = (value: string) => {
     // Update the ref synchronously as well as React state. Import followed by
@@ -195,21 +201,23 @@ export function PlanPanel() {
         </button>
       </div>
       <div className="plan-panel-state" role="status">{saveState}</div>
-      <textarea
-        className="plan-panel-textarea"
-        value={draft}
-        onChange={(event) => onChange(event.target.value)}
-        onBlur={() => void flush()}
+      <div
+        className="plan-panel-editor"
+        onBlur={(event) => {
+          // The toolbar lives inside this wrapper; flushing on every internal
+          // focus move would fire a write per toolbar click.
+          if (!event.currentTarget.contains(event.relatedTarget)) void flush()
+        }}
         onKeyDown={(event) => {
           if (event.key === 'Escape') {
             event.stopPropagation()
             void close()
           }
         }}
-        aria-label={`Plan notes for ${title}`}
-        autoFocus
-      />
-      <div className="plan-panel-counts">{draft.trim() ? draft.trim().split(/\s+/).length : 0} words · {draft.length} characters</div>
+      >
+        <NotesEditor value={draft} onChange={onChange} ariaLabel={`Plan notes for ${title}`} placeholder="Plan this work…" />
+      </div>
+      <div className="plan-panel-counts">{words} words · {characters} characters</div>
       {!isTauri() && <div className="plan-panel-notice">Markdown import/export needs the Deep Work desktop app.</div>}
       {notice && <div className="plan-panel-notice" role="status">{notice}</div>}
       <div className="plan-panel-foot">
