@@ -46,6 +46,12 @@ interface AppState {
   settingsOpen: boolean
   planTarget: PlanTarget
   sessionOpen: boolean
+  /**
+   * Set by Today's "This is a task. ↗" link; consumed by TodoView to clear
+   * filters, expand the task's group, scroll it into view and highlight it,
+   * then clear itself. Null means no pending cross-view focus.
+   */
+  pendingTodoFocus: number | null
   setView: (view: View) => void
   setAccent: (accent: AccentKey) => void
   setTimerStyle: (style: TimerStyle) => void
@@ -56,6 +62,8 @@ interface AppState {
   openPlan: (target: Exclude<PlanTarget, null>) => void
   closePlan: () => void
   setPlanTarget: (target: Exclude<PlanTarget, null>) => void
+  focusTask: (id: number) => void
+  clearTodoFocus: () => void
   enterSession: () => void
   exitSession: () => void
   hydrate: (driver: SqlDriver | null) => Promise<void>
@@ -70,6 +78,7 @@ export const useAppStore = create<AppState>()((set) => ({
   settingsOpen: false,
   planTarget: null,
   sessionOpen: false,
+  pendingTodoFocus: null,
   setView: (view) => set({ view }),
   setAccent: (accent) => {
     set({ accent })
@@ -130,6 +139,8 @@ export const useAppStore = create<AppState>()((set) => ({
   },
   closePlan: () => set({ planTarget: null }),
   setPlanTarget: (planTarget) => set({ planTarget, settingsOpen: false }),
+  focusTask: (id) => set({ pendingTodoFocus: id }),
+  clearTodoFocus: () => set({ pendingTodoFocus: null }),
   enterSession: () => set({ sessionOpen: true }),
   exitSession: () => set({ sessionOpen: false }),
   hydrate: async (driver) => {

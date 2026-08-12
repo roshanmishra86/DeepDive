@@ -1,15 +1,17 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useBlocksStore } from '../../stores/blocks'
 import { useDayStore } from '../../stores/day'
 import { useTodayBlocks } from '../../stores/useTodayBlocks'
 import { openDatabase } from '../../db/index'
 import { layout, daySummary, blockState, conflicts, moveBlockTo, nextFreeStart } from '../../lib/today'
-import { formatDuration, minutesToClock, parseClock } from '../../lib/time'
+import { formatDuration, minutesToClock, parseClock, fromDayKey } from '../../lib/time'
 import { TimelineBlock } from '../today/TimelineBlock'
+import { BlockNotesPanel } from '../today/BlockNotesPanel'
 import { useDragList } from '../common/useDragList'
 import { BlockComposer } from '../today/BlockComposer'
 import { ApplyTemplateMenu } from '../today/ApplyTemplateMenu'
 import { SaveTemplateModal } from '../templates/SaveTemplateModal'
+import type { DayBlock } from '../../db/types'
 
 type ComposerState =
   | { mode: 'closed' }
@@ -35,6 +37,88 @@ export function TodayView() {
   const [saveTemplateOpen, setSaveTemplateOpen] = useState(false)
   const [shutdownEditing, setShutdownEditing] = useState(false)
   const [shutdownText, setShutdownText] = useState('')
+
+  // --- Notes panel selection lifecycle -------------------------------------
+  // See BlockNotesPanel's flush prop and the rules below; mirrors the plan's
+  // five selection rules for the inline notes panel.
+  const [selectedBlockId, setSelectedBlockId] = useState<number | null>(null)
+  const flushNotesRef = useRef<(() => Promise<boolean>) | null>(null)
+  const notesFocusedRef = useRef(false)
+  const prevBlocksRef = useRef<DayBlock[]>(blocks)
+  const prevActiveIdRef = useRef<number | null>(null)
+
+  useEffect(() => {
+    const prevBlocks = prevBlocksRef.current
+    prevBlocksRef.current = blocks
+    const activeId = blocks.find((b) => blockState(b, nowMin) === 'active')?.id ?? null
+
+    // Rule 1: seed the selection (active block, else first) whenever the
+    // panel has no selection and there is something to select. Deliberately
+    // NOT a one-shot "first render" guard: `useTodayBlocks()` returns the
+    // frozen EMPTY array until async hydration resolves, so the very first
+    // effect pass can see `blocks.length === 0` on a real app mount — a
+    // guard burned on that pass would leave the panel stuck on its empty
+    // state forever. Re-checking whenever `selectedBlockId` is null also
+    // covers deleting the last block and later adding a new one. Not gated
+    // on focus: an empty/unseeded panel has nothing pending to protect.
+    if (selectedBlockId === null && blocks.length > 0) {
+      prevActiveIdRef.current = activeId
+      setSelectedBlockId(activeId ?? blocks[0].id)
+      return
+    }
+
+    let next: number | null | undefined // undefined = no change this pass
+    if (selectedBlockId !== null && !blocks.some((b) => b.id === selectedBlockId)) {
+      // Rule 4: the selected block was deleted, or hydration/rollover
+      // dropped it — fall back to the nearest remaining block by start
+      // time (not gated by focus: the block backing the editor is gone).
+      if (blocks.length === 0) {
+        next = null
+      } else {
+        const removed = prevBlocks.find((b) => b.id === selectedBlockId)
+        if (!removed) {
+          next = blocks[0].id
+        } else {
+          let best = blocks[0]
+          let bestDiff = Math.abs(best.startMin - removed.startMin)
+          for (const b of blocks) {
+            const diff = Math.abs(b.startMin - removed.startMin)
+            if (diff < bestDiff || (diff === bestDiff && b.startMin < best.startMin)) {
+              best = b
+              bestDiff = diff
+            }
+          }
+          next = best.id
+        }
+      }
+    } else if (
+      activeId !== prevActiveIdRef.current &&
+      activeId !== null &&
+      activeId !== selectedBlockId &&
+      !notesFocusedRef.current
+    ) {
+      // Rule 3: follow a newly active block, but never while the notes
+      // editor holds focus — a block entering session must not yank the
+      // panel away from someone mid-sentence.
+      next = activeId
+    }
+
+    prevActiveIdRef.current = activeId
+
+    if (next !== undefined) {
+      // Rule 5: flush any pending edit before the selection changes.
+      const target = next
+      void (flushNotesRef.current?.() ?? Promise.resolve(true)).then(() => setSelectedBlockId(target))
+    }
+  }, [blocks, nowMin, selectedBlockId])
+
+  const selectBlockNotes = (blockId: number) => {
+    if (blockId === selectedBlockId) return
+    void (flushNotesRef.current?.() ?? Promise.resolve(true)).then(() => setSelectedBlockId(blockId))
+  }
+
+  const selectedBlock = blocks.find((b) => b.id === selectedBlockId) ?? null
+  const notesNow = new Date(fromDayKey(day).getTime() + nowMin * 60000)
 
   // Hydrate on mount
   useEffect(() => {
@@ -201,7 +285,9 @@ export function TodayView() {
         </div>
       </div>
 
-      {/* Timeline */}
+      {/* Timeline + notes panel */}
+      <div className="today-body">
+      <div className="today-timeline-col">
       {isEmptyAndClosed ? (
         <div className="today-timeline">
           <div className="timeline-gutter" />
@@ -281,12 +367,27 @@ export function TodayView() {
                   }}
                   onDragEnd={clear}
                   dragTarget={drag.targetIndex === blocks.findIndex((block) => block.id === row.block.id) && drag.sourceId !== row.block.id}
+                  onSelectNotes={selectBlockNotes}
+                  selected={row.block.id === selectedBlockId}
                 />
               )
             })}
           </div>
         </div>
       )}
+      </div>
+
+      <div className="today-notes-panel">
+        <BlockNotesPanel
+          block={selectedBlock}
+          now={notesNow}
+          flushRef={flushNotesRef}
+          onFocusChange={(focused) => {
+            notesFocusedRef.current = focused
+          }}
+        />
+      </div>
+      </div>
 
       {/* Template menu */}
       {templateMenuOpen && (

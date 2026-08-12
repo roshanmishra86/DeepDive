@@ -4,6 +4,7 @@ import { useDayStore } from '../../stores/day'
 import { useTodayBlocks } from '../../stores/useTodayBlocks'
 import { blockProgress } from '../../lib/today'
 import { formatDuration } from '../../lib/time'
+import { isEmptyNote } from '../../lib/richText'
 import type { DayBlock } from '../../db/types'
 import type { BlockState } from '../../lib/today'
 import { useAppStore } from '../../stores/app'
@@ -22,6 +23,15 @@ interface TimelineBlockProps {
   onDrop?: () => void
   onDragEnd?: () => void
   dragTarget?: boolean
+  /**
+   * When provided (Today does), the NotePencil button selects this block in
+   * the inline notes panel instead of opening `PlanPanel`. Left undefined so
+   * this component stays reusable for the Phase 8 week grid, where it keeps
+   * the original `openPlan` behaviour.
+   */
+  onSelectNotes?: (blockId: number) => void
+  /** Applies `.timeline-block-selected` — shows which block the notes panel is bound to. */
+  selected?: boolean
 }
 
 const NUDGE_MIN = 5
@@ -38,6 +48,8 @@ export function TimelineBlock({
   onDrop,
   onDragEnd,
   dragTarget = false,
+  onSelectNotes,
+  selected = false,
 }: TimelineBlockProps) {
   const toggleCompleted = useBlocksStore((s) => s.toggleCompleted)
   const removeBlock = useBlocksStore((s) => s.removeBlock)
@@ -68,6 +80,7 @@ export function TimelineBlock({
     isCompact && 'timeline-block-compact',
     overlapMin !== undefined && 'timeline-block-conflict',
     dragTarget && 'timeline-block-drag-target',
+    selected && 'timeline-block-selected',
   ]
     .filter(Boolean)
     .join(' ')
@@ -169,11 +182,14 @@ export function TimelineBlock({
         </button>
         <button
           className="btn-icon"
-          onClick={() => openPlan(block.taskId ? { kind: 'task', id: block.taskId } : { kind: 'block', id: block.id })}
-          aria-label={`Open plan for ${block.title}`}
-          title="Open plan"
+          onClick={() => {
+            if (onSelectNotes) onSelectNotes(block.id)
+            else openPlan(block.taskId ? { kind: 'task', id: block.taskId } : { kind: 'block', id: block.id })
+          }}
+          aria-label={onSelectNotes ? `Show notes for ${block.title}` : `Open plan for ${block.title}`}
+          title={onSelectNotes ? 'Show notes' : 'Open plan'}
         >
-          <NotePencil size={14} weight={block.note ? 'fill' : 'regular'} />
+          <NotePencil size={14} weight={isEmptyNote(block.note) ? 'regular' : 'fill'} />
         </button>
         <button
           className="btn-icon"

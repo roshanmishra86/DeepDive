@@ -21,7 +21,7 @@ import { TaskRow } from '../../components/todo/TaskRow'
 import { SubtaskList } from '../../components/todo/SubtaskList'
 import { NotesEditor } from '../../components/common/NotesEditor'
 import { importMarkdownNotes } from '../../lib/markdownExport'
-import { notePlainText, parseNote } from '../../lib/richText'
+import { notePlainText, parseNote, serializeNote } from '../../lib/richText'
 import { DEFAULT_ACCENT } from '../../lib/accents'
 
 const DAY = '2026-08-10'
@@ -29,6 +29,14 @@ const DAY = '2026-08-10'
 const dbMock = vi.hoisted(() => ({ driver: null as ReturnType<typeof createTestDb>['driver'] | null }))
 
 vi.mock('../../db/index', () => ({ openDatabase: async () => dbMock.driver }))
+
+// The pencil's fill/regular weight is the thing under test in one of the
+// specs below (isEmptyNote vs raw string truthiness); the phosphor icon's
+// real SVG path data is an internal implementation detail of that package,
+// so it is swapped for a plain element exposing the resolved `weight`.
+vi.mock('@phosphor-icons/react/dist/csr/NotePencil', () => ({
+  NotePencil: ({ weight }: { weight?: string }) => <span data-testid="note-pencil" data-weight={weight ?? 'regular'} />,
+}))
 
 const makeTask = (id: number, patch: Partial<Task> = {}): Task => ({
   id,
@@ -48,7 +56,7 @@ const makeTask = (id: number, patch: Partial<Task> = {}): Task => ({
   ...patch,
 })
 
-const makeBlock = (id: number, title: string, startMin: number): DayBlock => ({
+const makeBlock = (id: number, title: string, startMin: number, patch: Partial<DayBlock> = {}): DayBlock => ({
   id,
   day: '2026-08-10',
   taskId: null,
@@ -65,6 +73,7 @@ const makeBlock = (id: number, title: string, startMin: number): DayBlock => ({
   repeat: 'once',
   trackId: null,
   quiet: false,
+  ...patch,
 })
 
 function resetStores() {
@@ -72,7 +81,7 @@ function resetStores() {
     year: new Date().getFullYear(), month0: new Date().getMonth(), statuses: {}, selectedDay: null,
     record: null, headline: null, trend: [], hasRecords: false, hasDayRecords: false, loading: false, error: null,
   })
-  useAppStore.setState({ view: 'week', accent: DEFAULT_ACCENT, timerStyle: 'ring', repeatStyle: 'chip', settingsOpen: false, planTarget: null, sessionOpen: false })
+  useAppStore.setState({ view: 'week', accent: DEFAULT_ACCENT, timerStyle: 'ring', repeatStyle: 'chip', settingsOpen: false, planTarget: null, sessionOpen: false, pendingTodoFocus: null })
   useTasksStore.setState({
     tasks: [], archivedTasks: [], groupBy: 'matrix', loading: false, loadingArchived: false, error: null,
     errorArchived: null, subtasksByTask: {}, subtaskLoading: {}, subtaskError: {},
@@ -242,5 +251,176 @@ describe('task planning release flows', () => {
     expect(screen.getByRole('button', { name: 'Repeat queue' })).toBeDefined()
     act(() => usePlayerStore.setState({ repeatMode: 'one' }))
     expect(screen.getByRole('button', { name: 'Repeat one' })).toBeDefined()
+  })
+
+  describe('Today block notes panel', () => {
+    it('shows the selected block\'s note and switches it when another block is chosen', async () => {
+      useBlocksStore.setState({
+        blocksByDay: {
+          [DAY]: [
+            makeBlock(1, 'First', 540, { note: 'First note text' }),
+            makeBlock(2, 'Second', 660, { note: 'Second note text' }),
+          ],
+        },
+        loadedDays: [DAY],
+      })
+      render(<TodayView />)
+
+      // nowMin=540 (from beforeEach) makes First the active, initially-selected block.
+      expect(screen.getByRole('textbox', { name: 'Notes for First' }).textContent).toBe('First note text')
+      expect(screen.queryByRole('textbox', { name: 'Notes for Second' })).toBeNull()
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: 'Show notes for Second' }))
+      })
+
+      expect(screen.getByRole('textbox', { name: 'Notes for Second' }).textContent).toBe('Second note text')
+      expect(screen.queryByRole('textbox', { name: 'Notes for First' })).toBeNull()
+    })
+
+    it('does not switch away from a focused block when a different block becomes active', async () => {
+      useBlocksStore.setState({
+        blocksByDay: {
+          [DAY]: [
+            makeBlock(1, 'First', 540, { note: 'First note text' }),
+            makeBlock(2, 'Second', 660, { note: 'Second note text' }),
+          ],
+        },
+        loadedDays: [DAY],
+      })
+      render(<TodayView />)
+
+      const firstTextbox = screen.getByRole('textbox', { name: 'Notes for First' })
+      // Bubbling focusin/focusout — the boundary the panel listens on for
+      // its onFocus/onBlur — not the non-bubbling `fireEvent.focus`, which
+      // would never reach the wrapper that owns the handler.
+      fireEvent.focusIn(firstTextbox)
+
+      // Second block now starts its in-session window; without the focus
+      // gate this would yank the panel away mid-edit.
+      await act(async () => {
+        useDayStore.setState({ nowMin: 660 })
+      })
+
+      expect(screen.getByRole('textbox', { name: 'Notes for First' })).toBeDefined()
+      expect(screen.queryByRole('textbox', { name: 'Notes for Second' })).toBeNull()
+
+      fireEvent.focusOut(firstTextbox)
+    })
+
+    it('falls back to the nearest remaining block when the selected block is deleted', async () => {
+      useBlocksStore.setState({
+        blocksByDay: {
+          [DAY]: [
+            makeBlock(1, 'First', 540, { note: 'First note text' }),
+            makeBlock(2, 'Second', 660, { note: 'Second note text' }),
+          ],
+        },
+        loadedDays: [DAY],
+      })
+      render(<TodayView />)
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: 'Show notes for Second' }))
+      })
+      expect(screen.getByRole('textbox', { name: 'Notes for Second' })).toBeDefined()
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: 'Delete Second' }))
+      })
+
+      await vi.waitFor(() => {
+        expect(screen.getByRole('textbox', { name: 'Notes for First' })).toBeDefined()
+      })
+    })
+
+    it('shows the task link only when the block is linked to a task, and it focuses that task', async () => {
+      useBlocksStore.setState({
+        blocksByDay: { [DAY]: [makeBlock(1, 'Linked', 540, { taskId: 5 })] },
+        loadedDays: [DAY],
+      })
+      render(<TodayView />)
+
+      const link = screen.getByRole('button', { name: 'This is a task. ↗' })
+      await act(async () => {
+        fireEvent.click(link)
+      })
+      expect(useAppStore.getState().pendingTodoFocus).toBe(5)
+      expect(useAppStore.getState().view).toBe('todo')
+    })
+
+    it('hides the task link when the block has no linked task', () => {
+      useBlocksStore.setState({
+        blocksByDay: { [DAY]: [makeBlock(1, 'Unlinked', 540)] },
+        loadedDays: [DAY],
+      })
+      render(<TodayView />)
+      expect(screen.queryByRole('button', { name: 'This is a task. ↗' })).toBeNull()
+    })
+
+    it('shows the note-pencil as fill only for real content, not a serialized empty doc', () => {
+      const emptyDoc = serializeNote({ type: 'doc', content: [{ type: 'paragraph' }] })
+      useBlocksStore.setState({
+        blocksByDay: {
+          [DAY]: [
+            makeBlock(1, 'Empty', 540, { note: emptyDoc }),
+            makeBlock(2, 'Filled', 660, { note: 'Some real content' }),
+          ],
+        },
+        loadedDays: [DAY],
+      })
+      render(<TodayView />)
+
+      const emptyPencil = screen.getByRole('button', { name: 'Show notes for Empty' }).querySelector('[data-testid="note-pencil"]')
+      const filledPencil = screen.getByRole('button', { name: 'Show notes for Filled' }).querySelector('[data-testid="note-pencil"]')
+      expect(emptyPencil?.getAttribute('data-weight')).toBe('regular')
+      expect(filledPencil?.getAttribute('data-weight')).toBe('fill')
+    })
+
+    it('seeds the panel with the first block once blocks hydrate after mount, even when none is active', async () => {
+      // Blocks start empty (mirrors a real mount: useTodayBlocks() returns
+      // the frozen EMPTY array until async hydration resolves) and neither
+      // block below covers nowMin=540, so Rule 1's "first block" arm — not
+      // "active block" — is what must seed the selection.
+      render(<TodayView />)
+      expect(screen.queryByRole('textbox', { name: /Notes for/ })).toBeNull()
+
+      await act(async () => {
+        useBlocksStore.setState({
+          blocksByDay: {
+            [DAY]: [
+              makeBlock(1, 'Later First', 600, { note: 'Later first note' }),
+              makeBlock(2, 'Later Second', 660, { note: 'Later second note' }),
+            ],
+          },
+          loadedDays: [DAY],
+        })
+      })
+
+      expect(screen.getByRole('textbox', { name: 'Notes for Later First' }).textContent).toBe('Later first note')
+    })
+
+    it('reseeds the panel after the last block is deleted and a new one is added', async () => {
+      useBlocksStore.setState({
+        blocksByDay: { [DAY]: [makeBlock(1, 'Solo', 600, { note: 'Solo note' })] },
+        loadedDays: [DAY],
+      })
+      render(<TodayView />)
+      expect(screen.getByRole('textbox', { name: 'Notes for Solo' })).toBeDefined()
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: 'Delete Solo' }))
+      })
+      expect(screen.queryByRole('textbox', { name: /Notes for/ })).toBeNull()
+
+      await act(async () => {
+        useBlocksStore.setState({
+          blocksByDay: { [DAY]: [makeBlock(2, 'Fresh', 620, { note: 'Fresh note' })] },
+          loadedDays: [DAY],
+        })
+      })
+
+      expect(screen.getByRole('textbox', { name: 'Notes for Fresh' }).textContent).toBe('Fresh note')
+    })
   })
 })
