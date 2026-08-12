@@ -210,6 +210,59 @@ export async function reorderBlocks(
   }
 }
 
+export async function listBlocksForRange(
+  driver: SqlDriver,
+  fromDay: string,
+  toDay: string
+): Promise<DayBlock[]> {
+  const rows = await driver.select<BlockRow>(
+    'SELECT * FROM day_block WHERE day >= ? AND day <= ? ORDER BY day, start_min, sort',
+    [fromDay, toDay]
+  )
+  return rows.map(rowToBlock)
+}
+
+export async function moveBlockToDayAtomic(
+  driver: SqlDriver,
+  input: {
+    blockId: number
+    fromDay: string
+    toDay: string
+    fromDayOrderedIds: number[]
+    toDayOrderedIds: number[]
+  }
+): Promise<boolean> {
+  const { blockId, fromDay, toDay, fromDayOrderedIds, toDayOrderedIds } = input
+  // Guard on fromDay so a stale client can't move a block that's already
+  // moved elsewhere. A guard miss blocks the DAY MOVE ONLY — it does not make
+  // the call a no-op: the resequence statements below still run in the same
+  // commit, and each is WHERE id = ? AND day = ? scoped to its own day, so
+  // any row that IS on that day gets the caller's proposed sort. When the
+  // block has already been moved onto toDay by someone else, toDay's sort
+  // values are therefore rewritten even though the return is false. That
+  // never corrupts a row — sort is only a within-day tie-breaker for equal
+  // start_min — but false does NOT mean "nothing happened", and a caller that
+  // wants its in-memory sort values to match disk after a miss has to reload
+  // both days. Both cases are verified in blocks.test.ts, not just asserted
+  // here.
+  const statements = [
+    {
+      sql: 'UPDATE day_block SET day = ? WHERE id = ? AND day = ?',
+      params: [toDay, blockId, fromDay],
+    },
+    ...fromDayOrderedIds.map((id, index) => ({
+      sql: 'UPDATE day_block SET sort = ? WHERE id = ? AND day = ?',
+      params: [index, id, fromDay],
+    })),
+    ...toDayOrderedIds.map((id, index) => ({
+      sql: 'UPDATE day_block SET sort = ? WHERE id = ? AND day = ?',
+      params: [index, id, toDay],
+    })),
+  ]
+  const results = await driver.transaction(statements)
+  return results[0].rowsAffected !== 0
+}
+
 export async function moveDayBlocksAtomic(
   driver: SqlDriver,
   day: string,

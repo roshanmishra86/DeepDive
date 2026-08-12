@@ -178,7 +178,7 @@ export async function addTemplateBlock(
 // except the immutable/derived ones, id and templateId). Typed as
 // Record<keyof Omit<TemplateBlock, 'id' | 'templateId'>, string> — the same
 // exhaustive-key convention as PERSISTABLE_BLOCK_FIELDS in stores/templates.ts
-// and stores/today.ts — so adding a field to TemplateBlock without adding it
+// and stores/blocks.ts — so adding a field to TemplateBlock without adding it
 // here fails `tsc -b` instead of the new field being silently dropped on
 // persist by whichever caller forgets to handle it.
 const TEMPLATE_BLOCK_COLUMNS: Record<keyof Omit<TemplateBlock, 'id' | 'templateId'>, string> = {

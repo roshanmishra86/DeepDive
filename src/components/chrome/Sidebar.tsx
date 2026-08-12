@@ -1,6 +1,7 @@
 import { useState, useEffect, type ReactElement } from 'react'
 import { useAppStore, type View } from '../../stores/app'
 import { useRitualsStore } from '../../stores/rituals'
+import { useDayStore } from '../../stores/day'
 import { openDatabase } from '../../db/index'
 import * as archive from '../../db/repos/archive'
 import { toDayKey, startOfWeek, splitDeepHours } from '../../lib/time'
@@ -128,6 +129,10 @@ function RitualChecklist() {
 
 function DeepHoursCard() {
   const [weekMinutes, setWeekMinutes] = useState<number[]>([0, 0, 0, 0, 0, 0, 0])
+  // Re-read on midnight rollover: the day store publishes the new day key,
+  // and this card's week window (and "today" bar) move with it. This is the
+  // card's only refresh entry point — it has no store of its own.
+  const currentDay = useDayStore((s) => s.currentDay)
 
   useEffect(() => {
     let mounted = true
@@ -149,7 +154,7 @@ function DeepHoursCard() {
     return () => {
       mounted = false
     }
-  }, [])
+  }, [currentDay])
 
   // Compute total hours and bar heights as percentages
   const totalMinutes = weekMinutes.reduce((sum, m) => sum + m, 0)

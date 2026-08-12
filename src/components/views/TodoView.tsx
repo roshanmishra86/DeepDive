@@ -1,7 +1,9 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useTasksStore } from '../../stores/tasks'
+import { useDayStore } from '../../stores/day'
 import { openDatabase } from '../../db/index'
 import { groupByMatrix, groupByDeadline, QUADRANTS, DEADLINE_BUCKETS } from '../../lib/todo'
+import { fromDayKey } from '../../lib/time'
 import type { Task } from '../../db/types'
 import { TaskRow } from '../todo/TaskRow'
 import { TaskEditor } from '../todo/TaskEditor'
@@ -18,17 +20,22 @@ export function TodoView() {
 
   const [editorOpen, setEditorOpen] = useState(false)
   const [editorTaskId, setEditorTaskId] = useState<number | null>(null)
-  const [now, setNow] = useState(() => new Date())
+  const nowMin = useDayStore((s) => s.nowMin)
+  const currentDay = useDayStore((s) => s.currentDay)
   const [draggingId, setDraggingId] = useState<number | null>(null)
   const [dropHint, setDropHint] = useState<string | null>(null)
   const dropCompleted = useRef(false)
 
-  // Refresh `now` on an interval so deadline buckets and due labels don't
-  // get stuck across the 48h boundary or midnight while the view stays open.
-  useEffect(() => {
-    const id = window.setInterval(() => setNow(new Date()), 60000)
-    return () => window.clearInterval(id)
-  }, [])
+  // Deadline buckets and due labels need a full Date, but the app has one
+  // clock (the day store) and one interval. Rebuild it from the day store's
+  // published tick rather than reading `new Date()` here, so nothing gets
+  // stuck across the 48h boundary or midnight while the view stays open and
+  // every surface agrees on what "now" is.
+  const now = useMemo(() => {
+    const date = fromDayKey(currentDay)
+    date.setMinutes(nowMin)
+    return date
+  }, [currentDay, nowMin])
 
   // Hydrate on mount (idempotent; already hydrated at App level but safety for if this view opens first)
   useEffect(() => {

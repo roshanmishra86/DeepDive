@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
-import { useTodayStore } from '../../stores/today'
-import { toDayKey } from '../../lib/time'
+import { useBlocksStore } from '../../stores/blocks'
+import { useDayStore } from '../../stores/day'
+import { useTodayBlocks } from '../../stores/useTodayBlocks'
 import { openDatabase } from '../../db/index'
 import { layout, daySummary, blockState, conflicts, moveBlockTo, nextFreeStart } from '../../lib/today'
 import { formatDuration, minutesToClock, parseClock } from '../../lib/time'
@@ -16,19 +17,18 @@ type ComposerState =
   | { mode: 'edit'; blockId: number }
 
 export function TodayView() {
-  const blocks = useTodayStore((s) => s.blocks)
-  const loading = useTodayStore((s) => s.loading)
-  const error = useTodayStore((s) => s.error)
-  const hydrate = useTodayStore((s) => s.hydrate)
-  const shutdownMin = useTodayStore((s) => s.shutdownMin)
-  const setShutdown = useTodayStore((s) => s.setShutdown)
+  const blocks = useTodayBlocks()
+  const day = useDayStore((s) => s.currentDay)
+  const loading = useBlocksStore((s) => s.loading)
+  const error = useBlocksStore((s) => s.error)
+  const hydrate = useBlocksStore((s) => s.hydrate)
+  const shutdownMin = useDayStore((s) => s.shutdownMin)
+  const setShutdown = useDayStore((s) => s.setShutdown)
 
-  const [nowMin, setNowMin] = useState(() => {
-    const d = new Date()
-    return d.getHours() * 60 + d.getMinutes()
-  })
+  // Single app-wide clock, owned by the day store (App.tsx starts it).
+  const nowMin = useDayStore((s) => s.nowMin)
   const { drag, start, over, clear } = useDragList<number>()
-  const moveTo = useTodayStore((s) => s.moveTo)
+  const moveWithinDay = useBlocksStore((s) => s.moveWithinDay)
 
   const [composerState, setComposerState] = useState<ComposerState>({ mode: 'closed' })
   const [templateMenuOpen, setTemplateMenuOpen] = useState(false)
@@ -43,8 +43,11 @@ export function TodayView() {
       try {
         const driver = await openDatabase()
         if (!mounted) return
-        const hydrationDay = toDayKey(new Date())
-        await hydrate(driver, hydrationDay)
+        // The day key comes from the clock owner, never from a local
+        // `new Date()` — that split is what produced the UTC-day-key defect.
+        const { currentDay: hydrationDay, nowMin: hydrationNowMin } = useDayStore.getState()
+        await useDayStore.getState().hydrate(driver, hydrationDay, hydrationNowMin)
+        await hydrate(driver, [hydrationDay])
       } catch (err) {
         console.error('Failed to hydrate today view:', err)
       }
@@ -53,15 +56,6 @@ export function TodayView() {
       mounted = false
     }
   }, [hydrate])
-
-  // Update nowMin every 30s
-  useEffect(() => {
-    const id = window.setInterval(() => {
-      const d = new Date()
-      setNowMin(d.getHours() * 60 + d.getMinutes())
-    }, 30000)
-    return () => window.clearInterval(id)
-  }, [])
 
   const sourceIndex = drag.sourceId === null ? -1 : blocks.findIndex((block) => block.id === drag.sourceId)
   const previewBlocks = sourceIndex !== -1 && drag.targetIndex !== null
@@ -282,7 +276,7 @@ export function TodayView() {
                   onDragOver={() => over(blocks.findIndex((block) => block.id === row.block.id))}
                   onDrop={() => {
                     const targetIndex = blocks.findIndex((block) => block.id === row.block.id)
-                    if (drag.sourceId !== null && targetIndex !== -1 && targetIndex !== sourceIndex) void moveTo(drag.sourceId, targetIndex)
+                    if (drag.sourceId !== null && targetIndex !== -1 && targetIndex !== sourceIndex) void moveWithinDay(day, drag.sourceId, targetIndex)
                     clear()
                   }}
                   onDragEnd={clear}

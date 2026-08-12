@@ -1,7 +1,9 @@
 import type { BlockKind } from '../../db/types'
 import { previewTodaySchedule, type TodaySchedulePreview } from '../../lib/scheduling'
 import { useAppStore } from '../../stores/app'
-import { useTodayStore } from '../../stores/today'
+import { useBlocksStore } from '../../stores/blocks'
+import { useDayStore } from '../../stores/day'
+import { useTodayBlocks } from '../../stores/useTodayBlocks'
 
 export interface SchedulableTaskBlock {
   title: string
@@ -19,9 +21,10 @@ export interface ScheduleTodayResult {
 
 /** Shared creation action for week tasks and subtasks. */
 export function useScheduleTodayBlock(now: Date) {
-  const blocks = useTodayStore((state) => state.blocks)
-  const shutdownMin = useTodayStore((state) => state.shutdownMin)
-  const addBlock = useTodayStore((state) => state.addBlock)
+  const blocks = useTodayBlocks()
+  const day = useDayStore((state) => state.currentDay)
+  const shutdownMin = useDayStore((state) => state.shutdownMin)
+  const addBlock = useBlocksStore((state) => state.addBlock)
   const setView = useAppStore((state) => state.setView)
   const fromMin = now.getHours() * 60 + now.getMinutes()
 
@@ -36,7 +39,7 @@ export function useScheduleTodayBlock(now: Date) {
   const schedule = async (draft: SchedulableTaskBlock, subtask = false): Promise<ScheduleTodayResult> => {
     const placement = preview(draft.durationMin, subtask)
     if (!placement.valid || !placement.fits) return { ok: false, preview: placement }
-    const id = await addBlock({ ...draft, fromMin })
+    const id = await addBlock(day, { ...draft, fromMin })
     if (id === null) return { ok: false, preview: placement }
     setView('today')
     return { ok: true, preview: placement }

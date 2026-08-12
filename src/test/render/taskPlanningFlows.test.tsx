@@ -11,7 +11,8 @@ import { useAppStore } from '../../stores/app'
 import { useLibraryStore } from '../../stores/library'
 import { usePlayerStore } from '../../stores/player'
 import { useTasksStore } from '../../stores/tasks'
-import { useTodayStore } from '../../stores/today'
+import { useBlocksStore } from '../../stores/blocks'
+import { useDayStore } from '../../stores/day'
 import { ArchiveView } from '../../components/views/ArchiveView'
 import { MusicBar } from '../../components/chrome/MusicBar'
 import { PlanPanel } from '../../components/plan/PlanPanel'
@@ -19,6 +20,8 @@ import { TodayView } from '../../components/views/TodayView'
 import { TaskRow } from '../../components/todo/TaskRow'
 import { SubtaskList } from '../../components/todo/SubtaskList'
 import { DEFAULT_ACCENT } from '../../lib/accents'
+
+const DAY = '2026-08-10'
 
 const dbMock = vi.hoisted(() => ({ driver: null as ReturnType<typeof createTestDb>['driver'] | null }))
 
@@ -71,7 +74,9 @@ function resetStores() {
     tasks: [], archivedTasks: [], groupBy: 'matrix', loading: false, loadingArchived: false, error: null,
     errorArchived: null, subtasksByTask: {}, subtaskLoading: {}, subtaskError: {},
   })
-  useTodayStore.setState({ day: null, blocks: [], loading: false, error: null, shutdownMin: null, shutdownIsDefault: true })
+  useBlocksStore.setState({ blocksByDay: {}, loadedDays: [], loading: false, error: null })
+  // The day store owns the day key every today-scoped selector reads.
+  useDayStore.setState({ currentDay: DAY, nowMin: 540, shutdownMin: null, shutdownIsDefault: true, error: null })
   useLibraryStore.setState({ tracks: [], loading: false, error: null, fadeInSec: 8, silenceDuringRest: true })
   usePlayerStore.setState({ trackId: null, trackName: null, trackMeta: null, playing: false, volume: 70, positionSec: 0, durationSec: 0, missing: false, restPaused: false, queue: [], queueIndex: -1, repeatMode: 'off' })
 }
@@ -81,7 +86,8 @@ describe('task planning release flows', () => {
     resetStores()
     dbMock.driver = null
     await useTasksStore.getState().hydrate(null)
-    await useTodayStore.getState().hydrate(null, '2026-08-10')
+    await useDayStore.getState().hydrate(null, DAY, 540)
+    await useBlocksStore.getState().hydrate(null, [DAY])
   })
 
   it('renders archived tasks even when no day record exists', async () => {
@@ -127,7 +133,7 @@ describe('task planning release flows', () => {
   })
 
   it('previews and cancels a Today reorder without persisting until drop', async () => {
-    useTodayStore.setState({ day: '2026-08-10', blocks: [makeBlock(1, 'First', 540), makeBlock(2, 'Second', 660)] })
+    useBlocksStore.setState({ blocksByDay: { [DAY]: [makeBlock(1, 'First', 540), makeBlock(2, 'Second', 660)] }, loadedDays: [DAY] })
     render(<TodayView />)
 
     const firstHandle = screen.getByRole('button', { name: 'Drag First' })
@@ -139,12 +145,13 @@ describe('task planning release flows', () => {
     expect(Array.from(document.querySelectorAll('.timeline-block-title')).map((node) => node.textContent)).toEqual(['Second', 'First'])
     fireEvent.dragEnd(firstHandle)
     expect(screen.queryByText('Previewing reordered schedule — drop to apply')).toBeNull()
-    expect(useTodayStore.getState().blocks.map((block) => block.id)).toEqual([1, 2])
+    expect(useBlocksStore.getState().blocksByDay[DAY].map((block) => block.id)).toEqual([1, 2])
   })
 
   it('confirms a subtask duration before creating a Today block with both links', async () => {
     const { driver } = createTestDb()
-    await useTodayStore.getState().hydrate(driver, '2026-08-10')
+    await useDayStore.getState().hydrate(driver, DAY, 540)
+    await useBlocksStore.getState().hydrate(driver, [DAY])
     await useTasksStore.getState().hydrate(driver)
     const taskId = await useTasksStore.getState().addTask({ title: 'Parent', important: true })
     const subtaskId = await useTasksStore.getState().createSubtask({ taskId: taskId!, title: 'Research', estimateMin: 30 })
@@ -159,10 +166,10 @@ describe('task planning release flows', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Add to today' }))
 
     await vi.waitFor(() => {
-      expect(useTodayStore.getState().blocks).toHaveLength(1)
+      expect(useBlocksStore.getState().blocksByDay[DAY]).toHaveLength(1)
       expect(useAppStore.getState().view).toBe('today')
     })
-    expect(useTodayStore.getState().blocks[0]).toMatchObject({ taskId, subtaskId })
+    expect(useBlocksStore.getState().blocksByDay[DAY][0]).toMatchObject({ taskId, subtaskId })
   })
 
   it('uses accessible repeat labels for every repeat mode', () => {

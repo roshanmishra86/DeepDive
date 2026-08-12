@@ -2,14 +2,14 @@ import { useEffect } from 'react'
 import { useAppStore } from './stores/app'
 import { useRitualsStore } from './stores/rituals'
 import { useTasksStore } from './stores/tasks'
-import { useTodayStore } from './stores/today'
+import { useBlocksStore } from './stores/blocks'
+import { useDayStore } from './stores/day'
 import { useTemplatesStore } from './stores/templates'
 import { useTimerStore } from './stores/timer'
 import { useLibraryStore } from './stores/library'
 import { usePlayerStore } from './stores/player'
 import { openDatabase } from './db/index'
 import { applyAccent } from './lib/accents'
-import { toDayKey } from './lib/time'
 import { activeWorkBlock } from './lib/timer'
 import { spaceTogglesTimer, escapeExitsSession } from './lib/shortcuts'
 import { TitleBar } from './components/chrome/TitleBar'
@@ -84,7 +84,10 @@ function useGlobalShortcuts() {
         e.preventDefault()
         const now = new Date()
         const nowMin = now.getHours() * 60 + now.getMinutes()
-        const candidate = activeWorkBlock(useTodayStore.getState().blocks, nowMin)
+        // Event handler, not a render path: both stores are read via
+        // getState() so this listener never has to re-subscribe.
+        const day = useDayStore.getState().currentDay
+        const candidate = activeWorkBlock(useBlocksStore.getState().blocksByDay[day] ?? [], nowMin)
         void useTimerStore.getState().toggle(candidate)
         return
       }
@@ -113,14 +116,15 @@ function App() {
       try {
         const driver = await openDatabase()
         if (!mounted) return
-        const now = new Date()
-        const hydrationDay = toDayKey(now)
-        const nowMin = now.getHours() * 60 + now.getMinutes()
+        // The day store owns the clock; every other store takes the day key
+        // and minute-of-day from it.
+        const { currentDay: hydrationDay, nowMin } = useDayStore.getState()
         await Promise.all([
+          useDayStore.getState().hydrate(driver, hydrationDay, nowMin),
           useAppStore.getState().hydrate(driver),
           useRitualsStore.getState().hydrate(driver, hydrationDay),
           useTasksStore.getState().hydrate(driver),
-          useTodayStore.getState().hydrate(driver, hydrationDay),
+          useBlocksStore.getState().hydrate(driver, [hydrationDay]),
           useTemplatesStore.getState().hydrate(driver),
           useLibraryStore.getState().hydrate(driver),
           usePlayerStore.getState().hydrate(driver),
@@ -141,6 +145,10 @@ function App() {
   useEffect(() => {
     applyAccent(accent, document.documentElement)
   }, [accent])
+
+  // The single app-wide 30s clock: recomputes nowMin and rolls Today,
+  // rituals, the sidebar and the timer over at midnight.
+  useEffect(() => useDayStore.getState().start(), [])
 
   // Wall-clock timer tick. The store recomputes from `endsAt`, so a
   // suspended/minimised window catches up instead of drifting.

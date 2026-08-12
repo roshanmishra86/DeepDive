@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react'
-import { useTodayStore } from '../../stores/today'
+import { useBlocksStore } from '../../stores/blocks'
+import { useDayStore } from '../../stores/day'
+import { useTodayBlocks } from '../../stores/useTodayBlocks'
 import { useTasksStore } from '../../stores/tasks'
 import { openDatabase } from '../../db/index'
 import * as tracksRepo from '../../db/repos/tracks'
@@ -40,12 +42,13 @@ const REPEAT_OPTIONS: { value: BlockRepeat; label: string }[] = [
 ]
 
 export function BlockComposer({ blockId, startMin: startMinProp, onDone }: BlockComposerProps) {
-  const blocks = useTodayStore((s) => s.blocks)
-  const addBlock = useTodayStore((s) => s.addBlock)
-  const editBlock = useTodayStore((s) => s.editBlock)
-  const removeBlock = useTodayStore((s) => s.removeBlock)
-  const shutdownMin = useTodayStore((s) => s.shutdownMin)
-  const setShutdown = useTodayStore((s) => s.setShutdown)
+  const blocks = useTodayBlocks()
+  const day = useDayStore((s) => s.currentDay)
+  const addBlock = useBlocksStore((s) => s.addBlock)
+  const editBlock = useBlocksStore((s) => s.editBlock)
+  const removeBlock = useBlocksStore((s) => s.removeBlock)
+  const shutdownMin = useDayStore((s) => s.shutdownMin)
+  const setShutdown = useDayStore((s) => s.setShutdown)
 
   const tasks = useTasksStore((s) => s.tasks)
   const addTask = useTasksStore((s) => s.addTask)
@@ -196,6 +199,7 @@ export function BlockComposer({ blockId, startMin: startMinProp, onDone }: Block
         })
       }
       await editBlock(
+        day,
         block.id,
         {
           title,
@@ -241,7 +245,7 @@ export function BlockComposer({ blockId, startMin: startMinProp, onDone }: Block
       })
     }
 
-    await addBlock({
+    await addBlock(day, {
       title,
       kind: draft.kind,
       durationMin: draft.durationMin,
@@ -283,7 +287,7 @@ export function BlockComposer({ blockId, startMin: startMinProp, onDone }: Block
 
   const handleDelete = () => {
     if (!block) return
-    void removeBlock(block.id)
+    void removeBlock(day, block.id)
     onDone()
   }
 

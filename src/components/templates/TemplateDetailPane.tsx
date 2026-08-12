@@ -1,6 +1,8 @@
 import { useState } from 'react'
 import { useTemplatesStore } from '../../stores/templates'
-import { useTodayStore } from '../../stores/today'
+import { useBlocksStore } from '../../stores/blocks'
+import { useDayStore } from '../../stores/day'
+import { useTodayBlocks } from '../../stores/useTodayBlocks'
 import { useAppStore } from '../../stores/app'
 import { minutesToClock } from '../../lib/time'
 import { templateSubtitle, WEEKDAYS, hasWeekday } from '../../lib/templates'
@@ -29,12 +31,13 @@ export function TemplateDetailPane({ template }: TemplateDetailPaneProps) {
   const removeBlock = useTemplatesStore((s) => s.removeBlock)
   const moveBlock = useTemplatesStore((s) => s.moveBlock)
   const moveBlockTo = useTemplatesStore((s) => s.moveBlockTo)
-  const applyTemplate = useTodayStore((s) => s.applyTemplate)
-  const todayBlocks = useTodayStore((s) => s.blocks)
-  // P2-A: applyTemplate reports failure via the today store's `error` field
+  const applyTemplate = useBlocksStore((s) => s.applyTemplate)
+  const currentDay = useDayStore((s) => s.currentDay)
+  const todayBlocks = useTodayBlocks()
+  // P2-A: applyTemplate reports failure via the blocks store's `error` field
   // (it never throws) — subscribe so a failed apply is visible instead of
   // silently doing nothing when handleApply below declines to navigate.
-  const applyError = useTodayStore((s) => s.error)
+  const applyError = useBlocksStore((s) => s.error)
   const setView = useAppStore((s) => s.setView)
 
   const [blockModal, setBlockModal] = useState<BlockModalState>(null)
@@ -57,7 +60,7 @@ export function TemplateDetailPane({ template }: TemplateDetailPaneProps) {
     // P2-A: applyTemplate never throws — it reports success via its return
     // value. Only navigate to Today when the apply actually landed; a
     // failed apply used to still navigate, hiding the failure entirely.
-    const ok = await applyTemplate(template.id)
+    const ok = await applyTemplate(currentDay, template.id)
     if (ok) {
       setView('today')
     }

@@ -7,7 +7,9 @@ import { UploadSimple } from '@phosphor-icons/react/dist/csr/UploadSimple'
 import { X } from '@phosphor-icons/react/dist/csr/X'
 import { useAppStore, registerPlanFlush } from '../../stores/app'
 import { useTasksStore } from '../../stores/tasks'
-import { useTodayStore } from '../../stores/today'
+import { useBlocksStore } from '../../stores/blocks'
+import { useDayStore } from '../../stores/day'
+import { useTodayBlocks } from '../../stores/useTodayBlocks'
 import { exportTaskMarkdown, importMarkdownNotes, markdownFilename } from '../../lib/markdownExport'
 import { isTauri } from '../../lib/platform'
 import type { Subtask } from '../../db/types'
@@ -25,8 +27,9 @@ export function PlanPanel() {
   const subtasks = useTasksStore((state) => target?.kind === 'task' ? state.subtasksByTask[target.id] ?? NO_SUBTASKS : NO_SUBTASKS)
   const loadSubtasks = useTasksStore((state) => state.loadSubtasks)
   const saveTaskNotes = useTasksStore((state) => state.saveTaskNotes)
-  const blocks = useTodayStore((state) => state.blocks)
-  const saveBlockNote = useTodayStore((state) => state.saveBlockNote)
+  const blocks = useTodayBlocks()
+  const currentDay = useDayStore((state) => state.currentDay)
+  const saveBlockNote = useBlocksStore((state) => state.saveBlockNote)
   const block = target?.kind === 'block' ? blocks.find((item) => item.id === target.id) ?? null : null
   const noteOwner = task
   const [draft, setDraft] = useState(noteOwner?.notes ?? block?.note ?? '')
@@ -74,7 +77,7 @@ export function PlanPanel() {
     writeChain.current = writeChain.current.then(async () => {
       const ok = targetAtRevision.kind === 'task'
         ? await saveTaskNotes(targetAtRevision.id, notes)
-        : await saveBlockNote(targetAtRevision.id, notes, new Date().toISOString())
+        : await saveBlockNote(currentDay, targetAtRevision.id, notes, new Date().toISOString())
       if (ok) {
         savedRevision.current = Math.max(savedRevision.current, rev)
         if (rev === revision.current) setSaveState('Saved')
@@ -87,7 +90,7 @@ export function PlanPanel() {
       return false
     })
     return writeChain.current
-  }, [saveBlockNote, saveTaskNotes, target])
+  }, [currentDay, saveBlockNote, saveTaskNotes, target])
 
   const flush = useCallback(async () => {
     if (debounce.current) {

@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useTasksStore } from '../../stores/tasks'
-import { useTodayStore } from '../../stores/today'
+import { useTodayBlocks } from '../../stores/useTodayBlocks'
 import { useAppStore } from '../../stores/app'
 import type { Subtask, Task } from '../../db/types'
 import { taskMeta, blockDraftFromTask } from '../../lib/todo'
@@ -34,7 +34,7 @@ export function TaskRow({ task, isDrop = false, onEdit, now, onDragStart, onDrag
   const toggleUrgent = useTasksStore((s) => s.toggleUrgent)
   const toggleDone = useTasksStore((s) => s.toggleDone)
   const removeTask = useTasksStore((s) => s.removeTask)
-  const blocks = useTodayStore((s) => s.blocks)
+  const blocks = useTodayBlocks()
   const openPlan = useAppStore((s) => s.openPlan)
   const archiveTask = useTasksStore((s) => s.archiveTask)
   const { schedule } = useScheduleTodayBlock(now)
