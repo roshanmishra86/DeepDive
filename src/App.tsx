@@ -21,29 +21,15 @@ import { SettingsPanel } from './components/chrome/SettingsPanel'
 import { SessionOverlay } from './components/chrome/SessionOverlay'
 import { TodayView } from './components/views/TodayView'
 import { TodoView } from './components/views/TodoView'
-import { ViewPlaceholder } from './components/views/ViewPlaceholder'
+import { WeekPlanView } from './components/views/WeekPlanView'
 import { TemplatesView } from './components/views/TemplatesView'
 import { ArchiveView } from './components/views/ArchiveView'
 import { LibraryView } from './components/views/LibraryView'
 
-/**
- * The `week` slot stays on a placeholder until the This Week calendar lands
- * (the redesign's Phase 8) — every other view is independently shippable.
- */
-function WeekPlanPlaceholder() {
-  return (
-    <ViewPlaceholder
-      title="This Week"
-      subtitle="A Monday–Sunday calendar of real time blocks, with weekly analytics."
-      phase="the This Week phase"
-    />
-  )
-}
-
 const VIEWS = {
   today: TodayView,
   todo: TodoView,
-  week: WeekPlanPlaceholder,
+  week: WeekPlanView,
   templates: TemplatesView,
   archive: ArchiveView,
   library: LibraryView,

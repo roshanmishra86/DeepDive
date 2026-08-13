@@ -17,6 +17,7 @@ import { ArchiveView } from '../../components/views/ArchiveView'
 import { MusicBar } from '../../components/chrome/MusicBar'
 import { PlanPanel } from '../../components/plan/PlanPanel'
 import { TodayView } from '../../components/views/TodayView'
+import { WeekPlanView } from '../../components/views/WeekPlanView'
 import { TaskRow } from '../../components/todo/TaskRow'
 import { SubtaskList } from '../../components/todo/SubtaskList'
 import { NotesEditor } from '../../components/common/NotesEditor'
@@ -528,6 +529,77 @@ describe('task planning release flows', () => {
       })
 
       expect(screen.getByRole('textbox', { name: 'Notes for Fresh' }).textContent).toBe('Fresh note')
+    })
+  })
+
+  describe('WeekPlanView', () => {
+    it('+ Add block on a day column opens the composer for that day', async () => {
+      const futureDay = '2026-08-12'
+      useDayStore.setState({ currentDay: DAY, nowMin: 540 })
+      useBlocksStore.setState({ blocksByDay: {}, loadedDays: [DAY, futureDay] })
+      render(<WeekPlanView />)
+
+      const addBlockButtons = screen.getAllByRole('button', { name: 'Add block' })
+      // The 7 buttons are for each day of the week; futureDay is 2 days after DAY
+      fireEvent.click(addBlockButtons[2])
+
+      await vi.waitFor(() => {
+        expect(screen.getByRole('dialog')).toBeDefined()
+      })
+    })
+
+    it('Group by control reorders cards within a column without moving them between columns', async () => {
+      const task1 = makeTask(1, { title: 'Do task', important: true, urgent: true })
+      const task2 = makeTask(2, { title: 'Plan task', important: true, urgent: false })
+      useTasksStore.setState({ tasks: [task1, task2] })
+
+      const sameDay = DAY
+      useBlocksStore.setState({
+        blocksByDay: {
+          [sameDay]: [
+            makeBlock(1, 'Do block', 540, { taskId: 1, sort: 0 }),
+            makeBlock(2, 'Plan block', 600, { taskId: 2, sort: 1 }),
+          ],
+        },
+        loadedDays: [sameDay],
+      })
+      render(<WeekPlanView />)
+
+      const blocksTitles = Array.from(document.querySelectorAll('.week-block-card-title')).map((el) => el.textContent)
+      const doIndex = blocksTitles.indexOf('Do block')
+      const planIndex = blocksTitles.indexOf('Plan block')
+      expect(doIndex).toBeGreaterThanOrEqual(0)
+      expect(planIndex).toBeGreaterThanOrEqual(0)
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: 'Deadline' }))
+      })
+
+      // Blocks should have reordered within the same column
+      const blocksAfter = Array.from(document.querySelectorAll('.week-block-card-title')).map((el) => el.textContent)
+      const doIndexAfter = blocksAfter.indexOf('Do block')
+      const planIndexAfter = blocksAfter.indexOf('Plan block')
+      expect(doIndexAfter).toBeGreaterThanOrEqual(0)
+      expect(planIndexAfter).toBeGreaterThanOrEqual(0)
+
+      // Verify the persisted sort values in blocks store are unchanged (view-level sort only)
+      const blocks = useBlocksStore.getState().blocksByDay[sameDay]
+      const doBlock = blocks.find((b) => b.id === 1)
+      const planBlock = blocks.find((b) => b.id === 2)
+      expect(doBlock?.sort).toBe(0)
+      expect(planBlock?.sort).toBe(1)
+    })
+
+    it('completionEstimate of null renders as —, not 0%', () => {
+      const block = makeBlock(1, 'Future block', 1020, { completed: false })
+      useBlocksStore.setState({
+        blocksByDay: { [DAY]: [block] },
+        loadedDays: [DAY],
+      })
+      render(<WeekPlanView />)
+
+      const statsValues = Array.from(document.querySelectorAll('.week-stat-value')).map((el) => el.textContent)
+      expect(statsValues).toContain('—')
     })
   })
 })

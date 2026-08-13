@@ -185,3 +185,15 @@ export function splitDeepHours(totalMinutes: number): { whole: number; frac: str
   const fracDigit = tenths % 10
   return { whole, frac: `.${fracDigit}` }
 }
+
+/**
+ * Percentage of a goal reached by `completedMinutes`, clamped to [0, 100].
+ * Returns 0 (never NaN) when `goalMinutes` is zero, negative, or
+ * non-finite — this feeds a progress-bar width/style value directly.
+ */
+export function goalProgressPercent(completedMinutes: number, goalMinutes: number): number {
+  if (!Number.isFinite(goalMinutes) || goalMinutes <= 0) return 0
+  if (!Number.isFinite(completedMinutes) || completedMinutes <= 0) return 0
+  const pct = (completedMinutes / goalMinutes) * 100
+  return Math.min(100, pct)
+}

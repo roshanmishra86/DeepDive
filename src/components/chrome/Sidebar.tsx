@@ -4,7 +4,7 @@ import { useRitualsStore } from '../../stores/rituals'
 import { useDayStore } from '../../stores/day'
 import { openDatabase } from '../../db/index'
 import * as archive from '../../db/repos/archive'
-import { toDayKey, startOfWeek, splitDeepHours } from '../../lib/time'
+import { toDayKey, startOfWeek, splitDeepHours, goalProgressPercent } from '../../lib/time'
 import { Clock } from '@phosphor-icons/react/dist/csr/Clock'
 import { CalendarBlank } from '@phosphor-icons/react/dist/csr/CalendarBlank'
 import { Cards } from '@phosphor-icons/react/dist/csr/Cards'
@@ -133,6 +133,7 @@ function DeepHoursCard() {
   // and this card's week window (and "today" bar) move with it. This is the
   // card's only refresh entry point — it has no store of its own.
   const currentDay = useDayStore((s) => s.currentDay)
+  const weeklyGoalMin = useAppStore((s) => s.weeklyGoalMin)
 
   useEffect(() => {
     let mounted = true
@@ -163,6 +164,13 @@ function DeepHoursCard() {
   const barHeights = weekMinutes.map((m) => (m / maxMinutes) * 100)
   const today = new Date().getDay() === 0 ? 6 : new Date().getDay() - 1 // Mon=0, Sun=6
 
+  // Weekly goal: "of 20 h goal" + a progress bar of completed vs. weeklyGoalMin.
+  // This is a *different* metric from the This Week header's planned-minutes
+  // figure — it counts only completed deep blocks, historical fact.
+  const goalHours = splitDeepHours(weeklyGoalMin)
+  const goalLabel = goalHours.frac === '.0' ? `${goalHours.whole} h` : `${goalHours.whole}${goalHours.frac} h`
+  const goalPercent = goalProgressPercent(totalMinutes, weeklyGoalMin)
+
   return (
     <div className="deep-card">
       <div className="sidebar-label">Deep hours this week</div>
@@ -170,6 +178,22 @@ function DeepHoursCard() {
         {whole}
         <span className="deep-hours-unit">{frac} h</span>
       </div>
+      {weeklyGoalMin > 0 && (
+        <div className="deep-goal">
+          <div className="deep-goal-label">of {goalLabel} goal</div>
+          <div
+            className="deep-goal-track"
+            role="progressbar"
+            aria-label="Weekly deep-hours goal progress"
+            aria-valuenow={Math.round(goalPercent)}
+            aria-valuemin={0}
+            aria-valuemax={100}
+            data-testid="deep-goal-progress"
+          >
+            <div className="deep-goal-fill" style={{ width: `${goalPercent}%` }} />
+          </div>
+        </div>
+      )}
       <div className="deep-bars">
         {barHeights.map((height, i) => (
           <div key={i} className="deep-bar-track">
