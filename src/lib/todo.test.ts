@@ -11,8 +11,14 @@ import {
   upcomingTasks,
   composeDueAt,
   decomposeDueAt,
+  priorityFromQuadrant,
+  applyFilters,
+  filtersActive,
+  sortGroup,
+  dragDisabledReason,
   QUADRANTS,
   DEADLINE_BUCKETS,
+  DEFAULT_TODO_FILTERS,
 } from './todo'
 import { formatDuration } from './time'
 import type { Task } from '../db/types'
@@ -449,6 +455,216 @@ describe('blockDraftFromTask', () => {
   })
 })
 
+describe('priorityFromQuadrant', () => {
+  it('maps do to high', () => {
+    expect(priorityFromQuadrant('do')).toBe('high')
+  })
+
+  it('maps plan to medium', () => {
+    expect(priorityFromQuadrant('plan')).toBe('medium')
+  })
+
+  it('maps delegate to medium', () => {
+    expect(priorityFromQuadrant('delegate')).toBe('medium')
+  })
+
+  it('maps drop to low', () => {
+    expect(priorityFromQuadrant('drop')).toBe('low')
+  })
+})
+
+describe('applyFilters', () => {
+  const now = new Date(2026, 7, 4, 12, 0, 0)
+
+  it('filters out done tasks when showCompleted is false', () => {
+    const tasks = [
+      makeTask(1, { done: true }),
+      makeTask(2, { done: false }),
+    ]
+    const filtered = applyFilters(tasks, { ...DEFAULT_TODO_FILTERS, showCompleted: false }, now)
+    expect(filtered).toHaveLength(1)
+    expect(filtered[0].id).toBe(2)
+  })
+
+  it('includes done tasks when showCompleted is true', () => {
+    const tasks = [
+      makeTask(1, { done: true }),
+      makeTask(2, { done: false }),
+    ]
+    const filtered = applyFilters(tasks, { ...DEFAULT_TODO_FILTERS, showCompleted: true }, now)
+    expect(filtered).toHaveLength(2)
+  })
+
+  it('filters to tasks with parseable dueAt when deadline is has', () => {
+    const tasks = [
+      makeTask(1, { dueAt: due('2026-08-05') }),
+      makeTask(2, { dueAt: null }),
+      makeTask(3, { dueAt: 'invalid' }),
+    ]
+    const filtered = applyFilters(tasks, { ...DEFAULT_TODO_FILTERS, deadline: 'has' }, now)
+    expect(filtered).toHaveLength(1)
+    expect(filtered[0].id).toBe(1)
+  })
+
+  it('filters to tasks without parseable dueAt when deadline is none', () => {
+    const tasks = [
+      makeTask(1, { dueAt: due('2026-08-05') }),
+      makeTask(2, { dueAt: null }),
+      makeTask(3, { dueAt: 'invalid' }),
+    ]
+    const filtered = applyFilters(tasks, { ...DEFAULT_TODO_FILTERS, deadline: 'none' }, now)
+    expect(filtered).toHaveLength(2)
+    expect(filtered.map((t) => t.id)).toEqual([2, 3])
+  })
+
+  it('filters to overdue tasks when overdueOnly is true', () => {
+    const tasks = [
+      makeTask(1, { dueAt: due('2026-08-03', '09:00') }), // past
+      makeTask(2, { dueAt: due('2026-08-10', '09:00') }), // future
+      makeTask(3, { dueAt: null }),
+    ]
+    const filtered = applyFilters(tasks, { ...DEFAULT_TODO_FILTERS, overdueOnly: true }, now)
+    expect(filtered).toHaveLength(1)
+    expect(filtered[0].id).toBe(1)
+  })
+
+  it('combines filters: showCompleted=false and deadline=has', () => {
+    const tasks = [
+      makeTask(1, { done: true, dueAt: due('2026-08-05') }),
+      makeTask(2, { done: false, dueAt: due('2026-08-05') }),
+      makeTask(3, { done: false, dueAt: null }),
+    ]
+    const filtered = applyFilters(tasks, { showCompleted: false, deadline: 'has', overdueOnly: false }, now)
+    expect(filtered).toHaveLength(1)
+    expect(filtered[0].id).toBe(2)
+  })
+
+  it('does not mutate the input array', () => {
+    const tasks = [
+      makeTask(1, { done: true }),
+      makeTask(2, { done: false }),
+    ]
+    const original = JSON.parse(JSON.stringify(tasks))
+    applyFilters(tasks, { showCompleted: false, deadline: 'any', overdueOnly: false }, now)
+    expect(tasks).toEqual(original)
+  })
+})
+
+describe('filtersActive', () => {
+  it('returns false when all filters match defaults', () => {
+    expect(filtersActive(DEFAULT_TODO_FILTERS)).toBe(false)
+  })
+
+  it('returns true when showCompleted differs from default', () => {
+    expect(filtersActive({ ...DEFAULT_TODO_FILTERS, showCompleted: false })).toBe(true)
+  })
+
+  it('returns true when deadline differs from default', () => {
+    expect(filtersActive({ ...DEFAULT_TODO_FILTERS, deadline: 'has' })).toBe(true)
+  })
+
+  it('returns true when overdueOnly differs from default', () => {
+    expect(filtersActive({ ...DEFAULT_TODO_FILTERS, overdueOnly: true })).toBe(true)
+  })
+})
+
+describe('sortGroup', () => {
+  it('manual mode uses sortTasks', () => {
+    const tasks = [
+      makeTask(3, { done: false, sort: 2 }),
+      makeTask(1, { done: false, sort: 0 }),
+      makeTask(2, { done: false, sort: 1 }),
+    ]
+    const sorted = sortGroup(tasks, 'manual')
+    expect(sorted.map((t) => t.id)).toEqual([1, 2, 3])
+  })
+
+  it('due mode sorts by dueAt instant ascending', () => {
+    const tasks = [
+      makeTask(1, { dueAt: due('2026-08-10') }),
+      makeTask(2, { dueAt: due('2026-08-05') }),
+      makeTask(3, { dueAt: due('2026-08-08') }),
+    ]
+    const sorted = sortGroup(tasks, 'due')
+    expect(sorted.map((t) => t.id)).toEqual([2, 3, 1])
+  })
+
+  it('due mode puts tasks without dueAt at the end', () => {
+    const tasks = [
+      makeTask(1, { dueAt: due('2026-08-10') }),
+      makeTask(2, { dueAt: null }),
+      makeTask(3, { dueAt: due('2026-08-05') }),
+    ]
+    const sorted = sortGroup(tasks, 'due')
+    expect(sorted.map((t) => t.id)).toEqual([3, 1, 2])
+  })
+
+  it('priority mode sorts by priority order', () => {
+    const tasks = [
+      makeTask(1, { priority: 'low' }),
+      makeTask(2, { priority: 'high' }),
+      makeTask(3, { priority: 'medium' }),
+    ]
+    const sorted = sortGroup(tasks, 'priority')
+    expect(sorted.map((t) => t.id)).toEqual([2, 3, 1])
+  })
+
+  it('title mode sorts case-insensitively', () => {
+    const tasks = [
+      makeTask(1, { title: 'zebra' }),
+      makeTask(2, { title: 'Apple' }),
+      makeTask(3, { title: 'Banana' }),
+    ]
+    const sorted = sortGroup(tasks, 'title')
+    expect(sorted.map((t) => t.id)).toEqual([2, 3, 1])
+  })
+
+  it('preserves input order for ties', () => {
+    const tasks = [
+      makeTask(3, { dueAt: due('2026-08-10') }),
+      makeTask(1, { dueAt: due('2026-08-10') }),
+      makeTask(2, { dueAt: due('2026-08-10') }),
+    ]
+    const sorted = sortGroup(tasks, 'due')
+    expect(sorted.map((t) => t.id)).toEqual([3, 1, 2])
+  })
+
+  it('does not mutate the input array', () => {
+    const tasks = [
+      makeTask(3, { dueAt: due('2026-08-10') }),
+      makeTask(1, { dueAt: due('2026-08-05') }),
+    ]
+    const original = JSON.parse(JSON.stringify(tasks))
+    sortGroup(tasks, 'due')
+    expect(tasks).toEqual(original)
+  })
+})
+
+describe('dragDisabledReason', () => {
+  it('returns null when sort is manual and filters are not active', () => {
+    const reason = dragDisabledReason({ sort: 'manual', filters: DEFAULT_TODO_FILTERS })
+    expect(reason).toBeNull()
+  })
+
+  it('returns sort message when sort is not manual', () => {
+    const reason = dragDisabledReason({ sort: 'due', filters: DEFAULT_TODO_FILTERS })
+    expect(reason).toContain('Set sort to Manual')
+  })
+
+  it('returns filter message when filters are active and sort is manual', () => {
+    const reason = dragDisabledReason({ sort: 'manual', filters: { ...DEFAULT_TODO_FILTERS, showCompleted: false } })
+    expect(reason).toContain('Clear filters')
+  })
+
+  it('prioritizes sort over filters in precedence', () => {
+    const reason = dragDisabledReason({
+      sort: 'due',
+      filters: { ...DEFAULT_TODO_FILTERS, showCompleted: false },
+    })
+    expect(reason).toContain('Set sort to Manual')
+  })
+})
+
 describe('upcomingTasks', () => {
   const now = new Date(2026, 7, 4, 12, 0, 0)
 
@@ -475,6 +691,16 @@ describe('upcomingTasks', () => {
     ]
     const upcoming = upcomingTasks(tasks, now)
     expect(upcoming.map((u) => u.task.id)).toEqual([4, 2, 3, 1])
+  })
+
+  it('uses transitive comparator for tie-breaking within quadrants', () => {
+    const tasks = [
+      makeTask(5, { sort: 2, important: true, urgent: true }),
+      makeTask(3, { sort: 0, important: true, urgent: true }),
+      makeTask(4, { sort: 1, important: true, urgent: true }),
+    ]
+    const upcoming = upcomingTasks(tasks, now)
+    expect(upcoming.map((u) => u.task.id)).toEqual([3, 4, 5])
   })
 
   it('caps at default limit of 5', () => {

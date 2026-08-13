@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import type { Subtask } from '../../db/types'
 import { useAppStore } from '../../stores/app'
 import { useTasksStore } from '../../stores/tasks'
 import { useDayStore } from '../../stores/day'
@@ -12,6 +13,8 @@ import { activeWorkBlock, displayPomodoroTarget, isFreshCycle } from '../../lib/
 import { upcomingTasks, taskMeta } from '../../lib/todo'
 import { ArrowCounterClockwise } from '@phosphor-icons/react/dist/csr/ArrowCounterClockwise'
 import { X } from '@phosphor-icons/react/dist/csr/X'
+
+const EMPTY: Subtask[] = []
 
 const RING_R = 86
 const RING_C = 540.35 // 2π · 86
@@ -194,6 +197,7 @@ function DistractionLog() {
 export function RightRail() {
   const setView = useAppStore((s) => s.setView)
   const tasks = useTasksStore((s) => s.tasks)
+  const subtasksByTask = useTasksStore((s) => s.subtasksByTask)
 
   const now = new Date()
   const upcoming = upcomingTasks(tasks, now, 5)
@@ -216,7 +220,7 @@ export function RightRail() {
         ) : (
           <div className="rail-upcoming">
             {upcoming.map((item, i) => {
-              const meta = taskMeta(item.task, now)
+              const meta = taskMeta(item.task, now, subtasksByTask[item.task.id] ?? EMPTY)
               return (
                 <div key={item.task.id} className="rail-upcoming-item">
                   <span className="rail-upcoming-n" style={{ color: item.rankColor }}>

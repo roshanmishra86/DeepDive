@@ -3,7 +3,16 @@ import type { SqlDriver } from '../db/driver'
 import type { Subtask, Task, TaskPriority } from '../db/types'
 import * as tasksRepo from '../db/repos/tasks'
 import * as subtasksRepo from '../db/repos/subtasks'
-import { groupByDeadline, groupByMatrix, type DeadlineBucket, type Quadrant, sortTasks } from '../lib/todo'
+import {
+  groupByDeadline,
+  groupByMatrix,
+  type DeadlineBucket,
+  type Quadrant,
+  type TodoFilters,
+  type GroupSort,
+  sortTasks,
+  DEFAULT_TODO_FILTERS,
+} from '../lib/todo'
 
 type TaskEdit = Partial<Omit<Task, 'id' | 'createdAt' | 'archived'>>
 type TaskDestination = { group: Quadrant | DeadlineBucket; beforeId: number | null }
@@ -12,6 +21,8 @@ interface TasksState {
   tasks: Task[]
   archivedTasks: Task[]
   groupBy: 'matrix' | 'deadline'
+  filters: TodoFilters
+  sortByGroup: Record<string, GroupSort>
   loading: boolean
   loadingArchived: boolean
   error: string | null
@@ -48,6 +59,10 @@ interface TasksState {
   reorderSubtasks: (taskId: number, orderedIds: number[]) => Promise<boolean>
   getSubtaskAllocation: (subtaskId: number) => Promise<{ allocatedMin: number; blockCount: number }>
   setGroupBy: (g: 'matrix' | 'deadline') => void
+  setFilters: (patch: Partial<TodoFilters>) => void
+  resetFilters: () => void
+  setGroupSort: (group: string, sort: GroupSort) => void
+  setPriority: (id: number, priority: TaskPriority) => Promise<void>
 }
 
 let nextLocalId = -1
@@ -111,6 +126,8 @@ export const useTasksStore = create<TasksState>()((set, get) => {
     tasks: [],
     archivedTasks: [],
     groupBy: 'matrix',
+    filters: DEFAULT_TODO_FILTERS,
+    sortByGroup: {},
     loading: false,
     loadingArchived: false,
     error: null,
@@ -371,5 +388,11 @@ export const useTasksStore = create<TasksState>()((set, get) => {
       catch (err) { set({ error: messageFor(err, 'Could not load allocation') }); return { allocatedMin: 0, blockCount: 0 } }
     },
     setGroupBy: (groupBy) => set({ groupBy }),
+    setFilters: (patch) => set((state) => ({ filters: { ...state.filters, ...patch } })),
+    resetFilters: () => set({ filters: DEFAULT_TODO_FILTERS }),
+    setGroupSort: (group, sort) => set((state) => ({ sortByGroup: { ...state.sortByGroup, [group]: sort } })),
+    setPriority: async (id, priority) => {
+      await get().editTask(id, { priority })
+    },
   }
 })

@@ -1,13 +1,64 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useTasksStore } from '../../stores/tasks'
+import { useAppStore } from '../../stores/app'
 import { useDayStore } from '../../stores/day'
 import { openDatabase } from '../../db/index'
-import { groupByMatrix, groupByDeadline, QUADRANTS, DEADLINE_BUCKETS } from '../../lib/todo'
+import {
+  groupByMatrix,
+  groupByDeadline,
+  QUADRANTS,
+  DEADLINE_BUCKETS,
+  applyFilters,
+  filtersActive,
+  sortGroup,
+  dragDisabledReason,
+  priorityFromQuadrant,
+  DEFAULT_TODO_FILTERS,
+  type TodoFilters,
+  type GroupSort,
+  type Quadrant,
+  type DeadlineBucket,
+} from '../../lib/todo'
 import { fromDayKey } from '../../lib/time'
 import type { Task } from '../../db/types'
 import { TaskRow } from '../todo/TaskRow'
 import { TaskEditor } from '../todo/TaskEditor'
+import { AddTaskRow } from '../todo/AddTaskRow'
 import { Plus } from '@phosphor-icons/react/dist/csr/Plus'
+
+type GroupKey = Quadrant | DeadlineBucket
+
+// Cross-view focus highlight fade duration (see effect below).
+export const TODO_FOCUS_FADE_MS = 2000
+
+const MATRIX_HINTS: Record<Quadrant, string> = {
+  do: 'Do these first.',
+  plan: 'Block time for these.',
+  delegate: 'Batch or hand these off.',
+  drop: 'Revisit only if things change.',
+}
+
+const DEADLINE_HINTS: Record<DeadlineBucket, string> = {
+  soon: 'Handle these within 48 hours.',
+  week: 'Fit these into the week.',
+  later: 'Keep an eye on these.',
+  none: 'Give these a deadline when ready.',
+}
+
+const SORT_OPTIONS: Array<{ value: GroupSort; label: string }> = [
+  { value: 'manual', label: 'Manual' },
+  { value: 'due', label: 'Due' },
+  { value: 'priority', label: 'Priority' },
+  { value: 'title', label: 'Title' },
+]
+
+function activeFilterCount(filters: TodoFilters): number {
+  let count = 0
+  if (filters.showCompleted !== DEFAULT_TODO_FILTERS.showCompleted) count++
+  if (filters.deadline !== DEFAULT_TODO_FILTERS.deadline) count++
+  if (filters.overdueOnly !== DEFAULT_TODO_FILTERS.overdueOnly) count++
+  return count
+}
 
 export function TodoView() {
   const tasks = useTasksStore((s) => s.tasks)
@@ -17,6 +68,15 @@ export function TodoView() {
   const hydrate = useTasksStore((s) => s.hydrate)
   const setGroupBy = useTasksStore((s) => s.setGroupBy)
   const moveTask = useTasksStore((s) => s.moveTask)
+  const addTask = useTasksStore((s) => s.addTask)
+  const filters = useTasksStore((s) => s.filters)
+  const setFilters = useTasksStore((s) => s.setFilters)
+  const resetFilters = useTasksStore((s) => s.resetFilters)
+  const sortByGroup = useTasksStore((s) => s.sortByGroup)
+  const setGroupSort = useTasksStore((s) => s.setGroupSort)
+
+  const pendingTodoFocus = useAppStore((s) => s.pendingTodoFocus)
+  const clearTodoFocus = useAppStore((s) => s.clearTodoFocus)
 
   const [editorOpen, setEditorOpen] = useState(false)
   const [editorTaskId, setEditorTaskId] = useState<number | null>(null)
@@ -25,6 +85,12 @@ export function TodoView() {
   const [draggingId, setDraggingId] = useState<number | null>(null)
   const [dropHint, setDropHint] = useState<string | null>(null)
   const dropCompleted = useRef(false)
+
+  const [filtersOpen, setFiltersOpen] = useState(false)
+  const filtersRef = useRef<HTMLDivElement>(null)
+
+  const [focusedTaskId, setFocusedTaskId] = useState<number | null>(null)
+  const bodyRef = useRef<HTMLDivElement>(null)
 
   // Deadline buckets and due labels need a full Date, but the app has one
   // clock (the day store) and one interval. Rebuild it from the day store's
@@ -54,6 +120,63 @@ export function TodoView() {
     }
   }, [hydrate])
 
+  // Close the Filters popover on outside click / Escape.
+  useEffect(() => {
+    if (!filtersOpen) return
+    const handleClick = (event: MouseEvent) => {
+      if (filtersRef.current && !filtersRef.current.contains(event.target as Node)) {
+        setFiltersOpen(false)
+      }
+    }
+    const handleKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setFiltersOpen(false)
+    }
+    document.addEventListener('mousedown', handleClick)
+    document.addEventListener('keydown', handleKey)
+    return () => {
+      document.removeEventListener('mousedown', handleClick)
+      document.removeEventListener('keydown', handleKey)
+    }
+  }, [filtersOpen])
+
+  // Cross-view focus target: Today's "This is a task. ↗" link sets
+  // pendingTodoFocus. This is split into two effects because the decision
+  // step below calls clearTodoFocus(), which is itself one of this effect's
+  // dependencies — if the scroll/focus/timer work lived in the same effect,
+  // React would tear it down (cancel the timer, never focus) the instant
+  // pendingTodoFocus flips back to null. Effect A only decides *whether* to
+  // focus a row (clearing filters or the pending target as needed); effect B,
+  // keyed only on the resulting focusedTaskId, does the actual scroll/focus/
+  // fade and is left alone by effect A's own state changes.
+  useEffect(() => {
+    if (pendingTodoFocus === null) return
+    const task = tasks.find((t) => t.id === pendingTodoFocus)
+    if (!task) {
+      clearTodoFocus()
+      return
+    }
+    const visible = applyFilters([task], filters, now).length > 0
+    if (!visible) {
+      resetFilters()
+      return
+    }
+    setFocusedTaskId(task.id)
+    clearTodoFocus()
+  }, [pendingTodoFocus, tasks, filters, now, clearTodoFocus, resetFilters])
+
+  // Presentation half of the cross-view focus target: once effect A has
+  // settled on a task to focus, scroll it into view, move DOM focus to it,
+  // and fade the highlight after TODO_FOCUS_FADE_MS. Runs after commit, so
+  // the row is already in the DOM — no requestAnimationFrame needed.
+  useEffect(() => {
+    if (focusedTaskId === null) return
+    const el = bodyRef.current?.querySelector<HTMLElement>(`[data-task-id="${focusedTaskId}"]`)
+    el?.scrollIntoView?.({ block: 'center' })
+    el?.focus()
+    const timer = setTimeout(() => setFocusedTaskId(null), TODO_FOCUS_FADE_MS)
+    return () => clearTimeout(timer)
+  }, [focusedTaskId])
+
   const openEditor = (taskId: number | null = null) => {
     setEditorTaskId(taskId)
     setEditorOpen(true)
@@ -65,12 +188,33 @@ export function TodoView() {
   }
 
   const hasAnyTasks = tasks.length > 0
+  const filteredTasks = useMemo(() => applyFilters(tasks, filters, now), [tasks, filters, now])
+  const filtersOn = filtersActive(filters)
+  const filterBadgeCount = activeFilterCount(filters)
+
+  const matrixGroups = useMemo(
+    () => groupByMatrix(filteredTasks).map((group) => ({
+      key: group.quadrant as GroupKey,
+      quadrant: group.quadrant,
+      tasks: sortGroup(group.tasks, sortByGroup[group.quadrant] ?? 'manual'),
+    })),
+    [filteredTasks, sortByGroup]
+  )
+  const deadlineGroups = useMemo(
+    () => groupByDeadline(filteredTasks, now).map((group) => ({
+      key: group.bucket as GroupKey,
+      bucket: group.bucket,
+      tasks: sortGroup(group.tasks, sortByGroup[group.bucket] ?? 'manual'),
+    })),
+    [filteredTasks, sortByGroup, now]
+  )
+
   const beginDrag = (id: number) => { dropCompleted.current = false; setDraggingId(id); setDropHint(null) }
   const finishDrag = () => {
     setDraggingId(null)
     if (!dropCompleted.current) setDropHint(null)
   }
-  const dropOn = async (group: 'do' | 'plan' | 'delegate' | 'drop' | 'soon' | 'week' | 'later' | 'none', beforeId: number | null) => {
+  const dropOn = async (group: GroupKey, beforeId: number | null) => {
     if (draggingId === null) return
     const ok = await moveTask(draggingId, { group, beforeId })
     dropCompleted.current = true
@@ -78,7 +222,7 @@ export function TodoView() {
     else setDropHint(null)
     setDraggingId(null)
   }
-  const moveWithin = async (group: 'do' | 'plan' | 'delegate' | 'drop' | 'soon' | 'week' | 'later' | 'none', groupTasks: Task[], index: number, direction: -1 | 1) => {
+  const moveWithin = async (group: GroupKey, groupTasks: Task[], index: number, direction: -1 | 1) => {
     const targetIndex = index + direction
     if (targetIndex < 0 || targetIndex >= groupTasks.length) return
     const beforeId = direction === -1
@@ -86,7 +230,7 @@ export function TodoView() {
       : groupTasks[targetIndex + 1]?.id ?? null
     await moveTask(groupTasks[index].id, { group, beforeId })
   }
-  const hoverDeadline = (bucket: 'soon' | 'week' | 'later' | 'none') => {
+  const hoverDeadline = (bucket: DeadlineBucket) => {
     if (draggingId === null) return
     const source = groupByDeadline(tasks, now).find((group) => group.tasks.some((task) => task.id === draggingId))?.bucket
     setDropHint(source && source !== bucket ? 'Move by editing the due date' : null)
@@ -147,6 +291,67 @@ export function TodoView() {
               </button>
             </div>
           </div>
+
+          <div className="todo-filters" ref={filtersRef}>
+            <button
+              type="button"
+              className={`btn-secondary todo-filters-trigger${filtersOn ? ' todo-filters-trigger-active' : ''}`}
+              aria-haspopup="true"
+              aria-expanded={filtersOpen}
+              onClick={() => setFiltersOpen((value) => !value)}
+            >
+              Filters
+              {filtersOn && <span className="todo-filters-badge">{filterBadgeCount}</span>}
+            </button>
+            {filtersOpen && (
+              <div className="todo-filters-popover" role="group" aria-label="Filters">
+                <button
+                  type="button"
+                  className={`todo-filter-toggle${filters.showCompleted ? ' todo-filter-toggle-active' : ''}`}
+                  aria-pressed={filters.showCompleted}
+                  onClick={() => setFilters({ showCompleted: !filters.showCompleted })}
+                >
+                  Show completed
+                </button>
+
+                <div className="todo-filter-group">
+                  <span className="todo-filter-label">Deadline</span>
+                  <div className="todo-filter-options">
+                    {(['any', 'has', 'none'] as const).map((option) => (
+                      <button
+                        key={option}
+                        type="button"
+                        className={`todo-filter-toggle${filters.deadline === option ? ' todo-filter-toggle-active' : ''}`}
+                        aria-pressed={filters.deadline === option}
+                        onClick={() => setFilters({ deadline: option })}
+                      >
+                        {option === 'any' ? 'Any' : option === 'has' ? 'Has deadline' : 'No deadline'}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  className={`todo-filter-toggle${filters.overdueOnly ? ' todo-filter-toggle-active' : ''}`}
+                  aria-pressed={filters.overdueOnly}
+                  onClick={() => setFilters({ overdueOnly: !filters.overdueOnly })}
+                >
+                  Overdue only
+                </button>
+
+                <button
+                  type="button"
+                  className="todo-filter-clear"
+                  onClick={resetFilters}
+                  disabled={!filtersOn}
+                >
+                  Clear filters
+                </button>
+              </div>
+            )}
+          </div>
+
           <button
             type="button"
             className="btn-accent btn-new-task"
@@ -158,7 +363,7 @@ export function TodoView() {
         </div>
       </div>
 
-      <div className="todo-body">
+      <div className="todo-body" ref={bodyRef}>
         {!hasAnyTasks ? (
           <div className="todo-empty">
             <div className="todo-empty-text">No tasks yet</div>
@@ -173,18 +378,39 @@ export function TodoView() {
         ) : (
           <div className="todo-groups">
             {groupBy === 'matrix'
-              ? groupByMatrix(tasks).map((group) => {
+              ? matrixGroups.map((group) => {
                   const meta = QUADRANTS.find((q) => q.quadrant === group.quadrant)
                   if (!meta) return null
                   const isDrop = group.quadrant === 'drop'
+                  const sort = sortByGroup[group.quadrant] ?? 'manual'
+                  const reason = dragDisabledReason({ sort, filters })
 
                   return (
                     <section key={group.quadrant} className="todo-group">
                       <div className="todo-group-head">
                         <span className="todo-group-dot" style={{ backgroundColor: meta.dot }} />
                         <h2 className="todo-group-label">{meta.label}</h2>
+                        <span className="todo-group-count">{group.tasks.length}</span>
+                        <span className="todo-group-hint">{MATRIX_HINTS[group.quadrant]}</span>
+                        <label className="todo-group-sort">
+                          Sort
+                          <select
+                            className="todo-group-sort-select"
+                            aria-label={`Sort ${meta.label}`}
+                            value={sort}
+                            onChange={(event) => setGroupSort(group.quadrant, event.target.value as GroupSort)}
+                          >
+                            {SORT_OPTIONS.map((option) => (
+                              <option key={option.value} value={option.value}>{option.label}</option>
+                            ))}
+                          </select>
+                        </label>
                       </div>
-                      <div className="todo-group-rows" onDragOver={(event) => { if (group.tasks.length === 0) event.preventDefault() }} onDrop={(event) => { if (group.tasks.length === 0) { event.preventDefault(); void dropOn(group.quadrant, null) } }}>
+                      <div
+                        className="todo-group-rows"
+                        onDragOver={(event) => { if (group.tasks.length === 0 && !reason) event.preventDefault() }}
+                        onDrop={(event) => { if (group.tasks.length === 0 && !reason) { event.preventDefault(); void dropOn(group.quadrant, null) } }}
+                      >
                         {group.tasks.length === 0 && draggingId !== null && <div className="todo-empty-drop-zone">Drop here</div>}
                         {group.tasks.map((task: Task) => (
                           <TaskRow
@@ -200,25 +426,58 @@ export function TodoView() {
                             dragTarget={draggingId !== null && draggingId !== task.id}
                             onMoveUp={() => moveWithin(group.quadrant, group.tasks, group.tasks.findIndex((item) => item.id === task.id), -1)}
                             onMoveDown={() => moveWithin(group.quadrant, group.tasks, group.tasks.findIndex((item) => item.id === task.id), 1)}
-                            canMoveUp={group.tasks[0]?.id !== task.id}
-                            canMoveDown={group.tasks[group.tasks.length - 1]?.id !== task.id}
+                            canMoveUp={!reason && group.tasks[0]?.id !== task.id}
+                            canMoveDown={!reason && group.tasks[group.tasks.length - 1]?.id !== task.id}
+                            dragDisabledReason={reason}
+                            onDragDisabledAttempt={setDropHint}
+                            focused={focusedTaskId === task.id}
                           />
                         ))}
+                        <AddTaskRow
+                          label={`Add task to ${meta.label}`}
+                          onAdd={(title) => void addTask({
+                            title,
+                            important: group.quadrant === 'do' || group.quadrant === 'plan',
+                            urgent: group.quadrant === 'do' || group.quadrant === 'delegate',
+                            priority: priorityFromQuadrant(group.quadrant),
+                          })}
+                        />
                       </div>
                     </section>
                   )
                 })
-              : groupByDeadline(tasks, now).map((group) => {
+              : deadlineGroups.map((group) => {
                   const meta = DEADLINE_BUCKETS.find((b) => b.bucket === group.bucket)
                   if (!meta) return null
+                  const sort = sortByGroup[group.bucket] ?? 'manual'
+                  const reason = dragDisabledReason({ sort, filters })
 
                   return (
                     <section key={group.bucket} className="todo-group">
                       <div className="todo-group-head">
                         <span className="todo-group-dot" style={{ backgroundColor: meta.dot }} />
                         <h2 className="todo-group-label">{meta.label}</h2>
+                        <span className="todo-group-count">{group.tasks.length}</span>
+                        <span className="todo-group-hint">{DEADLINE_HINTS[group.bucket]}</span>
+                        <label className="todo-group-sort">
+                          Sort
+                          <select
+                            className="todo-group-sort-select"
+                            aria-label={`Sort ${meta.label}`}
+                            value={sort}
+                            onChange={(event) => setGroupSort(group.bucket, event.target.value as GroupSort)}
+                          >
+                            {SORT_OPTIONS.map((option) => (
+                              <option key={option.value} value={option.value}>{option.label}</option>
+                            ))}
+                          </select>
+                        </label>
                       </div>
-                      <div className="todo-group-rows" onDragOver={(event) => { if (group.tasks.length === 0) { event.preventDefault(); hoverDeadline(group.bucket) } }} onDrop={(event) => { if (group.tasks.length === 0) { event.preventDefault(); void dropOn(group.bucket, null) } }}>
+                      <div
+                        className="todo-group-rows"
+                        onDragOver={(event) => { if (group.tasks.length === 0 && !reason) { event.preventDefault(); hoverDeadline(group.bucket) } }}
+                        onDrop={(event) => { if (group.tasks.length === 0 && !reason) { event.preventDefault(); void dropOn(group.bucket, null) } }}
+                      >
                         {group.tasks.length === 0 && draggingId !== null && <div className="todo-empty-drop-zone">Drop here</div>}
                         {group.tasks.map((task: Task) => (
                           <TaskRow
@@ -233,10 +492,17 @@ export function TodoView() {
                             dragTarget={draggingId !== null && draggingId !== task.id}
                             onMoveUp={() => moveWithin(group.bucket, group.tasks, group.tasks.findIndex((item) => item.id === task.id), -1)}
                             onMoveDown={() => moveWithin(group.bucket, group.tasks, group.tasks.findIndex((item) => item.id === task.id), 1)}
-                            canMoveUp={group.tasks[0]?.id !== task.id}
-                            canMoveDown={group.tasks[group.tasks.length - 1]?.id !== task.id}
+                            canMoveUp={!reason && group.tasks[0]?.id !== task.id}
+                            canMoveDown={!reason && group.tasks[group.tasks.length - 1]?.id !== task.id}
+                            dragDisabledReason={reason}
+                            onDragDisabledAttempt={setDropHint}
+                            focused={focusedTaskId === task.id}
                           />
                         ))}
+                        <AddTaskRow
+                          label={`Add task to ${meta.label}`}
+                          onAdd={(title) => void addTask({ title })}
+                        />
                       </div>
                     </section>
                   )
@@ -245,10 +511,6 @@ export function TodoView() {
         )}
 
         {dropHint && <div className="todo-drag-hint" role="status">{dropHint}</div>}
-
-        <div className="todo-footer">
-          Tags decide the quadrant. Nothing here is scheduled — blocks only exist for today.
-        </div>
       </div>
 
       {editorOpen && <TaskEditor taskId={editorTaskId} onClose={closeEditor} />}

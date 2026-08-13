@@ -2444,6 +2444,107 @@ button:focus-visible {
   color: var(--text-muted);
 }
 
+.todo-filters {
+  position: relative;
+}
+
+.todo-filters-trigger {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.todo-filters-trigger-active {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.todo-filters-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 8px;
+  background: var(--accent);
+  color: var(--on-accent);
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.todo-filters-popover {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 220px;
+  padding: 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  background: var(--bg-card);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.12);
+}
+
+.todo-filter-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.todo-filter-label {
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-faint);
+}
+
+.todo-filter-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.todo-filter-toggle {
+  font-size: 11.5px;
+  border-radius: 20px;
+  padding: 4px 10px;
+  cursor: pointer;
+  background: transparent;
+  border: 1px solid var(--border-strong);
+  color: var(--text-muted);
+  text-align: left;
+  transition: all 0.15s;
+}
+
+.todo-filter-toggle:hover {
+  border-color: var(--border);
+}
+
+.todo-filter-toggle-active {
+  background: var(--accent);
+  color: var(--on-accent);
+  border-color: var(--accent);
+}
+
+.todo-filter-clear {
+  align-self: flex-start;
+  font-size: 11.5px;
+  color: var(--accent);
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0;
+}
+
+.todo-filter-clear:disabled {
+  color: var(--text-faint);
+  cursor: default;
+}
+
 .segmented-control {
   display: flex;
   border: 1px solid var(--border-strong);
@@ -2520,6 +2621,45 @@ button:focus-visible {
   align-items: center;
   gap: 9px;
   margin-bottom: 10px;
+}
+
+.todo-group-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 9px;
+  background: var(--bg-chrome);
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  font-size: 10.5px;
+  font-family: var(--font-mono);
+}
+
+.todo-group-hint {
+  font-size: 11px;
+  color: var(--text-faint);
+  flex: 1;
+}
+
+.todo-group-sort {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 10.5px;
+  color: var(--text-muted);
+  flex: none;
+}
+
+.todo-group-sort-select {
+  border: 1px solid var(--border-strong);
+  border-radius: 4px;
+  background: var(--bg-chrome);
+  color: var(--text);
+  font-size: 11px;
+  padding: 3px 6px;
 }
 
 .todo-group-dot {
@@ -2706,12 +2846,129 @@ button:focus-visible {
   padding: 4px 6px;
 }
 
-.todo-footer {
-  border-top: 1px solid var(--border-subtle);
-  padding-top: 16px;
-  font-size: 12.5px;
+.task-due-chip {
+  font-size: 10.5px;
+  font-family: var(--font-mono);
+  padding: 3px 8px;
+  border-radius: 20px;
+  border: 1px solid var(--border-strong);
   color: var(--text-muted);
-  margin-top: auto;
+  flex: none;
+  white-space: nowrap;
+}
+
+.task-due-chip-danger {
+  color: var(--danger);
+  border-color: var(--danger);
+  background: var(--danger-surface);
+}
+
+.task-priority-chip {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  padding: 3px 9px;
+  border-radius: 20px;
+  border: 1px solid var(--border-strong);
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  flex: none;
+  transition: border-color 0.15s;
+}
+
+.task-priority-chip:hover {
+  border-color: var(--border);
+}
+
+.task-priority-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex: none;
+}
+
+.task-overflow {
+  position: relative;
+  flex: none;
+}
+
+.task-overflow-trigger {
+  flex: none;
+}
+
+.task-overflow-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  min-width: 170px;
+  padding: 4px;
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  background: var(--bg-card);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.12);
+}
+
+.task-overflow-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 9px;
+  border-radius: 4px;
+  font-size: 12px;
+  color: var(--text);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  text-align: left;
+}
+
+.task-overflow-item:hover {
+  background: var(--bg-chrome);
+}
+
+.task-overflow-item-danger {
+  color: var(--danger);
+}
+
+.task-overflow-confirm {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 9px;
+  font-size: 11.5px;
+  color: var(--text-muted);
+}
+
+.todo-add-task {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  border: 1px dashed var(--border-strong);
+  border-radius: 6px;
+  color: var(--text-faint);
+}
+
+.todo-add-task-input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  background: transparent;
+  font-size: 13px;
+  color: var(--text);
+}
+
+.todo-add-task-input:focus {
+  outline: none;
+}
+
+.todo-add-task-btn {
+  flex: none;
 }
 
 /* Task Editor Modal */
@@ -4290,6 +4547,8 @@ button:focus-visible {
 
 .task-drag-handle, .timeline-drag-handle { cursor: grab; color: var(--text-faint); font-size: 15px; padding: 2px 4px; }
 .task-drag-handle:active, .timeline-drag-handle:active { cursor: grabbing; }
+.task-drag-handle-disabled { cursor: not-allowed; color: var(--border-strong); }
+.task-drag-handle-disabled:active { cursor: not-allowed; }
 .task-order-btn { width: 22px; height: 22px; padding: 0; font-size: 12px; }
 .task-row-drag-target { outline: 1px dashed var(--accent); outline-offset: 2px; }
 .todo-empty-drop-zone { padding: 14px; border: 1px dashed var(--accent); color: var(--accent); text-align: center; font-size: 12px; }
@@ -4298,8 +4557,23 @@ button:focus-visible {
 .timeline-block-drag-target { border-color: var(--accent); box-shadow: inset 0 3px 0 var(--accent); }
 .timeline-block-drag-target::after { content: 'Drop here'; position: absolute; top: 5px; right: 8px; color: var(--accent); font-family: var(--font-mono); font-size: 9px; letter-spacing: .05em; }
 
+@keyframes todoRowFocusFade {
+  from { background: var(--accent-surface); box-shadow: 0 0 0 2px var(--accent); }
+  to { background: transparent; box-shadow: 0 0 0 2px transparent; }
+}
+
+.todo-row-focused {
+  animation: todoRowFocusFade 2s ease-out;
+}
+
+@media (prefers-contrast: more) {
+  .todo-row-focused {
+    box-shadow: 0 0 0 2px var(--accent);
+  }
+}
+
 .subtask-list { margin: 4px 0 0 28px; border-top: 1px solid var(--border); }
-.subtask-disclosure { width: 100%; display: flex; justify-content: space-between; padding: 6px 0; color: var(--text-muted); font-size: 11px; text-align: left; }
+.subtask-header { width: 100%; display: flex; justify-content: space-between; padding: 6px 0; color: var(--text-muted); font-size: 11px; text-align: left; }
 .subtask-body { display: flex; flex-direction: column; gap: 6px; padding: 2px 0 8px; }
 .subtask-row { display: flex; align-items: center; gap: 6px; min-height: 26px; }
 .subtask-row-drag-target { border-top: 2px solid var(--accent); }
@@ -4307,6 +4581,11 @@ button:focus-visible {
 .subtask-title { min-width: 0; flex: 1; border: 1px solid transparent; background: transparent; font-size: 12px; }
 .subtask-title:not([readonly]):focus { border-color: var(--border-strong); background: var(--bg-card); }
 .subtask-estimate { color: var(--text-muted); font-family: var(--font-mono); font-size: 10px; }
+.subtask-due { display: flex; align-items: center; gap: 4px; flex: none; }
+.subtask-due-date, .subtask-due-time { border: 1px solid var(--border); background: var(--bg-card); border-radius: 3px; padding: 3px 5px; font-size: 10.5px; color: var(--text-muted); }
+.subtask-due-date { max-width: 122px; }
+.subtask-due-time { max-width: 84px; }
+.subtask-due-label { font-family: var(--font-mono); font-size: 10px; color: var(--text-faint); white-space: nowrap; }
 .subtask-create { display: flex; gap: 6px; }
 .subtask-create input { min-width: 0; flex: 1; border: 1px solid var(--border); background: var(--bg-card); border-radius: 3px; padding: 5px 6px; font-size: 11px; }
 .subtask-create input[type='number'] { max-width: 56px; }

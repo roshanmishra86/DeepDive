@@ -23,6 +23,8 @@ import { NotesEditor } from '../../components/common/NotesEditor'
 import { importMarkdownNotes } from '../../lib/markdownExport'
 import { notePlainText, parseNote, serializeNote } from '../../lib/richText'
 import { DEFAULT_ACCENT } from '../../lib/accents'
+import { DEFAULT_TODO_FILTERS } from '../../lib/todo'
+import { TodoView, TODO_FOCUS_FADE_MS } from '../../components/views/TodoView'
 
 const DAY = '2026-08-10'
 
@@ -83,7 +85,8 @@ function resetStores() {
   })
   useAppStore.setState({ view: 'week', accent: DEFAULT_ACCENT, timerStyle: 'ring', repeatStyle: 'chip', settingsOpen: false, planTarget: null, sessionOpen: false, pendingTodoFocus: null })
   useTasksStore.setState({
-    tasks: [], archivedTasks: [], groupBy: 'matrix', loading: false, loadingArchived: false, error: null,
+    tasks: [], archivedTasks: [], groupBy: 'matrix', filters: DEFAULT_TODO_FILTERS, sortByGroup: {},
+    loading: false, loadingArchived: false, error: null,
     errorArchived: null, subtasksByTask: {}, subtaskLoading: {}, subtaskError: {},
   })
   useBlocksStore.setState({ blocksByDay: {}, loadedDays: [], loading: false, error: null })
@@ -204,6 +207,111 @@ describe('task planning release flows', () => {
     expect(down).toHaveBeenCalledOnce()
   })
 
+  it('changes a task\'s priority chip without touching important/urgent', () => {
+    const task = makeTask(1, { title: 'Priority task', important: true, urgent: false, priority: 'medium' })
+    useTasksStore.setState({ tasks: [task] })
+    render(<TaskRow task={task} now={new Date('2026-08-10T08:00:00')} onEdit={() => {}} />)
+
+    const chip = screen.getByRole('button', { name: 'Change priority for Priority task, currently Medium' })
+    fireEvent.click(chip)
+
+    const updated = useTasksStore.getState().tasks[0]
+    expect(updated.priority).toBe('low')
+    expect(updated.important).toBe(true)
+    expect(updated.urgent).toBe(false)
+  })
+
+  describe('TodoView', () => {
+    it('hides a task when a filter excludes it and updates the group count', () => {
+      const shown = makeTask(1, { title: 'Active task', important: true, urgent: true, done: false })
+      const hidden = makeTask(2, { title: 'Done task', important: true, urgent: true, done: true })
+      useTasksStore.setState({ tasks: [shown, hidden] })
+      render(<TodoView />)
+
+      expect(screen.getByText('Active task')).toBeDefined()
+      expect(screen.getByText('Done task')).toBeDefined()
+      const doGroup = screen.getByText('Active task').closest('.todo-group')!
+      expect(doGroup.querySelector('.todo-group-count')?.textContent).toBe('2')
+
+      fireEvent.click(screen.getByRole('button', { name: /Filters/ }))
+      fireEvent.click(screen.getByRole('button', { name: 'Show completed' }))
+
+      expect(screen.queryByText('Done task')).toBeNull()
+      expect(doGroup.querySelector('.todo-group-count')?.textContent).toBe('1')
+    })
+
+    it('reorders only the group whose sort control changed', () => {
+      const zebra = makeTask(1, { title: 'Zebra', important: true, urgent: true, sort: 0 })
+      const apple = makeTask(2, { title: 'Apple', important: true, urgent: true, sort: 1 })
+      const otherFirst = makeTask(3, { title: 'Other B', important: true, urgent: false, sort: 0 })
+      const otherSecond = makeTask(4, { title: 'Other A', important: true, urgent: false, sort: 1 })
+      useTasksStore.setState({ tasks: [zebra, apple, otherFirst, otherSecond] })
+      render(<TodoView />)
+
+      const doTitlesBefore = Array.from(document.querySelectorAll('.todo-group')).find((section) => section.textContent?.includes('Zebra'))!
+      expect(Array.from(doTitlesBefore.querySelectorAll('.task-title')).map((el) => el.textContent)).toEqual(['Zebra', 'Apple'])
+      const planSection = Array.from(document.querySelectorAll('.todo-group')).find((section) => section.textContent?.includes('Other B'))!
+      expect(Array.from(planSection.querySelectorAll('.task-title')).map((el) => el.textContent)).toEqual(['Other B', 'Other A'])
+
+      fireEvent.change(screen.getByRole('combobox', { name: 'Sort Urgent & important — do now' }), { target: { value: 'title' } })
+
+      const doSection = Array.from(document.querySelectorAll('.todo-group')).find((section) => section.textContent?.includes('Zebra'))!
+      expect(Array.from(doSection.querySelectorAll('.task-title')).map((el) => el.textContent)).toEqual(['Apple', 'Zebra'])
+      const planSectionAfter = Array.from(document.querySelectorAll('.todo-group')).find((section) => section.textContent?.includes('Other B'))!
+      expect(Array.from(planSectionAfter.querySelectorAll('.task-title')).map((el) => el.textContent)).toEqual(['Other B', 'Other A'])
+    })
+
+    it('disables the drag handle with a reason once a group\'s sort is not manual', () => {
+      const task = makeTask(1, { title: 'Sorted task', important: true, urgent: true })
+      useTasksStore.setState({ tasks: [task], sortByGroup: { do: 'due' } })
+      render(<TodoView />)
+
+      const handle = screen.getByRole('button', { name: 'Drag Sorted task' })
+      expect(handle.getAttribute('aria-disabled')).toBe('true')
+      expect(handle.getAttribute('title')).toBe('Set sort to Manual to reorder by hand.')
+    })
+
+    it('highlights the cross-view focus target and clears the pending state', () => {
+      const task = makeTask(1, { title: 'Linked task', important: true, urgent: true })
+      useTasksStore.setState({ tasks: [task] })
+      useAppStore.setState({ pendingTodoFocus: task.id })
+      render(<TodoView />)
+
+      const row = document.querySelector(`[data-task-id="${task.id}"]`)
+      expect(row?.classList.contains('todo-row-focused')).toBe(true)
+      expect(useAppStore.getState().pendingTodoFocus).toBeNull()
+    })
+
+    it('moves DOM focus to the cross-view focus target and fades the highlight after ~2s', async () => {
+      const task = makeTask(1, { title: 'Linked task', important: true, urgent: true })
+      useTasksStore.setState({ tasks: [task] })
+      useAppStore.setState({ pendingTodoFocus: task.id })
+      render(<TodoView />)
+
+      const row = document.querySelector(`[data-task-id="${task.id}"]`)
+      expect(row?.classList.contains('todo-row-focused')).toBe(true)
+
+      await vi.waitFor(() => {
+        expect(document.activeElement).toBe(row)
+      })
+
+      await vi.waitFor(
+        () => {
+          expect(row?.classList.contains('todo-row-focused')).toBe(false)
+        },
+        { timeout: TODO_FOCUS_FADE_MS + 2000 },
+      )
+    })
+
+    it('clears the pending focus silently when the task no longer exists', () => {
+      useTasksStore.setState({ tasks: [] })
+      useAppStore.setState({ pendingTodoFocus: 999 })
+      render(<TodoView />)
+
+      expect(useAppStore.getState().pendingTodoFocus).toBeNull()
+    })
+  })
+
   it('previews and cancels a Today reorder without persisting until drop', async () => {
     useBlocksStore.setState({ blocksByDay: { [DAY]: [makeBlock(1, 'First', 540), makeBlock(2, 'Second', 660)] }, loadedDays: [DAY] })
     render(<TodayView />)
@@ -232,7 +340,6 @@ describe('task planning release flows', () => {
     expect(subtask.id).toBe(subtaskId)
 
     render(<SubtaskList task={task} now={new Date('2026-08-10T08:00:00')} />)
-    fireEvent.click(screen.getByRole('button', { name: /Subtasks/ }))
     fireEvent.click(await screen.findByRole('button', { name: 'Add Research to today' }))
     expect(await screen.findByRole('dialog', { name: 'Schedule Research' })).toBeDefined()
     fireEvent.click(screen.getByRole('button', { name: 'Add to today' }))
