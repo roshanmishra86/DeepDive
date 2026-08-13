@@ -534,6 +534,107 @@ describe('task planning release flows', () => {
 
       expect(screen.getByRole('textbox', { name: 'Notes for Fresh' }).textContent).toBe('Fresh note')
     })
+
+    it('flushes a pending edit against the block\'s own day, not whatever day becomes current after a rollover', async () => {
+      // The block starts (and stays) on DAY. The day clock then rolls over
+      // to NEXT_DAY, dropping the block out of `useTodayBlocks()` — Rule 4
+      // in TodayView flushes the pending edit before falling back to an
+      // empty selection. The save must land on the block's own `day` field,
+      // not on whatever `currentDay` happens to be by the time it runs.
+      const NEXT_DAY = '2026-08-11'
+      useBlocksStore.setState({
+        blocksByDay: { [DAY]: [makeBlock(1, 'Overnight', 540)] },
+        loadedDays: [DAY],
+      })
+      render(<TodayView />)
+
+      const textbox = screen.getByRole('textbox', { name: 'Notes for Overnight' })
+      fireEvent.focusIn(textbox)
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: 'Bullet list' }))
+      })
+
+      await act(async () => {
+        useBlocksStore.setState((s) => ({
+          blocksByDay: { ...s.blocksByDay, [NEXT_DAY]: [] },
+          loadedDays: [...s.loadedDays, NEXT_DAY],
+        }))
+        useDayStore.setState({ currentDay: NEXT_DAY })
+      })
+
+      await vi.waitFor(() => {
+        expect(useBlocksStore.getState().blocksByDay[DAY][0].note).toContain('bulletList')
+      })
+      expect(useBlocksStore.getState().blocksByDay[DAY][0].noteUpdatedAt).not.toBeNull()
+      // Nothing was ever written under the new current day — a `currentDay`
+      // write would have created a phantom entry there instead.
+      expect(useBlocksStore.getState().blocksByDay[NEXT_DAY]).toEqual([])
+    })
+
+    it('keeps the block selected with its failed draft instead of silently dropping it when a flush fails', async () => {
+      // `useBlocksStore.setState` shallow-merges, so an overridden action
+      // leaks into every later test unless restored — capture and put the
+      // real one back once this test is done.
+      const realSaveBlockNote = useBlocksStore.getState().saveBlockNote
+      const failingSave = vi.fn(async () => false)
+      try {
+        useBlocksStore.setState({
+          blocksByDay: {
+            [DAY]: [
+              makeBlock(1, 'First', 540, { note: 'First note text' }),
+              makeBlock(2, 'Second', 660, { note: 'Second note text' }),
+            ],
+          },
+          loadedDays: [DAY],
+          saveBlockNote: failingSave,
+        })
+        render(<TodayView />)
+
+        await act(async () => {
+          fireEvent.click(screen.getByRole('button', { name: 'Bullet list' }))
+        })
+
+        await act(async () => {
+          fireEvent.click(screen.getByRole('button', { name: 'Show notes for Second' }))
+        })
+
+        // The flush the selection change waited on reported failure, so the
+        // boolean must not be discarded: the panel stays on First (with its
+        // unsaved draft still visible) rather than silently losing it.
+        await vi.waitFor(() => {
+          expect(failingSave).toHaveBeenCalled()
+        })
+        expect(screen.getByRole('textbox', { name: 'Notes for First' })).toBeDefined()
+        expect(screen.queryByRole('textbox', { name: 'Notes for Second' })).toBeNull()
+        expect(document.querySelector('.block-notes-save-state')?.textContent).toBe('Save failed')
+      } finally {
+        useBlocksStore.setState({ saveBlockNote: realSaveBlockNote })
+      }
+    })
+
+    it('flushes a pending edit on blur, not just on the trailing debounce', async () => {
+      useBlocksStore.setState({
+        blocksByDay: { [DAY]: [makeBlock(1, 'Blurred', 540)] },
+        loadedDays: [DAY],
+      })
+      render(<TodayView />)
+
+      const textbox = screen.getByRole('textbox', { name: 'Notes for Blurred' })
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: 'Bullet list' }))
+      })
+
+      // Leaving the panel entirely (relatedTarget outside the wrapper) —
+      // not a toolbar click, which stays inside the wrapper and must not
+      // flush on every internal focus move.
+      await act(async () => {
+        fireEvent.focusOut(textbox)
+      })
+
+      await vi.waitFor(() => {
+        expect(useBlocksStore.getState().blocksByDay[DAY][0].note).toContain('bulletList')
+      })
+    })
   })
 
   describe('WeekPlanView', () => {

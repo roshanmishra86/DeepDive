@@ -106,15 +106,22 @@ export function TodayView() {
     prevActiveIdRef.current = activeId
 
     if (next !== undefined) {
-      // Rule 5: flush any pending edit before the selection changes.
+      // Rule 5: flush any pending edit before the selection changes. Only
+      // move the selection once the flush actually succeeded — a failed
+      // save must not also lose the draft by yanking the editor away from
+      // it, so on failure the selection (and the failed draft) stays put.
       const target = next
-      void (flushNotesRef.current?.() ?? Promise.resolve(true)).then(() => setSelectedBlockId(target))
+      void (flushNotesRef.current?.() ?? Promise.resolve(true)).then((ok) => {
+        if (ok) setSelectedBlockId(target)
+      })
     }
   }, [blocks, nowMin, selectedBlockId])
 
   const selectBlockNotes = (blockId: number) => {
     if (blockId === selectedBlockId) return
-    void (flushNotesRef.current?.() ?? Promise.resolve(true)).then(() => setSelectedBlockId(blockId))
+    void (flushNotesRef.current?.() ?? Promise.resolve(true)).then((ok) => {
+      if (ok) setSelectedBlockId(blockId)
+    })
   }
 
   const selectedBlock = blocks.find((b) => b.id === selectedBlockId) ?? null

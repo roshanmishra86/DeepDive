@@ -968,7 +968,7 @@ describe('blocks store', () => {
     })
     const blockId = blocksOf(day)[0].id
 
-    await useBlocksStore.getState().editBlock(day, 
+    await useBlocksStore.getState().editBlock(day,
       blockId,
       {
         taskId,

@@ -2871,9 +2871,7 @@ button:focus-visible {
   background: var(--bg-card);
   padding: 12px 14px;
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
+  flex-direction: column;
   transition: border-color 0.15s;
 }
 
@@ -2886,6 +2884,17 @@ button:focus-visible {
   border-color: var(--border-strong);
   background: transparent;
   opacity: 0.72;
+}
+
+/* Holds the drag handle/checkbox/title on the left and the due chip/priority/
+   overflow menu on the right — the row's single visible line. Split out of
+   `.task-row` so subtasks (rendered as a sibling below) lay out as a
+   full-width block under this line instead of a third flex item beside it. */
+.task-row-main {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
 }
 
 .task-row-left {

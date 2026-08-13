@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import type { Subtask } from '../../db/types'
 import { useAppStore } from '../../stores/app'
 import { useTasksStore } from '../../stores/tasks'
@@ -8,7 +8,7 @@ import {
   useTimerStore,
   pomodoroCounterLabel,
 } from '../../stores/timer'
-import { formatClock } from '../../lib/time'
+import { formatClock, fromDayKey } from '../../lib/time'
 import { activeWorkBlock, displayPomodoroTarget, isFreshCycle } from '../../lib/timer'
 import { upcomingTasks, taskMeta } from '../../lib/todo'
 import { ArrowCounterClockwise } from '@phosphor-icons/react/dist/csr/ArrowCounterClockwise'
@@ -225,7 +225,16 @@ export function RightRail({ onCollapse }: { onCollapse?: () => void }) {
   const tasks = useTasksStore((s) => s.tasks)
   const subtasksByTask = useTasksStore((s) => s.subtasksByTask)
 
-  const now = new Date()
+  // One clock, owned by the day store — rebuilt the same way TodoView and
+  // WeekPlanView do, never read from `new Date()` directly. Otherwise "due
+  // today"/"tomorrow"/"overdue" labels go stale until an unrelated rerender.
+  const currentDay = useDayStore((s) => s.currentDay)
+  const nowMin = useDayStore((s) => s.nowMin)
+  const now = useMemo(() => {
+    const date = fromDayKey(currentDay)
+    date.setMinutes(nowMin)
+    return date
+  }, [currentDay, nowMin])
   const upcoming = upcomingTasks(tasks, now, 5)
 
   return (

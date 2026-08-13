@@ -3,7 +3,7 @@ import { useTasksStore } from '../../stores/tasks'
 import { useTodayBlocks } from '../../stores/useTodayBlocks'
 import { useAppStore } from '../../stores/app'
 import type { Subtask, Task } from '../../db/types'
-import { taskMeta, blockDraftFromTask, formatDueLabel, formatDueChipLabel, PRIORITIES } from '../../lib/todo'
+import { taskEstimateMeta, blockDraftFromTask, formatDueLabel, formatDueChipLabel, PRIORITIES } from '../../lib/todo'
 import { Trash } from '@phosphor-icons/react/dist/csr/Trash'
 import { Pencil } from '@phosphor-icons/react/dist/csr/Pencil'
 import { NotePencil } from '@phosphor-icons/react/dist/csr/NotePencil'
@@ -75,7 +75,10 @@ export function TaskRow({
   const wasMenuOpen = useRef(false)
 
   const loadedSubtasks = useTasksStore((s) => s.subtasksByTask[task.id] ?? NO_SUBTASKS)
-  const meta = taskMeta(task, now, loadedSubtasks)
+  // Only the estimate segment renders here — due info already shows in the
+  // due chip on the right, so a full `taskMeta()` would duplicate it on a
+  // second line (see mock-ups/TODO.png: single-line rows).
+  const meta = taskEstimateMeta(task, loadedSubtasks)
   const isPlanned = blocks.some((b) => b.taskId === task.id)
 
   const priorityMeta = PRIORITIES.find((p) => p.priority === task.priority) ?? PRIORITIES[1]
@@ -155,140 +158,142 @@ export function TaskRow({
       onDragOver={(event) => { event.preventDefault(); onDragOver?.() }}
       onDrop={(event) => { event.preventDefault(); onDrop?.() }}
     >
-      <div className="task-row-left">
-        <button
-          type="button"
-          className={`task-drag-handle${dragDisabledReason ? ' task-drag-handle-disabled' : ''}`}
-          draggable={!dragDisabledReason}
-          aria-disabled={dragDisabledReason ? 'true' : undefined}
-          onDragStart={handleDragStart}
-          onDragEnd={onDragEnd}
-          onClick={handleHandleClick}
-          aria-label={`Drag ${task.title}`}
-          title={dragDisabledReason ?? 'Drag to reorder'}
-        >
-          ⠿
-        </button>
-        <input
-          type="checkbox"
-          className="task-check"
-          checked={task.done}
-          onChange={() => void toggleDone(task.id, new Date().toISOString())}
-          aria-label={`Complete: ${task.title}`}
-        />
-        <div className="task-content">
-          <div className={`task-title${task.done ? ' task-done' : ''}`}>{task.title}</div>
-          {meta && <div className="task-meta">{meta}</div>}
-          {shutdownWarning && (
-            <div className="task-shutdown-warning" role="alert">
-              {shutdownWarning}
-            </div>
-          )}
-        </div>
-      </div>
-
-      <div className="task-row-right">
-        <span className={['task-due-chip', dueIsUrgent && 'task-due-chip-danger', !task.dueAt && 'task-due-chip-none'].filter(Boolean).join(' ')}>
-          {task.dueAt ? <Calendar size={12} /> : <CalendarX size={12} />}
-          {dueChipLabel}
-        </span>
-
-        <button
-          type="button"
-          className="task-priority-chip"
-          onClick={cyclePriority}
-          aria-label={`Change priority for ${task.title}, currently ${priorityMeta.label}`}
-        >
-          <span className="task-priority-dot" style={{ backgroundColor: priorityMeta.dot }} />
-          {priorityMeta.label}
-        </button>
-
-        <div className="task-overflow" ref={menuRef}>
+      <div className="task-row-main">
+        <div className="task-row-left">
           <button
             type="button"
-            ref={menuTriggerRef}
-            className="btn-icon task-overflow-trigger"
-            aria-haspopup="menu"
-            aria-expanded={menuOpen}
-            aria-label={`More actions: ${task.title}`}
-            onClick={() => setMenuOpen((value) => !value)}
+            className={`task-drag-handle${dragDisabledReason ? ' task-drag-handle-disabled' : ''}`}
+            draggable={!dragDisabledReason}
+            aria-disabled={dragDisabledReason ? 'true' : undefined}
+            onDragStart={handleDragStart}
+            onDragEnd={onDragEnd}
+            onClick={handleHandleClick}
+            aria-label={`Drag ${task.title}`}
+            title={dragDisabledReason ?? 'Drag to reorder'}
           >
-            <DotsThreeVertical size={16} weight="bold" />
+            ⠿
           </button>
-          {menuOpen && (
-            <div className="task-overflow-menu" role="menu">
-              <button
-                type="button"
-                role="menuitem"
-                className="task-overflow-item"
-                onClick={() => { closeMenu(); void handlePlanToday() }}
-                disabled={isPlanned}
-              >
-                <CalendarPlus size={14} /> {isPlanned ? 'Planned' : 'Plan today'}
-              </button>
-              <button
-                type="button"
-                role="menuitemcheckbox"
-                aria-checked={task.important}
-                className="task-overflow-item"
-                onClick={() => toggleImportant(task.id)}
-              >
-                <span className="task-overflow-checkmark" aria-hidden="true">{task.important ? '✓' : ''}</span> Important
-              </button>
-              <button
-                type="button"
-                role="menuitemcheckbox"
-                aria-checked={task.urgent}
-                className="task-overflow-item"
-                onClick={() => toggleUrgent(task.id)}
-              >
-                <span className="task-overflow-checkmark" aria-hidden="true">{task.urgent ? '✓' : ''}</span> Urgent
-              </button>
-              <button
-                type="button"
-                role="menuitem"
-                className="task-overflow-item"
-                onClick={() => { closeMenu(); void onMoveUp?.() }}
-                disabled={!onMoveUp || !canMoveUp}
-                aria-label={`Move ${task.title} up`}
-              >
-                ↑ Move up
-              </button>
-              <button
-                type="button"
-                role="menuitem"
-                className="task-overflow-item"
-                onClick={() => { closeMenu(); void onMoveDown?.() }}
-                disabled={!onMoveDown || !canMoveDown}
-                aria-label={`Move ${task.title} down`}
-              >
-                ↓ Move down
-              </button>
-              <div className="task-overflow-divider" />
-              <button type="button" role="menuitem" className="task-overflow-item" onClick={() => { closeMenu(); onEdit(task.id) }}>
-                <Pencil size={14} /> Edit
-              </button>
-              <button type="button" role="menuitem" className="task-overflow-item" onClick={() => { closeMenu(); openPlan({ kind: 'task', id: task.id }) }}>
-                <NotePencil size={14} weight={task.notes ? 'fill' : 'regular'} /> Plan / notes
-              </button>
-              {task.done && (
-                <button type="button" role="menuitem" className="task-overflow-item" onClick={() => { closeMenu(); void archiveTask(task.id, new Date().toISOString()) }}>
-                  <Archive size={14} /> Archive
+          <input
+            type="checkbox"
+            className="task-check"
+            checked={task.done}
+            onChange={() => void toggleDone(task.id, new Date().toISOString())}
+            aria-label={`Complete: ${task.title}`}
+          />
+          <div className="task-content">
+            <div className={`task-title${task.done ? ' task-done' : ''}`}>{task.title}</div>
+            {meta && <div className="task-meta">{meta}</div>}
+            {shutdownWarning && (
+              <div className="task-shutdown-warning" role="alert">
+                {shutdownWarning}
+              </div>
+            )}
+          </div>
+        </div>
+
+        <div className="task-row-right">
+          <span className={['task-due-chip', dueIsUrgent && 'task-due-chip-danger', !task.dueAt && 'task-due-chip-none'].filter(Boolean).join(' ')}>
+            {task.dueAt ? <Calendar size={12} /> : <CalendarX size={12} />}
+            {dueChipLabel}
+          </span>
+
+          <button
+            type="button"
+            className="task-priority-chip"
+            onClick={cyclePriority}
+            aria-label={`Change priority for ${task.title}, currently ${priorityMeta.label}`}
+          >
+            <span className="task-priority-dot" style={{ backgroundColor: priorityMeta.dot }} />
+            {priorityMeta.label}
+          </button>
+
+          <div className="task-overflow" ref={menuRef}>
+            <button
+              type="button"
+              ref={menuTriggerRef}
+              className="btn-icon task-overflow-trigger"
+              aria-haspopup="menu"
+              aria-expanded={menuOpen}
+              aria-label={`More actions: ${task.title}`}
+              onClick={() => setMenuOpen((value) => !value)}
+            >
+              <DotsThreeVertical size={16} weight="bold" />
+            </button>
+            {menuOpen && (
+              <div className="task-overflow-menu" role="menu">
+                <button
+                  type="button"
+                  role="menuitem"
+                  className="task-overflow-item"
+                  onClick={() => { closeMenu(); void handlePlanToday() }}
+                  disabled={isPlanned}
+                >
+                  <CalendarPlus size={14} /> {isPlanned ? 'Planned' : 'Plan today'}
                 </button>
-              )}
-              {!deleteConfirm ? (
-                <button type="button" role="menuitem" className="task-overflow-item task-overflow-item-danger" onClick={() => setDeleteConfirm(true)}>
-                  <Trash size={14} /> Delete
+                <button
+                  type="button"
+                  role="menuitemcheckbox"
+                  aria-checked={task.important}
+                  className="task-overflow-item"
+                  onClick={() => toggleImportant(task.id)}
+                >
+                  <span className="task-overflow-checkmark" aria-hidden="true">{task.important ? '✓' : ''}</span> Important
                 </button>
-              ) : (
-                <div className="task-overflow-confirm">
-                  <span>Delete this task?</span>
-                  <button type="button" className="btn-icon btn-danger task-confirm" onClick={() => void handleDelete()} title="Confirm delete">✓</button>
-                  <button type="button" className="btn-icon task-confirm" onClick={() => setDeleteConfirm(false)} title="Cancel delete">✕</button>
-                </div>
-              )}
-            </div>
-          )}
+                <button
+                  type="button"
+                  role="menuitemcheckbox"
+                  aria-checked={task.urgent}
+                  className="task-overflow-item"
+                  onClick={() => toggleUrgent(task.id)}
+                >
+                  <span className="task-overflow-checkmark" aria-hidden="true">{task.urgent ? '✓' : ''}</span> Urgent
+                </button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  className="task-overflow-item"
+                  onClick={() => { closeMenu(); void onMoveUp?.() }}
+                  disabled={!onMoveUp || !canMoveUp}
+                  aria-label={`Move ${task.title} up`}
+                >
+                  ↑ Move up
+                </button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  className="task-overflow-item"
+                  onClick={() => { closeMenu(); void onMoveDown?.() }}
+                  disabled={!onMoveDown || !canMoveDown}
+                  aria-label={`Move ${task.title} down`}
+                >
+                  ↓ Move down
+                </button>
+                <div className="task-overflow-divider" />
+                <button type="button" role="menuitem" className="task-overflow-item" onClick={() => { closeMenu(); onEdit(task.id) }}>
+                  <Pencil size={14} /> Edit
+                </button>
+                <button type="button" role="menuitem" className="task-overflow-item" onClick={() => { closeMenu(); openPlan({ kind: 'task', id: task.id }) }}>
+                  <NotePencil size={14} weight={task.notes ? 'fill' : 'regular'} /> Plan / notes
+                </button>
+                {task.done && (
+                  <button type="button" role="menuitem" className="task-overflow-item" onClick={() => { closeMenu(); void archiveTask(task.id, new Date().toISOString()) }}>
+                    <Archive size={14} /> Archive
+                  </button>
+                )}
+                {!deleteConfirm ? (
+                  <button type="button" role="menuitem" className="task-overflow-item task-overflow-item-danger" onClick={() => setDeleteConfirm(true)}>
+                    <Trash size={14} /> Delete
+                  </button>
+                ) : (
+                  <div className="task-overflow-confirm">
+                    <span>Delete this task?</span>
+                    <button type="button" className="btn-icon btn-danger task-confirm" onClick={() => void handleDelete()} title="Confirm delete">✓</button>
+                    <button type="button" className="btn-icon task-confirm" onClick={() => setDeleteConfirm(false)} title="Cancel delete">✕</button>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
         </div>
       </div>
       <SubtaskList task={task} now={now} />

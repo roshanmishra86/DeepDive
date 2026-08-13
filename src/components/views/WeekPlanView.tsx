@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useAppStore } from '../../stores/app'
 import { useBlocksStore } from '../../stores/blocks'
 import { useDayStore } from '../../stores/day'
@@ -12,7 +12,7 @@ import {
   sortDayBlocks,
   type WeekGroupBy,
 } from '../../lib/weekPlan'
-import { startOfWeek, addDays, fromDayKey } from '../../lib/time'
+import { startOfWeek, addDays, fromDayKey, toDayKey } from '../../lib/time'
 import { upcomingTasks } from '../../lib/todo'
 import { nextFreeStart } from '../../lib/today'
 import type { Task } from '../../db/types'
@@ -42,6 +42,11 @@ export function WeekPlanView() {
   const [groupBy, setGroupBy] = useState<WeekGroupBy>('importance')
   const [composerState, setComposerState] = useState<ComposerState>({ mode: 'closed' })
   const [dragging, setDragging] = useState<DraggingBlock | null>(null)
+  // Set the moment the user navigates to a different week (prev/next arrows).
+  // Once set, the auto-advance effect below stops moving the anchor out from
+  // under them — a week rollover crossing midnight must never yank the view
+  // back to "this week" while someone is looking at a different one.
+  const manuallyAnchored = useRef(false)
 
   const currentDay = useDayStore((s) => s.currentDay)
   const nowMin = useDayStore((s) => s.nowMin)
@@ -59,6 +64,15 @@ export function WeekPlanView() {
   useEffect(() => {
     void ensureDays(days)
   }, [days, ensureDays])
+
+  // Advance the anchor when the day clock crosses into a new week (e.g. left
+  // open Sunday night into Monday) — but never once the user has manually
+  // navigated to a different week via the prev/next arrows.
+  useEffect(() => {
+    if (manuallyAnchored.current) return
+    const currentWeekMonday = startOfWeek(fromDayKey(currentDay))
+    setAnchorMonday((prev) => (toDayKey(prev) === toDayKey(currentWeekMonday) ? prev : currentWeekMonday))
+  }, [currentDay])
 
   // One clock, owned by the day store — rebuilt the same way TodoView does,
   // never read from `new Date()` directly.
@@ -144,8 +158,14 @@ export function WeekPlanView() {
         <WeekDatePicker
           anchorMonday={anchorMonday}
           todayKey={currentDay}
-          onPrev={() => setAnchorMonday((d) => addDays(d, -7))}
-          onNext={() => setAnchorMonday((d) => addDays(d, 7))}
+          onPrev={() => {
+            manuallyAnchored.current = true
+            setAnchorMonday((d) => addDays(d, -7))
+          }}
+          onNext={() => {
+            manuallyAnchored.current = true
+            setAnchorMonday((d) => addDays(d, 7))
+          }}
         />
 
         <div className="week-columns">
