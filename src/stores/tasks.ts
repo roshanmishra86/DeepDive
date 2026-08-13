@@ -49,7 +49,7 @@ interface TasksState {
   removeTask: (id: number) => Promise<void>
   archiveTask: (id: number, archivedAt: string) => Promise<boolean>
   unarchiveTask: (id: number) => Promise<boolean>
-  moveTask: (id: number, destination: TaskDestination) => Promise<boolean>
+  moveTask: (id: number, destination: TaskDestination, now: Date) => Promise<boolean>
   saveTaskNotes: (id: number, notes: string) => Promise<boolean>
   loadSubtasks: (taskId: number) => Promise<void>
   createSubtask: (input: { taskId: number; title: string; estimateMin: number; createdAt?: string; dueAt?: string | null }) => Promise<number | null>
@@ -260,17 +260,17 @@ export const useTasksStore = create<TasksState>()((set, get) => {
       return true
     },
 
-    moveTask: async (id, destination) => {
+    moveTask: async (id, destination, now) => {
       const state = get()
       const task = state.tasks.find((item) => item.id === id)
       if (!task) return false
       if (state.groupBy === 'deadline') {
-        const currentGroup = groupByDeadline(state.tasks, new Date()).find((group) => group.tasks.some((item) => item.id === id))?.bucket
+        const currentGroup = groupByDeadline(state.tasks, now).find((group) => group.tasks.some((item) => item.id === id))?.bucket
         if (currentGroup && currentGroup !== destination.group) return false
       }
       const groups = state.groupBy === 'matrix'
         ? groupByMatrix(state.tasks).map((group) => ({ key: group.quadrant, ids: group.tasks.map((item) => item.id) }))
-        : groupByDeadline(state.tasks, new Date()).map((group) => ({ key: group.bucket, ids: group.tasks.map((item) => item.id) }))
+        : groupByDeadline(state.tasks, now).map((group) => ({ key: group.bucket, ids: group.tasks.map((item) => item.id) }))
       const destinationGroup = groups.find((group) => group.key === destination.group)
       if (!destinationGroup) return false
       const without = groups.map((group) => ({ ...group, ids: group.ids.filter((itemId) => itemId !== id) }))

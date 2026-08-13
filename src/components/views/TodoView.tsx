@@ -85,6 +85,7 @@ export function TodoView() {
   const nowMin = useDayStore((s) => s.nowMin)
   const currentDay = useDayStore((s) => s.currentDay)
   const [draggingId, setDraggingId] = useState<number | null>(null)
+  const [dropTargetId, setDropTargetId] = useState<number | null>(null)
   const [dropHint, setDropHint] = useState<string | null>(null)
   const dropCompleted = useRef(false)
 
@@ -211,18 +212,20 @@ export function TodoView() {
     [filteredTasks, sortByGroup, now]
   )
 
-  const beginDrag = (id: number) => { dropCompleted.current = false; setDraggingId(id); setDropHint(null) }
+  const beginDrag = (id: number) => { dropCompleted.current = false; setDraggingId(id); setDropTargetId(null); setDropHint(null) }
   const finishDrag = () => {
     setDraggingId(null)
+    setDropTargetId(null)
     if (!dropCompleted.current) setDropHint(null)
   }
   const dropOn = async (group: GroupKey, beforeId: number | null) => {
     if (draggingId === null) return
-    const ok = await moveTask(draggingId, { group, beforeId })
+    const ok = await moveTask(draggingId, { group, beforeId }, now)
     dropCompleted.current = true
     if (!ok && groupBy === 'deadline') setDropHint('Move by editing the due date')
     else setDropHint(null)
     setDraggingId(null)
+    setDropTargetId(null)
   }
   const moveWithin = async (group: GroupKey, groupTasks: Task[], index: number, direction: -1 | 1) => {
     const targetIndex = index + direction
@@ -230,13 +233,22 @@ export function TodoView() {
     const beforeId = direction === -1
       ? groupTasks[targetIndex].id
       : groupTasks[targetIndex + 1]?.id ?? null
-    await moveTask(groupTasks[index].id, { group, beforeId })
+    await moveTask(groupTasks[index].id, { group, beforeId }, now)
   }
   const hoverDeadline = (bucket: DeadlineBucket) => {
     if (draggingId === null) return
     const source = groupByDeadline(tasks, now).find((group) => group.tasks.some((task) => task.id === draggingId))?.bucket
     setDropHint(source && source !== bucket ? 'Move by editing the due date' : null)
   }
+  // Row-level hover: the only row that should show the drop-target outline
+  // is the one the pointer is actually over, not every non-dragged row.
+  const hoverRow = (taskId: number) => {
+    if (draggingId === null || draggingId === taskId) return
+    setDropTargetId(taskId)
+  }
+  // Dragging over the empty area of a group (no rows to hover) means the
+  // pointer has left whatever row was previously targeted.
+  const clearRowTarget = () => setDropTargetId(null)
 
   if (loading) {
     return (
@@ -406,7 +418,7 @@ export function TodoView() {
                       </div>
                       <div
                         className="todo-group-rows"
-                        onDragOver={(event) => { if (group.tasks.length === 0 && !reason) event.preventDefault() }}
+                        onDragOver={(event) => { if (group.tasks.length === 0 && !reason) { event.preventDefault(); clearRowTarget() } }}
                         onDrop={(event) => { if (group.tasks.length === 0 && !reason) { event.preventDefault(); void dropOn(group.quadrant, null) } }}
                       >
                         {group.tasks.length === 0 && draggingId !== null && <div className="todo-empty-drop-zone">Drop here</div>}
@@ -418,10 +430,10 @@ export function TodoView() {
                             onEdit={openEditor}
                             now={now}
                             onDragStart={() => beginDrag(task.id)}
-                            onDragOver={() => setDropHint(null)}
+                            onDragOver={() => { setDropHint(null); hoverRow(task.id) }}
                             onDrop={() => void dropOn(group.quadrant, task.id)}
                             onDragEnd={finishDrag}
-                            dragTarget={draggingId !== null && draggingId !== task.id}
+                            dragTarget={dropTargetId === task.id}
                             onMoveUp={() => moveWithin(group.quadrant, group.tasks, group.tasks.findIndex((item) => item.id === task.id), -1)}
                             onMoveDown={() => moveWithin(group.quadrant, group.tasks, group.tasks.findIndex((item) => item.id === task.id), 1)}
                             canMoveUp={!reason && group.tasks[0]?.id !== task.id}
@@ -475,7 +487,7 @@ export function TodoView() {
                       </div>
                       <div
                         className="todo-group-rows"
-                        onDragOver={(event) => { if (group.tasks.length === 0 && !reason) { event.preventDefault(); hoverDeadline(group.bucket) } }}
+                        onDragOver={(event) => { if (group.tasks.length === 0 && !reason) { event.preventDefault(); hoverDeadline(group.bucket); clearRowTarget() } }}
                         onDrop={(event) => { if (group.tasks.length === 0 && !reason) { event.preventDefault(); void dropOn(group.bucket, null) } }}
                       >
                         {group.tasks.length === 0 && draggingId !== null && <div className="todo-empty-drop-zone">Drop here</div>}
@@ -486,10 +498,10 @@ export function TodoView() {
                             onEdit={openEditor}
                             now={now}
                             onDragStart={() => beginDrag(task.id)}
-                            onDragOver={() => hoverDeadline(group.bucket)}
+                            onDragOver={() => { hoverDeadline(group.bucket); hoverRow(task.id) }}
                             onDrop={() => void dropOn(group.bucket, task.id)}
                             onDragEnd={finishDrag}
-                            dragTarget={draggingId !== null && draggingId !== task.id}
+                            dragTarget={dropTargetId === task.id}
                             onMoveUp={() => moveWithin(group.bucket, group.tasks, group.tasks.findIndex((item) => item.id === task.id), -1)}
                             onMoveDown={() => moveWithin(group.bucket, group.tasks, group.tasks.findIndex((item) => item.id === task.id), 1)}
                             canMoveUp={!reason && group.tasks[0]?.id !== task.id}

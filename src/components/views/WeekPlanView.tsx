@@ -97,6 +97,15 @@ export function WeekPlanView() {
     ? (blocksByDay[busiestDay] ?? []).filter((b) => b.kind !== 'break').length
     : 0
 
+  // The header's "New block" button has no day of its own to anchor to, so it
+  // defaults to `currentDay` — but once the user has navigated to a
+  // different week, `currentDay` falls outside `days` and the block would be
+  // created on a day the visible week can't show. Fall back to the first
+  // visible day in that case, using the same day-key string comparison the
+  // rest of this file uses (`days` and `currentDay` are already `toDayKey`
+  // strings, so a direct membership check is the matching comparison).
+  const headerComposerDay = days.includes(currentDay) ? currentDay : days[0]
+
   const openNewComposer = (day: string) => {
     const fromMin = day === currentDay ? nowMin : 0
     const startMin = nextFreeStart(blocksByDay[day] ?? [], fromMin, 30)
@@ -145,7 +154,7 @@ export function WeekPlanView() {
               </button>
             </div>
           </div>
-          <button type="button" className="btn-accent" onClick={() => openNewComposer(currentDay)}>
+          <button type="button" className="btn-accent" onClick={() => openNewComposer(headerComposerDay)}>
             <Plus size={16} />
             New block
           </button>

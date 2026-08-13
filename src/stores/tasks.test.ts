@@ -225,6 +225,28 @@ describe('tasks store', () => {
     expect(fromDb).toBeNull()
   })
 
+  it('moveTask buckets deadline groups off the caller-supplied now, not the wall clock', async () => {
+    await useTasksStore.getState().hydrate(driver)
+    useTasksStore.getState().setGroupBy('deadline')
+
+    // Due far in the future so any accidental use of the real wall clock
+    // (today, per this environment) would bucket it as 'later' instead of
+    // 'soon' — making a bug that reads `new Date()` internally observable.
+    const id = await tasksRepo.createTask(driver, {
+      title: 'Future task',
+      dueAt: '2030-06-05T10:00:00.000Z',
+      createdAt: new Date().toISOString(),
+    })
+    await useTasksStore.getState().hydrate(driver)
+
+    // 34 hours before the due date: within the 48h "soon" window relative to
+    // this `now`, but nowhere near "soon" relative to the real wall clock.
+    const now = new Date('2030-06-04T00:00:00.000Z')
+
+    const ok = await useTasksStore.getState().moveTask(id, { group: 'soon', beforeId: null }, now)
+    expect(ok).toBe(true)
+  })
+
   it('sets groupBy without persisting', async () => {
     await useTasksStore.getState().hydrate(driver)
 

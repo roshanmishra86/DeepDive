@@ -201,8 +201,18 @@ export function BlockNotesPanel({ block, now, flushRef, onFocusChange }: BlockNo
             type="button"
             className="block-notes-task-link"
             onClick={() => {
-              focusTask(block.taskId!)
-              setView('todo')
+              // This button lives inside the blur-flush wrapper above, so
+              // clicking it only moves focus within the panel — the blur
+              // guard suppresses the flush there. Flush explicitly before
+              // navigating away: switching views must never lose a pending
+              // debounced edit. On failure, stay put so the user keeps the
+              // failed draft and the visible "Save failed" state.
+              void (async () => {
+                const ok = await flush()
+                if (!ok) return
+                focusTask(block.taskId!)
+                setView('todo')
+              })()
             }}
           >
             This is a task. <ArrowSquareOut size={12} />

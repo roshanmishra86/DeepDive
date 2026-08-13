@@ -26,6 +26,8 @@ import { notePlainText, parseNote, serializeNote } from '../../lib/richText'
 import { DEFAULT_ACCENT } from '../../lib/accents'
 import { DEFAULT_TODO_FILTERS } from '../../lib/todo'
 import { TodoView, TODO_FOCUS_FADE_MS } from '../../components/views/TodoView'
+import { weekDays } from '../../lib/weekPlan'
+import { startOfWeek, addDays, fromDayKey } from '../../lib/time'
 
 const DAY = '2026-08-10'
 
@@ -461,6 +463,78 @@ describe('task planning release flows', () => {
       expect(useAppStore.getState().view).toBe('todo')
     })
 
+    it('flushes a pending edit before following the task link, so the debounced draft is not lost', async () => {
+      // The task-link button lives inside the panel's blur-flush wrapper, so
+      // clicking it moves focus within the panel and the blur guard would
+      // normally suppress the flush — the handler must flush explicitly
+      // before navigating, and the save must land before the view switches.
+      useBlocksStore.setState({
+        blocksByDay: { [DAY]: [makeBlock(1, 'Linked', 540, { taskId: 5 })] },
+        loadedDays: [DAY],
+      })
+      render(<TodayView />)
+
+      const textbox = screen.getByRole('textbox', { name: 'Notes for Linked' })
+      fireEvent.focusIn(textbox)
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: 'Bullet list' }))
+      })
+      expect(document.querySelector('.block-notes-save-state')?.textContent).toBe('Saving…')
+
+      const link = screen.getByRole('button', { name: 'This is a task.' })
+      await act(async () => {
+        fireEvent.click(link)
+      })
+
+      // The click handler awaits the flush before navigating, but the
+      // underlying write chain is a real (unmocked) async db round-trip —
+      // wait for it rather than asserting immediately after the click, same
+      // as the other flush-ordering tests in this file.
+      await vi.waitFor(() => {
+        expect(useBlocksStore.getState().blocksByDay[DAY][0].note).toContain('bulletList')
+      })
+      expect(useAppStore.getState().pendingTodoFocus).toBe(5)
+      expect(useAppStore.getState().view).toBe('todo')
+    })
+
+    it('keeps the panel in place and does not navigate when the pre-navigate flush fails', async () => {
+      const realSaveBlockNote = useBlocksStore.getState().saveBlockNote
+      const failingSave = vi.fn(async () => false)
+      try {
+        useAppStore.setState({ view: 'today' })
+        useBlocksStore.setState({
+          blocksByDay: { [DAY]: [makeBlock(1, 'Linked', 540, { taskId: 5, note: 'original' })] },
+          loadedDays: [DAY],
+          saveBlockNote: failingSave,
+        })
+        render(<TodayView />)
+
+        const textbox = screen.getByRole('textbox', { name: 'Notes for Linked' })
+        fireEvent.focusIn(textbox)
+        await act(async () => {
+          fireEvent.click(screen.getByRole('button', { name: 'Bullet list' }))
+        })
+
+        const link = screen.getByRole('button', { name: 'This is a task.' })
+        await act(async () => {
+          fireEvent.click(link)
+        })
+
+        await vi.waitFor(() => {
+          expect(failingSave).toHaveBeenCalled()
+        })
+        // The failed flush must not be discarded: no navigation, no task
+        // focus, and the failed-draft state stays visible on the panel that
+        // still holds the unsaved edit.
+        expect(useAppStore.getState().view).toBe('today')
+        expect(useAppStore.getState().pendingTodoFocus).toBeNull()
+        expect(screen.getByRole('textbox', { name: 'Notes for Linked' })).toBeDefined()
+        expect(document.querySelector('.block-notes-save-state')?.textContent).toBe('Save failed')
+      } finally {
+        useBlocksStore.setState({ saveBlockNote: realSaveBlockNote })
+      }
+    })
+
     it('hides the task link when the block has no linked task', () => {
       useBlocksStore.setState({
         blocksByDay: { [DAY]: [makeBlock(1, 'Unlinked', 540)] },
@@ -693,6 +767,40 @@ describe('task planning release flows', () => {
       const planBlock = blocks.find((b) => b.id === 2)
       expect(doBlock?.sort).toBe(0)
       expect(planBlock?.sort).toBe(1)
+    })
+
+    it('falls back to the first visible day for header "New block" once the user has navigated away from the current week', async () => {
+      // Header "New block" has no day of its own to anchor to and defaults
+      // to currentDay — but after paging to a different week, currentDay is
+      // no longer in `days`, and creating on it would silently vanish from
+      // the visible week. It must fall back to the first visible day.
+      useDayStore.setState({ currentDay: DAY, nowMin: 540 })
+      useBlocksStore.setState({ blocksByDay: {}, loadedDays: [] })
+      render(<WeekPlanView />)
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: 'Next week' }))
+      })
+
+      const nextWeekDays = weekDays(addDays(startOfWeek(fromDayKey(DAY)), 7))
+      expect(nextWeekDays).not.toContain(DAY)
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: 'New block' }))
+      })
+      const dialog = await screen.findByRole('dialog')
+      fireEvent.change(dialog.querySelector('.composer-name-input') as HTMLInputElement, {
+        target: { value: 'Future block' },
+      })
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: 'Create' }))
+      })
+
+      const created = Object.entries(useBlocksStore.getState().blocksByDay)
+        .flatMap(([day, blocks]) => blocks.map((b) => ({ day, title: b.title })))
+        .find((b) => b.title === 'Future block')
+      expect(created).toBeDefined()
+      expect(created!.day).toBe(nextWeekDays[0])
     })
 
     it('completionEstimate of null renders as —, not 0%', () => {

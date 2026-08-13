@@ -447,18 +447,6 @@ export function formatDueChipLabel(dueAt: string, now: Date): string {
 }
 
 /**
- * Formats just the estimate segment of task metadata: "≈{formatDuration} left".
- * Returns null when the task has no remaining estimate. Split out of
- * `taskMeta` so callers that already render due info elsewhere (e.g. the
- * TODO row's due chip) can show the estimate without duplicating the due
- * date on a second line.
- */
-export function taskEstimateMeta(task: Task, subtasks: Subtask[] = []): string | null {
-  const estimateMin = effectiveTaskEstimate(task, subtasks)
-  return estimateMin ? `≈${formatDuration(estimateMin)} left` : null
-}
-
-/**
  * Formats task metadata as a single line joined by " · ".
  * Includes estimate as "≈{formatDuration}..." when set, and
  * "due {formatDueLabel}" when dueAt is set. Returns null when
@@ -466,10 +454,10 @@ export function taskEstimateMeta(task: Task, subtasks: Subtask[] = []): string |
  */
 export function taskMeta(task: Task, now: Date, subtasks: Subtask[] = []): string | null {
   const parts: string[] = []
-  const estimateLabel = taskEstimateMeta(task, subtasks)
+  const estimateMin = effectiveTaskEstimate(task, subtasks)
 
-  if (estimateLabel) {
-    parts.push(estimateLabel)
+  if (estimateMin) {
+    parts.push(`≈${formatDuration(estimateMin)} left`)
   }
 
   if (task.dueAt) {

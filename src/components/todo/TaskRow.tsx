@@ -3,7 +3,7 @@ import { useTasksStore } from '../../stores/tasks'
 import { useTodayBlocks } from '../../stores/useTodayBlocks'
 import { useAppStore } from '../../stores/app'
 import type { Subtask, Task } from '../../db/types'
-import { taskEstimateMeta, blockDraftFromTask, formatDueLabel, formatDueChipLabel, PRIORITIES } from '../../lib/todo'
+import { blockDraftFromTask, formatDueLabel, formatDueChipLabel, PRIORITIES } from '../../lib/todo'
 import { Trash } from '@phosphor-icons/react/dist/csr/Trash'
 import { Pencil } from '@phosphor-icons/react/dist/csr/Pencil'
 import { NotePencil } from '@phosphor-icons/react/dist/csr/NotePencil'
@@ -75,10 +75,6 @@ export function TaskRow({
   const wasMenuOpen = useRef(false)
 
   const loadedSubtasks = useTasksStore((s) => s.subtasksByTask[task.id] ?? NO_SUBTASKS)
-  // Only the estimate segment renders here — due info already shows in the
-  // due chip on the right, so a full `taskMeta()` would duplicate it on a
-  // second line (see mock-ups/TODO.png: single-line rows).
-  const meta = taskEstimateMeta(task, loadedSubtasks)
   const isPlanned = blocks.some((b) => b.taskId === task.id)
 
   const priorityMeta = PRIORITIES.find((p) => p.priority === task.priority) ?? PRIORITIES[1]
@@ -182,7 +178,6 @@ export function TaskRow({
           />
           <div className="task-content">
             <div className={`task-title${task.done ? ' task-done' : ''}`}>{task.title}</div>
-            {meta && <div className="task-meta">{meta}</div>}
             {shutdownWarning && (
               <div className="task-shutdown-warning" role="alert">
                 {shutdownWarning}

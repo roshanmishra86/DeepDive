@@ -1805,12 +1805,16 @@ owner of the wall clock, including midnight rollover for Today, rituals, the sid
   class used in `src/components/` has no rule in `src/styles/`" — CLAUDE.md), reopened rather than
   closed by the Phase 8 workaround. Fixing the checker to also parse the array-join idiom is
   unstarted work, not scoped to this phase.
-- [ ] **`WeekPlanView`'s `anchorMonday` does not roll over at midnight.** It is seeded once via
+- [x] **`WeekPlanView`'s `anchorMonday` now rolls over at midnight.** Previously seeded once via
   `useState(() => startOfWeek(fromDayKey(useDayStore.getState().currentDay)))` on mount and never
-  re-derived. Phase 4's midnight rollover moves `currentDay`, rituals, the sidebar card and the
-  timer's block attachment, but nothing re-reads `anchorMonday` — an app left open across a
-  week-boundary midnight (Sunday night into Monday) keeps showing the old week on This Week until
-  the user navigates away and back, or manually pages the date picker.
+  re-derived, so an app left open across a week-boundary midnight (Sunday night into Monday) kept
+  showing the old week on This Week until the user navigated away and back, or manually paged the
+  date picker. Fixed with an effect that re-derives the current week's Monday from `currentDay` and
+  advances `anchorMonday` whenever they diverge — but only when the user hasn't manually navigated
+  away: a `manuallyAnchored` ref is set the moment the user pages the date picker via the prev/next
+  arrows, and once set, the auto-advance effect leaves `anchorMonday` alone, so a week rollover
+  crossing midnight can no longer yank the view back to "this week" out from under someone looking
+  at a different one.
 
 #### Manual end-to-end checks not performed
 
@@ -1828,7 +1832,6 @@ documentation pass — they are outstanding, not passing by inference from the a
   arrives.
 - Resizing across 1320px and confirming the rail collapses, the toggle works, and an explicit
   toggle survives until the next breakpoint crossing.
-- Leaving the app open across local midnight and confirming Today, rituals, sidebar and timer all
-  roll over (and, per the known limitation above, that This Week's `anchorMonday` does *not* —
-  that is expected, not a bug to chase).
+- Leaving the app open across local midnight and confirming Today, rituals, sidebar, timer, and
+  This Week's `anchorMonday` all roll over.
 | Google-Fonts-dependent typography fails offline | Bundled `@fontsource` packages. |
