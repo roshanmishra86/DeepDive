@@ -372,6 +372,91 @@
   display: flex;
   flex-direction: column;
   user-select: none;
+  position: relative;
+}
+
+.rail-head {
+  display: flex;
+  justify-content: flex-end;
+  padding: 10px 12px 0;
+  flex: none;
+}
+
+.rail-collapse-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 5px;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.rail-collapse-btn:hover {
+  color: var(--text);
+  background: var(--bg-chrome);
+}
+
+/* Below the 1320px breakpoint, an expanded rail overlays the main view
+   instead of squeezing it — `.app-middle` (index.css) supplies the
+   positioned containing block. */
+@media (max-width: 1319px) {
+  .right-rail {
+    position: absolute;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 30;
+    box-shadow: -8px 0 24px rgba(0, 0, 0, 0.18);
+    animation: rail-overlay-in 160ms ease-out;
+  }
+}
+
+@keyframes rail-overlay-in {
+  from {
+    transform: translateX(24px);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+/* Collapsed rail: a narrow toggle strip that still carries the timer's
+   remaining time. */
+.rail-toggle-strip {
+  width: 40px;
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 12px;
+  padding: 16px 0;
+  border-left: 1px solid #e4ded1;
+  background: var(--bg-panel);
+  cursor: pointer;
+}
+
+.rail-toggle-strip:hover {
+  background: var(--bg-chrome);
+}
+
+.rail-toggle-icon {
+  color: var(--text-faint);
+  font-size: 14px;
+  line-height: 1;
+}
+
+.rail-toggle-clock {
+  writing-mode: vertical-rl;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  letter-spacing: 0.02em;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
 }
 
 /* Pomodoro widget at top of right rail */
@@ -4963,18 +5048,29 @@ button:focus-visible {
 
 /* Day columns */
 
+/* Below 1500px the week always scrolls horizontally rather than shrinking
+   columns to illegibility — each column keeps a 170px floor and the grid
+   itself owns the horizontal overflow, so `.app-main` never has to. */
 .week-columns {
   display: grid;
-  grid-template-columns: repeat(7, minmax(140px, 1fr));
+  grid-template-columns: repeat(7, minmax(170px, 1fr));
   gap: 10px;
   overflow-x: auto;
+  overflow-y: visible;
+}
+
+@media (min-width: 1500px) {
+  .week-columns {
+    grid-template-columns: repeat(7, 1fr);
+    overflow-x: visible;
+  }
 }
 
 .week-day-col {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  min-width: 0;
+  min-width: 170px;
   padding: 10px;
   border: 1px solid var(--border);
   border-radius: 8px;
@@ -4996,6 +5092,12 @@ button:focus-visible {
   gap: 6px;
   padding-bottom: 6px;
   border-bottom: 1px solid var(--border-subtle);
+  /* Sticks to the top of `.week-body`'s vertical scroll as a day's blocks
+     grow tall, so the header (and its hours total) stays visible. */
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--bg-panel);
 }
 
 .week-day-col-weekday {

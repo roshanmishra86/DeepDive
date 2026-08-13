@@ -14,7 +14,8 @@ import { activeWorkBlock } from './lib/timer'
 import { spaceTogglesTimer, escapeExitsSession } from './lib/shortcuts'
 import { TitleBar } from './components/chrome/TitleBar'
 import { Sidebar } from './components/chrome/Sidebar'
-import { RightRail } from './components/chrome/RightRail'
+import { RightRail, RailToggleStrip } from './components/chrome/RightRail'
+import { initialRailCollapsed, nextRailCollapsed, RAIL_BREAKPOINT } from './lib/railBreakpoint'
 import { PlanPanel } from './components/plan/PlanPanel'
 import { MusicBar } from './components/chrome/MusicBar'
 import { SettingsPanel } from './components/chrome/SettingsPanel'
@@ -93,6 +94,7 @@ function App() {
   const settingsOpen = useAppStore((s) => s.settingsOpen)
   const sessionOpen = useAppStore((s) => s.sessionOpen)
   const planTarget = useAppStore((s) => s.planTarget)
+  const railCollapsed = useAppStore((s) => s.railCollapsed)
 
   // On mount, open the database and hydrate stores. Render normally while
   // it resolves; failures are logged but non-fatal.
@@ -118,6 +120,18 @@ function App() {
           // progress after a relaunch (Phase 11 P1-3).
           useTimerStore.getState().hydrate(driver, hydrationDay, nowMin),
         ])
+        if (!mounted) return
+        // Sync the rail's collapsed state from the actual window width now
+        // that the persisted value has hydrated (Phase 9 gap fix). A narrow
+        // window always starts collapsed; a wide window keeps whatever was
+        // persisted. Must run after hydrate resolves, or this would just be
+        // overwritten by useAppStore.hydrate's persisted value.
+        useAppStore.getState().setRailCollapsed(
+          initialRailCollapsed({
+            width: window.innerWidth,
+            persisted: useAppStore.getState().railCollapsed,
+          })
+        )
       } catch (err) {
         console.error('Failed to initialize database:', err)
       }
@@ -145,6 +159,28 @@ function App() {
 
   useGlobalShortcuts()
 
+  // Single shell-owned resize listener for the right rail's collapse
+  // breakpoint (1320px). Uses matchMedia so it only fires on an actual
+  // crossing, not on every resize pixel. `nextRailCollapsed` is the pure,
+  // unit-tested decision: null means no crossing, so an explicit user
+  // toggle (setRailCollapsed) is left untouched until the next one.
+  useEffect(() => {
+    const mql = window.matchMedia(`(min-width: ${RAIL_BREAKPOINT}px)`)
+    let previousWidth = window.innerWidth
+    const handleChange = () => {
+      const width = window.innerWidth
+      const decision = nextRailCollapsed({
+        width,
+        previousWidth,
+        current: useAppStore.getState().railCollapsed,
+      })
+      previousWidth = width
+      if (decision !== null) useAppStore.getState().setRailCollapsed(decision)
+    }
+    mql.addEventListener('change', handleChange)
+    return () => mql.removeEventListener('change', handleChange)
+  }, [])
+
   const ActiveView = VIEWS[view]
 
   return (
@@ -155,7 +191,13 @@ function App() {
         <main className="app-main">
           <ActiveView />
         </main>
-        {planTarget ? <PlanPanel /> : <RightRail />}
+        {planTarget ? (
+          <PlanPanel />
+        ) : railCollapsed ? (
+          <RailToggleStrip onExpand={() => useAppStore.getState().setRailCollapsed(false)} />
+        ) : (
+          <RightRail onCollapse={() => useAppStore.getState().setRailCollapsed(true)} />
+        )}
       </div>
       <MusicBar />
       {settingsOpen && <SettingsPanel />}

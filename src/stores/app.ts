@@ -47,6 +47,14 @@ interface AppState {
   planTarget: PlanTarget
   sessionOpen: boolean
   /**
+   * Whether the right rail is collapsed to a narrow toggle strip. Defaults
+   * to false; auto-toggled by the shell's single resize listener when the
+   * window crosses the 1320px breakpoint (see `lib/railBreakpoint.ts`), but
+   * an explicit user toggle (`setRailCollapsed`) wins until the next
+   * crossing. Persisted like the other chrome settings.
+   */
+  railCollapsed: boolean
+  /**
    * Set by Today's "This is a task. ↗" link; consumed by TodoView to clear
    * filters, expand the task's group, scroll it into view and highlight it,
    * then clear itself. Null means no pending cross-view focus.
@@ -57,6 +65,7 @@ interface AppState {
   setTimerStyle: (style: TimerStyle) => void
   setRepeatStyle: (style: RepeatStyle) => void
   setWeeklyGoalMin: (minutes: number) => void
+  setRailCollapsed: (collapsed: boolean) => void
   openSettings: () => void
   closeSettings: () => void
   openPlan: (target: Exclude<PlanTarget, null>) => void
@@ -78,6 +87,7 @@ export const useAppStore = create<AppState>()((set) => ({
   settingsOpen: false,
   planTarget: null,
   sessionOpen: false,
+  railCollapsed: false,
   pendingTodoFocus: null,
   setView: (view) => set({ view }),
   setAccent: (accent) => {
@@ -114,6 +124,15 @@ export const useAppStore = create<AppState>()((set) => ({
       settingsRepo.setSetting(persistenceDriver, 'weeklyGoalMin', String(weeklyGoalMin)).catch((err) =>
         console.error('Failed to persist weeklyGoalMin:', err)
       )
+    }
+  },
+  setRailCollapsed: (railCollapsed) => {
+    set({ railCollapsed })
+    // Fire-and-forget persistence
+    if (persistenceDriver) {
+      settingsRepo
+        .setSetting(persistenceDriver, 'railCollapsed', railCollapsed ? 'true' : 'false')
+        .catch((err) => console.error('Failed to persist railCollapsed:', err))
     }
   },
   openSettings: () => {
@@ -176,11 +195,17 @@ export const useAppStore = create<AppState>()((set) => ({
           ? Math.round(weeklyGoalValue)
           : DEFAULT_WEEKLY_GOAL_MIN
 
+      // Validate and apply railCollapsed — any unrecognised stored value
+      // (missing key, corrupt value) falls back to expanded (false).
+      const railCollapsedValue = settings.railCollapsed
+      const validRailCollapsed = railCollapsedValue === 'true'
+
       set({
         accent: validAccent,
         timerStyle: validTimerStyle,
         repeatStyle: validRepeatStyle,
         weeklyGoalMin: validWeeklyGoalMin,
+        railCollapsed: validRailCollapsed,
       })
     } catch (err) {
       console.error('Failed to hydrate app store:', err)

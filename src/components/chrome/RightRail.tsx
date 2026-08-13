@@ -194,7 +194,33 @@ function DistractionLog() {
   )
 }
 
-export function RightRail() {
+/**
+ * Narrow toggle strip rendered by the shell in place of the full rail once
+ * `railCollapsed` is true. Carries the timer's remaining time — sourced the
+ * same way `PomodoroWidget` does, via `useTimerStore` + `formatClock` — so
+ * the primary signal survives the collapse.
+ */
+export function RailToggleStrip({ onExpand }: { onExpand: () => void }) {
+  const phase = useTimerStore((s) => s.phase)
+  const remainingSec = useTimerStore((s) => s.remainingSec)
+  const clock = formatClock(remainingSec)
+  const phaseLabel = phase === 'focus' ? 'Focus' : 'Rest'
+
+  return (
+    <button
+      type="button"
+      className="rail-toggle-strip"
+      onClick={onExpand}
+      aria-label={`Expand right rail — ${phaseLabel} ${clock} remaining`}
+      data-testid="rail-toggle-strip"
+    >
+      <span className="rail-toggle-icon" aria-hidden="true">‹</span>
+      <span className="rail-toggle-clock" data-testid="rail-toggle-clock">{clock}</span>
+    </button>
+  )
+}
+
+export function RightRail({ onCollapse }: { onCollapse?: () => void }) {
   const setView = useAppStore((s) => s.setView)
   const tasks = useTasksStore((s) => s.tasks)
   const subtasksByTask = useTasksStore((s) => s.subtasksByTask)
@@ -204,6 +230,19 @@ export function RightRail() {
 
   return (
     <aside className="right-rail">
+      {onCollapse && (
+        <div className="rail-head">
+          <button
+            type="button"
+            className="rail-collapse-btn"
+            onClick={onCollapse}
+            aria-label="Collapse right rail"
+            data-testid="rail-collapse"
+          >
+            ›
+          </button>
+        </div>
+      )}
       <PomodoroWidget />
 
       <div className="rail-scroll">
