@@ -6,6 +6,7 @@ import { formatDuration } from '../../lib/time'
 import { formatRelativeLabel } from '../../lib/relativeTime'
 import { NotesEditor } from '../common/NotesEditor'
 import type { DayBlock } from '../../db/types'
+import { ArrowSquareOut } from '@phosphor-icons/react/dist/csr/ArrowSquareOut'
 
 type SaveState = 'Saved' | 'Saving…' | 'Save failed'
 
@@ -150,20 +151,19 @@ export function BlockNotesPanel({ block, now, flushRef, onFocusChange }: BlockNo
     >
       <div className="block-notes-header">
         Notes
-        <span className="block-notes-save-state" role="status">{saveState}</span>
+        {block.taskId !== null && (
+          <button
+            type="button"
+            className="block-notes-task-link"
+            onClick={() => {
+              focusTask(block.taskId!)
+              setView('todo')
+            }}
+          >
+            This is a task. <ArrowSquareOut size={12} />
+          </button>
+        )}
       </div>
-      {block.taskId !== null && (
-        <button
-          type="button"
-          className="block-notes-task-link"
-          onClick={() => {
-            focusTask(block.taskId!)
-            setView('todo')
-          }}
-        >
-          This is a task. ↗
-        </button>
-      )}
       <div className="block-notes-title">{block.title}</div>
       <div className="block-notes-meta">{metaParts.join(' · ')}</div>
       <div className="block-notes-editor">
@@ -174,7 +174,10 @@ export function BlockNotesPanel({ block, now, flushRef, onFocusChange }: BlockNo
           ariaLabel={`Notes for ${block.title}`}
         />
       </div>
-      {lastEdited !== '' && <div className="block-notes-footer">Last edited {lastEdited}</div>}
+      <div className="block-notes-footer">
+        {lastEdited !== '' && <span>Last edited {lastEdited} · </span>}
+        <span className="block-notes-save-state" role="status">{saveState}</span>
+      </div>
     </div>
   )
 }

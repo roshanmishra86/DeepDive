@@ -2575,9 +2575,22 @@ button:focus-visible {
   gap: 9px;
 }
 
-.todo-group-label {
-  font-size: 11.5px;
-  color: var(--text-muted);
+.todo-group-by-label {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+.todo-group-by-select {
+  border: 1px solid var(--border-strong);
+  border-radius: 5px;
+  background: var(--bg-chrome);
+  color: var(--text);
+  font-size: 12.5px;
+  padding: 6px 10px;
+  cursor: pointer;
 }
 
 .todo-filters {
@@ -2754,48 +2767,79 @@ button:focus-visible {
 
 .todo-group-head {
   display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin-bottom: 10px;
+}
+
+.todo-group-heading {
+  display: flex;
   align-items: center;
   gap: 9px;
-  margin-bottom: 10px;
 }
 
 .todo-group-count {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-width: 18px;
   height: 18px;
-  padding: 0 5px;
+  padding: 0 8px;
   border-radius: 9px;
   background: var(--bg-chrome);
   border: 1px solid var(--border);
   color: var(--text-muted);
   font-size: 10.5px;
   font-family: var(--font-mono);
+  white-space: nowrap;
 }
 
 .todo-group-hint {
   font-size: 11px;
   color: var(--text-faint);
-  flex: 1;
+  margin: 0;
+  padding: 0;
+  /* Aligns under the group label, past the dot + heading gap. */
+  margin-left: calc(7px + 9px);
 }
 
 .todo-group-sort {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 4px;
   font-size: 10.5px;
   color: var(--text-muted);
   flex: none;
+  margin-left: auto;
+}
+
+.todo-group-sort-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
 }
 
 .todo-group-sort-select {
-  border: 1px solid var(--border-strong);
-  border-radius: 4px;
-  background: var(--bg-chrome);
-  color: var(--text);
+  /* Reads as a quiet "Sort ⇅" control rather than a bordered native
+     dropdown, while staying a real <select> so it keeps combobox
+     semantics and keyboard support (including a visible focus ring). */
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
   font-size: 11px;
-  padding: 3px 6px;
+  padding: 2px 4px;
+  cursor: pointer;
+  appearance: none;
+}
+
+.todo-group-sort-select:hover {
+  color: var(--text);
+}
+
+.todo-group-sort-select:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 3px;
 }
 
 .todo-group-dot {
@@ -2921,56 +2965,6 @@ button:focus-visible {
   flex: none;
 }
 
-.task-tags {
-  display: flex;
-  gap: 4px;
-}
-
-.task-tag {
-  font-size: 10.5px;
-  border-radius: 20px;
-  padding: 3px 9px;
-  cursor: pointer;
-  background: transparent;
-  border: 1px solid var(--border-strong);
-  color: var(--text-muted);
-  transition: all 0.15s;
-}
-
-.task-tag:hover {
-  border-color: var(--border);
-}
-
-.task-tag-active {
-  background: var(--accent);
-  color: var(--on-accent);
-  border-color: var(--accent);
-}
-
-.task-plan-btn {
-  font-size: 12px;
-  color: var(--accent);
-  border: 1px solid var(--border);
-  border-radius: 5px;
-  padding: 5px 10px;
-  cursor: pointer;
-  background: var(--accent-surface);
-  transition: background-color 0.15s;
-}
-
-.task-plan-btn:hover:not(:disabled) {
-  background: var(--accent);
-  color: var(--on-accent);
-}
-
-.task-plan-btn-disabled {
-  opacity: 0.6;
-  cursor: default;
-  background: transparent;
-  color: var(--text-muted);
-  border-color: var(--border-strong);
-}
-
 .task-actions {
   display: flex;
   gap: 4px;
@@ -2983,6 +2977,9 @@ button:focus-visible {
 }
 
 .task-due-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
   font-size: 10.5px;
   font-family: var(--font-mono);
   padding: 3px 8px;
@@ -2997,6 +2994,10 @@ button:focus-visible {
   color: var(--danger);
   border-color: var(--danger);
   background: var(--danger-surface);
+}
+
+.task-due-chip-none {
+  color: var(--text-faint);
 }
 
 .task-priority-chip {
@@ -3067,8 +3068,30 @@ button:focus-visible {
   background: var(--bg-chrome);
 }
 
+.task-overflow-item:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.task-overflow-item:disabled:hover {
+  background: transparent;
+}
+
 .task-overflow-item-danger {
   color: var(--danger);
+}
+
+.task-overflow-checkmark {
+  display: inline-flex;
+  width: 14px;
+  justify-content: center;
+  color: var(--accent);
+  font-size: 11px;
+}
+
+.task-overflow-divider {
+  margin: 4px 6px;
+  border-top: 1px solid var(--border);
 }
 
 .task-overflow-confirm {
@@ -3080,31 +3103,50 @@ button:focus-visible {
   color: var(--text-muted);
 }
 
+/* Per-group "+ Add task" strip: reads as a quiet, centered prompt spanning
+   the group at rest, and only takes on form chrome (left-aligned input,
+   visible submit button) once focused/filled. */
 .todo-add-task {
   display: flex;
   align-items: center;
+  justify-content: center;
   gap: 8px;
-  padding: 8px 14px;
-  border: 1px dashed var(--border-strong);
+  padding: 9px 14px;
+  border: 1px dashed var(--border);
   border-radius: 6px;
   color: var(--text-faint);
+  transition: border-color 0.15s, justify-content 0.15s;
+}
+
+.todo-add-task:focus-within {
+  justify-content: flex-start;
+  border-color: var(--border-strong);
 }
 
 .todo-add-task-input {
-  flex: 1;
+  flex: none;
+  width: 160px;
   min-width: 0;
   border: none;
   background: transparent;
   font-size: 13px;
   color: var(--text);
+  text-align: center;
 }
 
 .todo-add-task-input:focus {
   outline: none;
+  flex: 1;
+  text-align: left;
 }
 
 .todo-add-task-btn {
   flex: none;
+  display: none;
+}
+
+.todo-add-task:focus-within .todo-add-task-btn {
+  display: inline-flex;
 }
 
 /* Task Editor Modal */
@@ -4685,7 +4727,6 @@ button:focus-visible {
 .task-drag-handle:active, .timeline-drag-handle:active { cursor: grabbing; }
 .task-drag-handle-disabled { cursor: not-allowed; color: var(--border-strong); }
 .task-drag-handle-disabled:active { cursor: not-allowed; }
-.task-order-btn { width: 22px; height: 22px; padding: 0; font-size: 12px; }
 .task-row-drag-target { outline: 1px dashed var(--accent); outline-offset: 2px; }
 .todo-empty-drop-zone { padding: 14px; border: 1px dashed var(--accent); color: var(--accent); text-align: center; font-size: 12px; }
 .todo-drag-hint { margin-top: 12px; padding: 9px 12px; background: var(--bg-card); border-left: 2px solid var(--warn); color: var(--text-muted); font-size: 12px; }
@@ -4708,23 +4749,58 @@ button:focus-visible {
   }
 }
 
-.subtask-list { margin: 4px 0 0 28px; border-top: 1px solid var(--border); }
-.subtask-header { width: 100%; display: flex; justify-content: space-between; padding: 6px 0; color: var(--text-muted); font-size: 11px; text-align: left; }
-.subtask-body { display: flex; flex-direction: column; gap: 6px; padding: 2px 0 8px; }
-.subtask-row { display: flex; align-items: center; gap: 6px; min-height: 26px; }
+/*
+ * Subtasks render as compact indented child rows under the parent task —
+ * no header, no counter (see SubtaskList.tsx). Everything past the title
+ * (estimate, due inputs, reorder, allocate, delete) stays invisible at
+ * rest and only reveals on row hover / :focus-within, so keyboard users
+ * can still tab to it. The "New subtask" create row uses the same
+ * reveal-on-hover treatment, keyed on the parent .task-row (see below).
+ */
+.subtask-list { margin: 2px 0 0 28px; }
+
+/* A task with zero subtasks renders `.subtask-list` anyway (it still holds
+   the create row — TaskEditor has no subtask UI, so this is the only way to
+   give a task its first one) but it must take up no visible space at rest.
+   `.task-row:hover`/`:focus-within` — not `.subtask-list:hover`, which can
+   never fire on a zero-height box — un-collapses it. Height/overflow, not
+   display:none, so the create row's inputs stay tabbable while collapsed. */
+.subtask-list-empty { height: 0; margin: 0; overflow: hidden; }
+.task-row:hover .subtask-list-empty,
+.task-row:focus-within .subtask-list-empty {
+  height: auto;
+  overflow: visible;
+  margin: 2px 0 0 28px;
+}
+
+.subtask-body { display: flex; flex-direction: column; gap: 2px; padding: 2px 0 6px; }
+.subtask-row { display: flex; align-items: center; gap: 6px; min-height: 20px; padding: 1px 0; }
 .subtask-row-drag-target { border-top: 2px solid var(--accent); }
-.subtask-drag-handle { cursor: grab; color: var(--text-faint); padding: 1px 4px; font-size: 13px; }
-.subtask-title { min-width: 0; flex: 1; border: 1px solid transparent; background: transparent; font-size: 12px; }
-.subtask-title:not([readonly]):focus { border-color: var(--border-strong); background: var(--bg-card); }
+.subtask-drag-handle { cursor: grab; color: var(--text-faint); padding: 1px 4px; font-size: 12px; }
+.subtask-title { min-width: 0; flex: 1; border: 1px solid transparent; background: transparent; font-size: 12px; color: var(--text-muted); }
+.subtask-title:not([readonly]):focus { border-color: var(--border-strong); background: var(--bg-card); color: var(--text); }
 .subtask-estimate { color: var(--text-muted); font-family: var(--font-mono); font-size: 10px; }
 .subtask-due { display: flex; align-items: center; gap: 4px; flex: none; }
 .subtask-due-date, .subtask-due-time { border: 1px solid var(--border); background: var(--bg-card); border-radius: 3px; padding: 3px 5px; font-size: 10.5px; color: var(--text-muted); }
 .subtask-due-date { max-width: 122px; }
 .subtask-due-time { max-width: 84px; }
-.subtask-due-label { font-family: var(--font-mono); font-size: 10px; color: var(--text-faint); white-space: nowrap; }
-.subtask-create { display: flex; gap: 6px; }
+.subtask-due-label { font-family: var(--font-mono); font-size: 10.5px; color: var(--warn); white-space: nowrap; margin-left: auto; }
+.subtask-due-label-danger { color: var(--danger); }
+.subtask-create { display: flex; gap: 6px; padding: 2px 0; }
 .subtask-create input { min-width: 0; flex: 1; border: 1px solid var(--border); background: var(--bg-card); border-radius: 3px; padding: 5px 6px; font-size: 11px; }
 .subtask-create input[type='number'] { max-width: 56px; }
+
+/* Hidden at rest; revealed on hover/focus-within of the owning row (per-row
+   controls) or of the parent .task-row (the create row, which has no single
+   subtask row of its own to hover — and, when the list is empty, sits
+   inside a zero-height box that can't be hovered directly either). Opacity
+   rather than display keeps layout stable and keeps focus reachable by
+   keyboard even before the pointer hovers. */
+.subtask-reveal { opacity: 0; transition: opacity 0.12s; }
+.subtask-row:hover .subtask-reveal,
+.subtask-row:focus-within .subtask-reveal { opacity: 1; }
+.task-row:hover .subtask-create .subtask-reveal,
+.task-row:focus-within .subtask-create .subtask-reveal { opacity: 1; }
 .subtask-muted, .subtask-error { color: var(--text-muted); font-size: 11px; }
 .subtask-error { color: var(--danger); }
 .subtask-allocation-popover { margin: 6px 0; padding: 10px; border: 1px solid var(--accent); border-radius: 5px; background: var(--bg-card); font-size: 11px; }
@@ -4824,9 +4900,14 @@ button:focus-visible {
 }
 
 .block-notes-task-link {
-  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  text-transform: none;
+  letter-spacing: normal;
   color: var(--accent);
   font-size: 12px;
+  font-family: var(--font-ui);
   text-decoration: underline;
   text-underline-offset: 2px;
 }
@@ -4853,6 +4934,8 @@ button:focus-visible {
 }
 
 .block-notes-footer {
+  display: flex;
+  align-items: center;
   font-family: var(--font-mono);
   font-size: 10.5px;
   color: var(--text-faint);

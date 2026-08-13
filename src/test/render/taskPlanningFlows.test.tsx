@@ -196,14 +196,18 @@ describe('task planning release flows', () => {
     }, { timeout: 3000 })
   })
 
-  it('exposes week ordering buttons as the keyboard-accessible alternative to drag', () => {
+  it('exposes move up/down as the keyboard-accessible alternative to drag, via the overflow menu', () => {
     const task = makeTask(1, { title: 'Keyboard task' })
     const up = vi.fn()
     const down = vi.fn()
     render(<TaskRow task={task} now={new Date('2026-08-10T08:00:00')} onEdit={() => {}} onMoveUp={up} onMoveDown={down} canMoveUp canMoveDown />)
 
-    fireEvent.click(screen.getByRole('button', { name: 'Move Keyboard task up' }))
-    fireEvent.click(screen.getByRole('button', { name: 'Move Keyboard task down' }))
+    fireEvent.click(screen.getByRole('button', { name: 'More actions: Keyboard task' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Move Keyboard task up' }))
+
+    fireEvent.click(screen.getByRole('button', { name: 'More actions: Keyboard task' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Move Keyboard task down' }))
+
     expect(up).toHaveBeenCalledOnce()
     expect(down).toHaveBeenCalledOnce()
   })
@@ -232,13 +236,13 @@ describe('task planning release flows', () => {
       expect(screen.getByText('Active task')).toBeDefined()
       expect(screen.getByText('Done task')).toBeDefined()
       const doGroup = screen.getByText('Active task').closest('.todo-group')!
-      expect(doGroup.querySelector('.todo-group-count')?.textContent).toBe('2')
+      expect(doGroup.querySelector('.todo-group-count')?.textContent).toBe('2 tasks')
 
       fireEvent.click(screen.getByRole('button', { name: /Filters/ }))
       fireEvent.click(screen.getByRole('button', { name: 'Show completed' }))
 
       expect(screen.queryByText('Done task')).toBeNull()
-      expect(doGroup.querySelector('.todo-group-count')?.textContent).toBe('1')
+      expect(doGroup.querySelector('.todo-group-count')?.textContent).toBe('1 task')
     })
 
     it('reorders only the group whose sort control changed', () => {
@@ -254,7 +258,7 @@ describe('task planning release flows', () => {
       const planSection = Array.from(document.querySelectorAll('.todo-group')).find((section) => section.textContent?.includes('Other B'))!
       expect(Array.from(planSection.querySelectorAll('.task-title')).map((el) => el.textContent)).toEqual(['Other B', 'Other A'])
 
-      fireEvent.change(screen.getByRole('combobox', { name: 'Sort Urgent & important — do now' }), { target: { value: 'title' } })
+      fireEvent.change(screen.getByRole('combobox', { name: 'Sort Urgent & important' }), { target: { value: 'title' } })
 
       const doSection = Array.from(document.querySelectorAll('.todo-group')).find((section) => section.textContent?.includes('Zebra'))!
       expect(Array.from(doSection.querySelectorAll('.task-title')).map((el) => el.textContent)).toEqual(['Apple', 'Zebra'])
@@ -449,7 +453,7 @@ describe('task planning release flows', () => {
       })
       render(<TodayView />)
 
-      const link = screen.getByRole('button', { name: 'This is a task. ↗' })
+      const link = screen.getByRole('button', { name: 'This is a task.' })
       await act(async () => {
         fireEvent.click(link)
       })

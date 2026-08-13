@@ -4,7 +4,6 @@ import {
   blockDraftFromSubtask,
   composeDueAt,
   decomposeDueAt,
-  effectiveTaskEstimate,
   formatDueLabel,
   remainingSubtaskEstimate,
 } from '../../lib/todo'
@@ -138,27 +137,38 @@ export function SubtaskList({ task, now }: SubtaskListProps) {
     ? remainingSubtaskEstimate(allocationDraft.subtask.estimateMin, allocationDraft.allocatedMin)
     : 0
 
+  // At rest, a task with no subtasks shows nothing: no header, no
+  // "No subtasks yet." line, no visible add row — the mockup shows a bare
+  // parent row. But the inline create row must still exist in the DOM so a
+  // zero-subtask task can gain its first one (TaskEditor has no subtask UI
+  // at all), so `.subtask-list` collapses to zero height/overflow:hidden
+  // via `.subtask-list-empty` and only expands — revealing the create row —
+  // on `:hover`/`:focus-within` of the parent `.task-row` (see chrome.css).
+  // Archived tasks get no create row at all, so an empty one truly has
+  // nothing to show and renders null.
+  const isEmpty = !loading && !error && subtasks.length === 0
+
+  if (isEmpty && task.archived) return null
+
   return (
-    <div className="subtask-list">
-      <div className="subtask-header">
-        <span>Subtasks</span>
-        <span>{subtasks.filter((subtask) => subtask.done).length}/{subtasks.length} · {hoursLabel(effectiveTaskEstimate(task, subtasks) ?? 0)}</span>
-      </div>
+    <div className={`subtask-list${isEmpty ? ' subtask-list-empty' : ''}`}>
       <div className="subtask-body">
         {loading && <div className="subtask-muted">Loading subtasks…</div>}
         {error && <div className="subtask-error">{error} <button type="button" onClick={() => void load(task.id)}>Retry</button></div>}
         {!loading && subtasks.map((subtask, index) => {
           const due = decomposeDueAt(subtask.dueAt ?? '')
+          const dueLabel = subtask.dueAt ? formatDueLabel(subtask.dueAt, now) : ''
+          const dueIsUrgent = dueLabel === 'overdue' || dueLabel.startsWith('today')
           return (
             <div key={subtask.id} className={`subtask-row ${drag.targetIndex === index && drag.sourceId !== subtask.id ? 'subtask-row-drag-target' : ''}`} onDragOver={(event) => { event.preventDefault(); over(index) }} onDrop={(event) => { event.preventDefault(); if (drag.sourceId !== null && drag.sourceId !== subtask.id) void reorder(task.id, insertIdBefore(subtasks.map((item) => item.id), drag.sourceId, subtask.id)); clear() }}>
-              {!task.archived && <button type="button" className="subtask-drag-handle" draggable onDragStart={() => start(subtask.id)} onDragEnd={clear} aria-label={`Drag ${subtask.title}`} title="Drag to reorder">⠿</button>}
+              {!task.archived && <button type="button" className="subtask-drag-handle subtask-reveal" draggable onDragStart={() => start(subtask.id)} onDragEnd={clear} aria-label={`Drag ${subtask.title}`} title="Drag to reorder">⠿</button>}
               <input type="checkbox" checked={subtask.done} disabled={task.archived} onChange={() => void setDone(subtask.id, task.id, !subtask.done)} aria-label={`Complete subtask: ${subtask.title}`} />
               <input className="subtask-title" value={titleDrafts[subtask.id] ?? subtask.title} readOnly={task.archived} onChange={(event) => scheduleTitleSave(subtask, event.target.value)} onBlur={() => { const value = titleDrafts[subtask.id]; if (value !== undefined) void commitTitle(subtask, value) }} aria-label="Subtask title" />
-              <span className="subtask-estimate">{hoursLabel(subtask.estimateMin)}</span>
+              <span className="subtask-estimate subtask-reveal">{hoursLabel(subtask.estimateMin)}</span>
               <div className="subtask-due">
                 <input
                   type="date"
-                  className="subtask-due-date"
+                  className="subtask-due-date subtask-reveal"
                   value={due.date}
                   disabled={task.archived}
                   onChange={(event) => void update(subtask.id, task.id, { dueAt: composeDueAt(event.target.value, due.time) })}
@@ -167,32 +177,31 @@ export function SubtaskList({ task, now }: SubtaskListProps) {
                 {due.date && (
                   <input
                     type="time"
-                    className="subtask-due-time"
+                    className="subtask-due-time subtask-reveal"
                     value={due.time}
                     disabled={task.archived}
                     onChange={(event) => void update(subtask.id, task.id, { dueAt: composeDueAt(due.date, event.target.value) })}
                     aria-label={`${subtask.title} due time`}
                   />
                 )}
-                {subtask.dueAt && <span className="subtask-due-label">{formatDueLabel(subtask.dueAt, now)}</span>}
+                {subtask.dueAt && <span className={`subtask-due-label${dueIsUrgent ? ' subtask-due-label-danger' : ''}`}>{dueLabel}</span>}
               </div>
               {!task.archived && <>
-                <button type="button" className="btn-icon" onClick={() => void move(index, -1)} disabled={index === 0} aria-label="Move subtask up">↑</button>
-                <button type="button" className="btn-icon" onClick={() => void move(index, 1)} disabled={index === subtasks.length - 1} aria-label="Move subtask down">↓</button>
-                <button type="button" className="btn-icon" onClick={() => void openAllocation(subtask)} aria-label={`Add ${subtask.title} to today`}>＋</button>
-                <button type="button" className="btn-icon btn-danger" onClick={() => setDeleteSubtaskId(subtask.id)} aria-label={`Delete ${subtask.title}`}>×</button>
+                <button type="button" className="btn-icon subtask-reveal" onClick={() => void move(index, -1)} disabled={index === 0} aria-label="Move subtask up">↑</button>
+                <button type="button" className="btn-icon subtask-reveal" onClick={() => void move(index, 1)} disabled={index === subtasks.length - 1} aria-label="Move subtask down">↓</button>
+                <button type="button" className="btn-icon subtask-reveal" onClick={() => void openAllocation(subtask)} aria-label={`Add ${subtask.title} to today`}>＋</button>
+                <button type="button" className="btn-icon btn-danger subtask-reveal" onClick={() => setDeleteSubtaskId(subtask.id)} aria-label={`Delete ${subtask.title}`}>×</button>
               </>}
             </div>
           )
         })}
         {!task.archived && (
           <div className="subtask-create">
-            <input value={title} onChange={(event) => setTitle(event.target.value)} placeholder="New subtask" aria-label="New subtask title" />
-            <input type="number" min="0.25" max="24" step="0.25" value={estimate} onChange={(event) => setEstimate(event.target.value)} aria-label="Subtask estimate in hours" />
-            <button type="button" className="btn-secondary" onClick={() => void createNew()} disabled={!title.trim()}>Add</button>
+            <input className="subtask-reveal" value={title} onChange={(event) => setTitle(event.target.value)} placeholder="New subtask" aria-label="New subtask title" />
+            <input className="subtask-reveal" type="number" min="0.25" max="24" step="0.25" value={estimate} onChange={(event) => setEstimate(event.target.value)} aria-label="Subtask estimate in hours" />
+            <button type="button" className="btn-secondary subtask-reveal" onClick={() => void createNew()} disabled={!title.trim()}>Add</button>
           </div>
         )}
-        {subtasks.length === 0 && !loading && <div className="subtask-muted">No subtasks yet.</div>}
       </div>
 
       {allocationDraft && allocationPreview && (

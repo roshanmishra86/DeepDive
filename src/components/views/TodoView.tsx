@@ -25,6 +25,8 @@ import { TaskRow } from '../todo/TaskRow'
 import { TaskEditor } from '../todo/TaskEditor'
 import { AddTaskRow } from '../todo/AddTaskRow'
 import { Plus } from '@phosphor-icons/react/dist/csr/Plus'
+import { Funnel } from '@phosphor-icons/react/dist/csr/Funnel'
+import { ArrowsDownUp } from '@phosphor-icons/react/dist/csr/ArrowsDownUp'
 
 type GroupKey = Quadrant | DeadlineBucket
 
@@ -33,9 +35,9 @@ export const TODO_FOCUS_FADE_MS = 2000
 
 const MATRIX_HINTS: Record<Quadrant, string> = {
   do: 'Do these first.',
-  plan: 'Block time for these.',
-  delegate: 'Batch or hand these off.',
-  drop: 'Revisit only if things change.',
+  plan: 'Schedule these.',
+  delegate: 'Batch or delegate.',
+  drop: 'Keep for someday.',
 }
 
 const DEADLINE_HINTS: Record<DeadlineBucket, string> = {
@@ -273,23 +275,16 @@ export function TodoView() {
         </div>
         <div className="todo-controls">
           <div className="todo-group-by">
-            <span className="todo-group-label">Group by</span>
-            <div className="segmented-control">
-              <button
-                type="button"
-                className={`segmented-btn${groupBy === 'matrix' ? ' segmented-btn-active' : ''}`}
-                onClick={() => setGroupBy('matrix')}
-              >
-                Importance
-              </button>
-              <button
-                type="button"
-                className={`segmented-btn${groupBy === 'deadline' ? ' segmented-btn-active' : ''}`}
-                onClick={() => setGroupBy('deadline')}
-              >
-                Deadline
-              </button>
-            </div>
+            <span className="todo-group-by-label">Group by</span>
+            <select
+              className="todo-group-by-select"
+              aria-label="Group by"
+              value={groupBy}
+              onChange={(event) => setGroupBy(event.target.value as typeof groupBy)}
+            >
+              <option value="matrix">Importance</option>
+              <option value="deadline">Deadline</option>
+            </select>
           </div>
 
           <div className="todo-filters" ref={filtersRef}>
@@ -300,6 +295,7 @@ export function TodoView() {
               aria-expanded={filtersOpen}
               onClick={() => setFiltersOpen((value) => !value)}
             >
+              <Funnel size={14} />
               Filters
               {filtersOn && <span className="todo-filters-badge">{filterBadgeCount}</span>}
             </button>
@@ -358,7 +354,7 @@ export function TodoView() {
             onClick={() => openEditor(null)}
           >
             <Plus size={16} />
-            New task
+            Add task
           </button>
         </div>
       </div>
@@ -388,23 +384,25 @@ export function TodoView() {
                   return (
                     <section key={group.quadrant} className="todo-group">
                       <div className="todo-group-head">
-                        <span className="todo-group-dot" style={{ backgroundColor: meta.dot }} />
-                        <h2 className="todo-group-label">{meta.label}</h2>
-                        <span className="todo-group-count">{group.tasks.length}</span>
-                        <span className="todo-group-hint">{MATRIX_HINTS[group.quadrant]}</span>
-                        <label className="todo-group-sort">
-                          Sort
-                          <select
-                            className="todo-group-sort-select"
-                            aria-label={`Sort ${meta.label}`}
-                            value={sort}
-                            onChange={(event) => setGroupSort(group.quadrant, event.target.value as GroupSort)}
-                          >
-                            {SORT_OPTIONS.map((option) => (
-                              <option key={option.value} value={option.value}>{option.label}</option>
-                            ))}
-                          </select>
-                        </label>
+                        <div className="todo-group-heading">
+                          <span className="todo-group-dot" style={{ backgroundColor: meta.dot }} />
+                          <h2 className="todo-group-label">{meta.label}</h2>
+                          <span className="todo-group-count">{group.tasks.length} {group.tasks.length === 1 ? 'task' : 'tasks'}</span>
+                          <label className="todo-group-sort">
+                            <span className="todo-group-sort-label"><ArrowsDownUp size={11} /> Sort</span>
+                            <select
+                              className="todo-group-sort-select"
+                              aria-label={`Sort ${meta.label}`}
+                              value={sort}
+                              onChange={(event) => setGroupSort(group.quadrant, event.target.value as GroupSort)}
+                            >
+                              {SORT_OPTIONS.map((option) => (
+                                <option key={option.value} value={option.value}>{option.label}</option>
+                              ))}
+                            </select>
+                          </label>
+                        </div>
+                        <p className="todo-group-hint">{MATRIX_HINTS[group.quadrant]}</p>
                       </div>
                       <div
                         className="todo-group-rows"
@@ -455,23 +453,25 @@ export function TodoView() {
                   return (
                     <section key={group.bucket} className="todo-group">
                       <div className="todo-group-head">
-                        <span className="todo-group-dot" style={{ backgroundColor: meta.dot }} />
-                        <h2 className="todo-group-label">{meta.label}</h2>
-                        <span className="todo-group-count">{group.tasks.length}</span>
-                        <span className="todo-group-hint">{DEADLINE_HINTS[group.bucket]}</span>
-                        <label className="todo-group-sort">
-                          Sort
-                          <select
-                            className="todo-group-sort-select"
-                            aria-label={`Sort ${meta.label}`}
-                            value={sort}
-                            onChange={(event) => setGroupSort(group.bucket, event.target.value as GroupSort)}
-                          >
-                            {SORT_OPTIONS.map((option) => (
-                              <option key={option.value} value={option.value}>{option.label}</option>
-                            ))}
-                          </select>
-                        </label>
+                        <div className="todo-group-heading">
+                          <span className="todo-group-dot" style={{ backgroundColor: meta.dot }} />
+                          <h2 className="todo-group-label">{meta.label}</h2>
+                          <span className="todo-group-count">{group.tasks.length} {group.tasks.length === 1 ? 'task' : 'tasks'}</span>
+                          <label className="todo-group-sort">
+                            <span className="todo-group-sort-label"><ArrowsDownUp size={11} /> Sort</span>
+                            <select
+                              className="todo-group-sort-select"
+                              aria-label={`Sort ${meta.label}`}
+                              value={sort}
+                              onChange={(event) => setGroupSort(group.bucket, event.target.value as GroupSort)}
+                            >
+                              {SORT_OPTIONS.map((option) => (
+                                <option key={option.value} value={option.value}>{option.label}</option>
+                              ))}
+                            </select>
+                          </label>
+                        </div>
+                        <p className="todo-group-hint">{DEADLINE_HINTS[group.bucket]}</p>
                       </div>
                       <div
                         className="todo-group-rows"

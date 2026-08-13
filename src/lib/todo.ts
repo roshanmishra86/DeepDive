@@ -97,10 +97,10 @@ export interface QuadrantMeta {
 }
 
 export const QUADRANTS: QuadrantMeta[] = [
-  { quadrant: 'do', label: 'Urgent & important — do now', dot: 'var(--danger)' },
-  { quadrant: 'plan', label: 'Important, not urgent — block time', dot: 'var(--accent)' },
-  { quadrant: 'delegate', label: 'Urgent, not important — batch or delegate', dot: 'var(--warn)' },
-  { quadrant: 'drop', label: 'Neither — drop for now', dot: 'var(--border-strong)' },
+  { quadrant: 'do', label: 'Urgent & important', dot: 'var(--danger)' },
+  { quadrant: 'plan', label: 'Important, not urgent', dot: 'var(--accent)' },
+  { quadrant: 'delegate', label: 'Urgent, not important (batch or delegate)', dot: 'var(--warn)' },
+  { quadrant: 'drop', label: 'Neither (someday / drop if needed)', dot: 'var(--border-strong)' },
 ]
 
 /**
@@ -415,6 +415,35 @@ export function formatDueLabel(dueAt: string, now: Date): string {
     'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
   ]
   return `${dueDate.getDate()} ${monthNames[dueDate.getMonth()]}`
+}
+
+/**
+ * Presentation form of `formatDueLabel` for the TODO row's due chip, e.g.
+ * "Due today, 5:00 PM" / "Due Sat, 16 Aug" / "Due 15 Aug" / "Overdue".
+ * Reuses `formatDueLabel`'s bucketing (today/tomorrow/within-7-days/beyond)
+ * as the single source of truth for *which* bucket a date falls in, then
+ * only reformats for the chip: adds the "Due "/"Overdue" prefix, and — since
+ * `formatDueLabel`'s within-7-days bucket returns a bare weekday ("Sat") —
+ * appends the ", D Mon" the chip needs but the plain label omits. Returns ""
+ * for an unparseable `dueAt` (caller renders a "No deadline" chip instead).
+ */
+export function formatDueChipLabel(dueAt: string, now: Date): string {
+  const label = formatDueLabel(dueAt, now)
+  if (!label) return ''
+  if (label === 'overdue') return 'Overdue'
+  if (label.startsWith('today') || label.startsWith('tomorrow')) return `Due ${label}`
+
+  const weekdays = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+  if (weekdays.includes(label)) {
+    const due = new Date(dueAt)
+    const monthNames = [
+      'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+    ]
+    return `Due ${label}, ${due.getDate()} ${monthNames[due.getMonth()]}`
+  }
+
+  return `Due ${label}`
 }
 
 /**

@@ -3,12 +3,15 @@ import { useTasksStore } from '../../stores/tasks'
 import { useTodayBlocks } from '../../stores/useTodayBlocks'
 import { useAppStore } from '../../stores/app'
 import type { Subtask, Task } from '../../db/types'
-import { taskMeta, blockDraftFromTask, formatDueLabel, PRIORITIES } from '../../lib/todo'
+import { taskMeta, blockDraftFromTask, formatDueLabel, formatDueChipLabel, PRIORITIES } from '../../lib/todo'
 import { Trash } from '@phosphor-icons/react/dist/csr/Trash'
 import { Pencil } from '@phosphor-icons/react/dist/csr/Pencil'
 import { NotePencil } from '@phosphor-icons/react/dist/csr/NotePencil'
 import { Archive } from '@phosphor-icons/react/dist/csr/Archive'
 import { DotsThreeVertical } from '@phosphor-icons/react/dist/csr/DotsThreeVertical'
+import { Calendar } from '@phosphor-icons/react/dist/csr/Calendar'
+import { CalendarX } from '@phosphor-icons/react/dist/csr/CalendarX'
+import { CalendarPlus } from '@phosphor-icons/react/dist/csr/CalendarPlus'
 import { SubtaskList } from './SubtaskList'
 import { useScheduleTodayBlock } from './useScheduleTodayBlock'
 
@@ -78,6 +81,7 @@ export function TaskRow({
   const priorityMeta = PRIORITIES.find((p) => p.priority === task.priority) ?? PRIORITIES[1]
   const dueLabel = task.dueAt ? formatDueLabel(task.dueAt, now) : ''
   const dueIsUrgent = dueLabel === 'overdue' || dueLabel.startsWith('today')
+  const dueChipLabel = task.dueAt ? formatDueChipLabel(task.dueAt, now) : 'No deadline'
 
   useEffect(() => {
     if (!menuOpen) return
@@ -165,8 +169,6 @@ export function TaskRow({
         >
           ⠿
         </button>
-        <button type="button" className="btn-icon task-order-btn" onClick={() => void onMoveUp?.()} disabled={!onMoveUp || !canMoveUp} aria-label={`Move ${task.title} up`} title="Move up">↑</button>
-        <button type="button" className="btn-icon task-order-btn" onClick={() => void onMoveDown?.()} disabled={!onMoveDown || !canMoveDown} aria-label={`Move ${task.title} down`} title="Move down">↓</button>
         <input
           type="checkbox"
           className="task-check"
@@ -186,9 +188,10 @@ export function TaskRow({
       </div>
 
       <div className="task-row-right">
-        {dueLabel && (
-          <span className={`task-due-chip${dueIsUrgent ? ' task-due-chip-danger' : ''}`}>{dueLabel}</span>
-        )}
+        <span className={['task-due-chip', dueIsUrgent && 'task-due-chip-danger', !task.dueAt && 'task-due-chip-none'].filter(Boolean).join(' ')}>
+          {task.dueAt ? <Calendar size={12} /> : <CalendarX size={12} />}
+          {dueChipLabel}
+        </span>
 
         <button
           type="button"
@@ -198,35 +201,6 @@ export function TaskRow({
         >
           <span className="task-priority-dot" style={{ backgroundColor: priorityMeta.dot }} />
           {priorityMeta.label}
-        </button>
-
-        <div className="task-tags">
-          <button
-            type="button"
-            className={`task-tag${task.important ? ' task-tag-active' : ''}`}
-            onClick={() => toggleImportant(task.id)}
-            aria-label={`${task.important ? 'Remove' : 'Mark'} important: ${task.title}`}
-          >
-            Important
-          </button>
-          <button
-            type="button"
-            className={`task-tag${task.urgent ? ' task-tag-active' : ''}`}
-            onClick={() => toggleUrgent(task.id)}
-            aria-label={`${task.urgent ? 'Remove' : 'Mark'} urgent: ${task.title}`}
-          >
-            Urgent
-          </button>
-        </div>
-
-        <button
-          type="button"
-          className={`task-plan-btn${isPlanned ? ' task-plan-btn-disabled' : ''}`}
-          onClick={handlePlanToday}
-          disabled={isPlanned}
-          aria-label={isPlanned ? `Planned: ${task.title}` : `Plan today: ${task.title}`}
-        >
-          {isPlanned ? 'Planned' : 'Plan today'}
         </button>
 
         <div className="task-overflow" ref={menuRef}>
@@ -243,6 +217,54 @@ export function TaskRow({
           </button>
           {menuOpen && (
             <div className="task-overflow-menu" role="menu">
+              <button
+                type="button"
+                role="menuitem"
+                className="task-overflow-item"
+                onClick={() => { closeMenu(); void handlePlanToday() }}
+                disabled={isPlanned}
+              >
+                <CalendarPlus size={14} /> {isPlanned ? 'Planned' : 'Plan today'}
+              </button>
+              <button
+                type="button"
+                role="menuitemcheckbox"
+                aria-checked={task.important}
+                className="task-overflow-item"
+                onClick={() => toggleImportant(task.id)}
+              >
+                <span className="task-overflow-checkmark" aria-hidden="true">{task.important ? '✓' : ''}</span> Important
+              </button>
+              <button
+                type="button"
+                role="menuitemcheckbox"
+                aria-checked={task.urgent}
+                className="task-overflow-item"
+                onClick={() => toggleUrgent(task.id)}
+              >
+                <span className="task-overflow-checkmark" aria-hidden="true">{task.urgent ? '✓' : ''}</span> Urgent
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                className="task-overflow-item"
+                onClick={() => { closeMenu(); void onMoveUp?.() }}
+                disabled={!onMoveUp || !canMoveUp}
+                aria-label={`Move ${task.title} up`}
+              >
+                ↑ Move up
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                className="task-overflow-item"
+                onClick={() => { closeMenu(); void onMoveDown?.() }}
+                disabled={!onMoveDown || !canMoveDown}
+                aria-label={`Move ${task.title} down`}
+              >
+                ↓ Move down
+              </button>
+              <div className="task-overflow-divider" />
               <button type="button" role="menuitem" className="task-overflow-item" onClick={() => { closeMenu(); onEdit(task.id) }}>
                 <Pencil size={14} /> Edit
               </button>

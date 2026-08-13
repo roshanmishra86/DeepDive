@@ -6,6 +6,7 @@ import {
   groupByMatrix,
   groupByDeadline,
   formatDueLabel,
+  formatDueChipLabel,
   taskMeta,
   blockDraftFromTask,
   upcomingTasks,
@@ -333,6 +334,35 @@ describe('formatDueLabel', () => {
 
   it('returns an empty string for an invalid dueAt instead of NaN/undefined', () => {
     expect(formatDueLabel('not-a-date', baseDate)).toBe('')
+  })
+})
+
+describe('formatDueChipLabel', () => {
+  const baseDate = new Date(2026, 7, 4, 12, 0, 0) // Aug 4 noon
+
+  it('prefixes overdue instants with "Overdue"', () => {
+    expect(formatDueChipLabel(due('2026-08-03', '09:00'), baseDate)).toBe('Overdue')
+  })
+
+  it('prefixes same-day instants with "Due"', () => {
+    expect(formatDueChipLabel(due('2026-08-04', '18:00'), baseDate)).toMatch(/^Due today, \d+:\d{2} (AM|PM)$/)
+  })
+
+  it('prefixes next-day instants with "Due"', () => {
+    expect(formatDueChipLabel(due('2026-08-05'), baseDate)).toMatch(/^Due tomorrow, \d+:\d{2} (AM|PM)$/)
+  })
+
+  it('appends the day/month to weekday-abbreviation labels', () => {
+    // Aug 8 is Saturday.
+    expect(formatDueChipLabel(due('2026-08-08'), baseDate)).toBe('Due Sat, 8 Aug')
+  })
+
+  it('prefixes date-and-month labels with "Due"', () => {
+    expect(formatDueChipLabel(due('2026-08-15'), baseDate)).toBe('Due 15 Aug')
+  })
+
+  it('returns an empty string for an invalid dueAt', () => {
+    expect(formatDueChipLabel('not-a-date', baseDate)).toBe('')
   })
 })
 
