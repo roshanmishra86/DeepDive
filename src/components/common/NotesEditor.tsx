@@ -118,7 +118,12 @@ export function NotesEditor({ value, onChange, placeholder, editable = true, ari
   }, [editor, value])
 
   useEffect(() => {
-    editor?.setEditable(editable)
+    // `setEditable`'s default `emitUpdate` is true, so this fires a full
+    // `update` event on every mount/prop change — reporting an
+    // editor-lifecycle change through `onUpdate` as if the user had typed.
+    // That marks the notes/plan panel dirty and can persist an unedited
+    // draft on the next debounce or blur flush.
+    editor?.setEditable(editable, false)
   }, [editable, editor])
 
   useEffect(() => {
