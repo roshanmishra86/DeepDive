@@ -180,6 +180,26 @@ describe('task planning release flows', () => {
     expect(onChange).not.toHaveBeenCalled()
   })
 
+  it('does not emit onChange on mount or on an editable prop change', async () => {
+    // TipTap's setEditable(editable) defaults emitUpdate to true, so toggling
+    // `editable` — including the mount-time effect run — fires a full
+    // `update` event that consumers read as a real user edit, marking the
+    // panel dirty and risking an unedited (or empty) save on the next flush.
+    const onChange = vi.fn()
+    const { rerender } = render(<NotesEditor value="alpha" onChange={onChange} ariaLabel="Notes" editable />)
+    expect(onChange).not.toHaveBeenCalled()
+
+    await act(async () => {
+      rerender(<NotesEditor value="alpha" onChange={onChange} ariaLabel="Notes" editable={false} />)
+    })
+    expect(onChange).not.toHaveBeenCalled()
+
+    await act(async () => {
+      rerender(<NotesEditor value="alpha" onChange={onChange} ariaLabel="Notes" editable />)
+    })
+    expect(onChange).not.toHaveBeenCalled()
+  })
+
   it('emits a stored rich-text envelope when a toolbar toggle is used', async () => {
     const onChange = vi.fn()
     render(<NotesEditor value="alpha" onChange={onChange} ariaLabel="Notes" />)
