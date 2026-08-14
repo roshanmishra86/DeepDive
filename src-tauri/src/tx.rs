@@ -14,7 +14,7 @@ use std::path::Path;
 use tauri::Manager;
 
 /// Prefix on the error a `requireRowsAffected` violation produces. The
-/// frontend matches on it (see `guardUnmet` in `src/db/driver.ts`) to tell an
+/// frontend matches on it (see `isGuardUnmet` in `src/db/driver.ts`) to tell an
 /// unmet guard — an ordinary "someone else got there first" outcome the
 /// caller handles — apart from a genuine SQL failure. Changing this string
 /// changes a cross-language contract; the TS constant must change with it.
@@ -294,8 +294,8 @@ mod tests {
     async fn statements_default_to_no_row_guard_when_deserialized() {
         // The frontend omits requireRowsAffected on every statement that is
         // not a guard; serde must read that as false, not fail.
-        let stmt: TxStatement =
-            serde_json::from_str(r#"{"sql":"UPDATE t SET n = 1","params":[]}"#).expect("deserialize");
+        let stmt: TxStatement = serde_json::from_str(r#"{"sql":"UPDATE t SET n = 1","params":[]}"#)
+            .expect("deserialize");
         assert!(!stmt.require_rows_affected);
 
         let guard: TxStatement = serde_json::from_str(
