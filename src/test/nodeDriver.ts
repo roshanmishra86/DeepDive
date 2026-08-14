@@ -7,7 +7,7 @@
 import { DatabaseSync } from 'node:sqlite'
 import { readFileSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
-import type { SqlDriver, SqlResult } from '../db/driver'
+import { GUARD_UNMET, type SqlDriver, type SqlResult, type TxStatement } from '../db/driver'
 
 class NodeSqliteDriver implements SqlDriver {
   private db: DatabaseSync
@@ -56,15 +56,21 @@ class NodeSqliteDriver implements SqlDriver {
   // Phase 11 P0-1 via the `execute_transaction` Rust command
   // (src-tauri/src/tx.rs), which owns one fresh connection per
   // transaction — the two drivers' rollback semantics now match.
-  transaction(statements: { sql: string; params?: unknown[] }[]): Promise<SqlResult[]> {
+  transaction(statements: TxStatement[]): Promise<SqlResult[]> {
     if (statements.length === 0) return Promise.resolve([])
 
     this.db.exec('BEGIN')
     try {
       const results: SqlResult[] = []
-      for (const { sql, params } of statements) {
+      for (const [index, { sql, params, requireRowsAffected }] of statements.entries()) {
         const stmt = this.db.prepare(sql)
         const info = stmt.run(...((params ?? []) as Parameters<typeof stmt.run>))
+        // Same guard semantics, and the same sentinel, as the Rust command
+        // (src-tauri/src/tx.rs) — the two drivers must be indistinguishable
+        // here or the tests would prove nothing about production.
+        if (requireRowsAffected && Number(info.changes) === 0) {
+          throw new Error(`${GUARD_UNMET}: statement ${index} affected no rows, transaction rolled back`)
+        }
         results.push({
           rowsAffected: Number(info.changes),
           lastInsertId: Number(info.lastInsertRowid),

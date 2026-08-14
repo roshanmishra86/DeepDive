@@ -83,7 +83,7 @@ export type Quadrant = 'do' | 'plan' | 'delegate' | 'drop'
  * delegate: !important && urgent
  * drop: !important && !urgent
  */
-export function quadrantOf(task: Task): Quadrant {
+export function quadrantOf(task: Pick<Task, 'important' | 'urgent'>): Quadrant {
   if (task.important && task.urgent) return 'do'
   if (task.important && !task.urgent) return 'plan'
   if (!task.important && task.urgent) return 'delegate'

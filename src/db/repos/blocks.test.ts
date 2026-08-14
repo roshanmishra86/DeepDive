@@ -528,15 +528,14 @@ describe('blocks repository', () => {
       expect(after).toEqual(before)
     })
 
-    it('returns false but DOES resequence toDay when the block has already been moved onto toDay', async () => {
+    it('returns false and resequences NOTHING when the block has already been moved onto toDay', async () => {
       // The realistic stale case: another client already moved the block to
-      // toDay. The guarded day move affects 0 rows (so the return is false),
-      // but the toDay resequence statements are scoped to toDay — and the
-      // block IS on toDay now, so its sort, and every other toDay row's sort,
-      // is rewritten to this caller's proposed ordering. fromDay's rows are
-      // rewritten too, from the caller's fromDayOrderedIds. A guard miss is
-      // therefore NOT a no-op: it leaves both days resequenced, only the day
-      // move undone.
+      // toDay. The guarded day move affects 0 rows, and because that
+      // statement carries requireRowsAffected the whole transaction rolls
+      // back — including the resequences, which are scoped per day and would
+      // otherwise match rows on both days and commit this caller's proposed
+      // ordering from an already-stale view. Regression guard: `false` must
+      // mean the database is untouched.
       const fromDay = '2026-09-10'
       const toDay = '2026-09-11'
 
@@ -565,6 +564,10 @@ describe('blocks repository', () => {
         sort: 5,
       })
 
+      const before = await driver.select<BlockRowSnapshot>(
+        'SELECT id, day, start_min, sort FROM day_block ORDER BY id'
+      )
+
       const ok = await blocks.moveBlockToDayAtomic(driver, {
         blockId: alreadyMoved,
         fromDay,
@@ -574,24 +577,16 @@ describe('blocks repository', () => {
       })
       expect(ok).toBe(false)
 
-      // The block stayed where it already was — the day move is what the
-      // guard blocked.
-      const toDayRows = await driver.select<BlockRowSnapshot>(
-        'SELECT id, day, start_min, sort FROM day_block WHERE day = ? ORDER BY sort',
-        [toDay]
+      // Every row on both days is exactly as it was — the caller's proposed
+      // ordering (otherOnTo 1 -> 0, alreadyMoved 0 -> 1, siblingOnFrom
+      // 5 -> 0) was rolled back with the move it belonged to.
+      const after = await driver.select<BlockRowSnapshot>(
+        'SELECT id, day, start_min, sort FROM day_block ORDER BY id'
       )
-      expect(toDayRows.map((r) => r.id)).toEqual([otherOnTo, alreadyMoved])
-      // ...but toDay's sort values WERE rewritten: otherOnTo went 1 -> 0 and
-      // alreadyMoved went 0 -> 1, exactly the ordering this caller proposed.
-      expect(toDayRows.map((r) => r.sort)).toEqual([0, 1])
-
-      // fromDay is resequenced from the caller's list too: 5 -> 0.
-      const fromDayRows = await driver.select<BlockRowSnapshot>(
-        'SELECT id, day, start_min, sort FROM day_block WHERE day = ? ORDER BY sort',
-        [fromDay]
-      )
-      expect(fromDayRows.map((r) => r.id)).toEqual([siblingOnFrom])
-      expect(fromDayRows[0].sort).toBe(0)
+      expect(after).toEqual(before)
+      expect(after.find((r) => r.id === alreadyMoved)?.sort).toBe(0)
+      expect(after.find((r) => r.id === otherOnTo)?.sort).toBe(1)
+      expect(after.find((r) => r.id === siblingOnFrom)?.sort).toBe(5)
     })
 
     // moveBlockToDayAtomic has no natural way to fail mid-transaction through

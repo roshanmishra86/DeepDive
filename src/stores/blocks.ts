@@ -587,12 +587,12 @@ export const useBlocksStore = create<BlocksState>()((set, get) => {
           toDayOrderedIds: nextTo.map((b) => b.id),
         })
         if (!ok) {
-          // Source-day guard missed: the row is no longer on fromDay, so this
-          // client's view of both days is stale by definition — and the
-          // transaction already resequenced `sort` on both days before the
-          // guard aborted the move itself. Restoring the pre-move arrays
-          // (revert) would reinstate that stale view; reload from disk so
-          // both slices reflect what actually happened there.
+          // Source-day guard missed: the row is no longer on fromDay, so
+          // nothing was written (the guard rolls the whole transaction back)
+          // but this client's view of both days is stale by definition.
+          // Restoring the pre-move arrays (revert) would reinstate exactly
+          // that stale view; reload from disk so both slices reflect what
+          // actually happened there.
           set({ error: 'Block already moved' })
           await get().reloadDays([fromDay, toDay])
           return false

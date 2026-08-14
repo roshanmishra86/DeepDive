@@ -247,6 +247,68 @@ describe('tasks store', () => {
     expect(ok).toBe(true)
   })
 
+  it('moveTask leaves order untouched when a row is dropped on itself', async () => {
+    const now = new Date()
+    // One quadrant ('do'), three rows, so a self-drop that fell through to
+    // the top-insert would be visible as a reordering.
+    for (const title of ['First', 'Second', 'Third']) {
+      await tasksRepo.createTask(driver, {
+        title,
+        important: true,
+        urgent: true,
+        createdAt: now.toISOString(),
+      })
+    }
+    await useTasksStore.getState().hydrate(driver)
+    const before = useTasksStore.getState().tasks.map((task) => task.title)
+    const third = useTasksStore.getState().tasks.find((task) => task.title === 'Third')!
+
+    // Exactly what TodoView's drop handler passes when a drag ends on the
+    // row it started from: the row's own id as beforeId.
+    const ok = await useTasksStore.getState().moveTask(third.id, { group: 'do', beforeId: third.id }, now)
+
+    expect(ok).toBe(true)
+    expect(useTasksStore.getState().tasks.map((task) => task.title)).toEqual(before)
+    await useTasksStore.getState().hydrate(driver)
+    expect(useTasksStore.getState().tasks.map((task) => task.title)).toEqual(before)
+  })
+
+  it('moveTask appends, not prepends, when beforeId is no longer in the group', async () => {
+    const now = new Date()
+    for (const title of ['First', 'Second']) {
+      await tasksRepo.createTask(driver, { title, important: true, urgent: true, createdAt: now.toISOString() })
+    }
+    await useTasksStore.getState().hydrate(driver)
+    const first = useTasksStore.getState().tasks.find((task) => task.title === 'First')!
+
+    // 9999 is not in the group: a stale drop target.
+    const ok = await useTasksStore.getState().moveTask(first.id, { group: 'do', beforeId: 9999 }, now)
+
+    expect(ok).toBe(true)
+    expect(useTasksStore.getState().tasks.map((task) => task.title)).toEqual(['Second', 'First'])
+  })
+
+  it('addTask seeds priority from the Eisenhower flags when none is given', async () => {
+    await useTasksStore.getState().hydrate(driver)
+
+    const urgentImportant = await useTasksStore.getState().addTask({ title: 'Do now', important: true, urgent: true })
+    const importantOnly = await useTasksStore.getState().addTask({ title: 'Plan it', important: true, urgent: false })
+    const neither = await useTasksStore.getState().addTask({ title: 'Someday', important: false, urgent: false })
+    const explicit = await useTasksStore.getState().addTask({ title: 'Explicit', important: true, urgent: true, priority: 'low' })
+
+    // Persisted, not just in memory — createTask defaults priority itself,
+    // so the derived value has to reach the repo call.
+    await useTasksStore.getState().hydrate(driver)
+    const priorityOf = (id: number | null) =>
+      useTasksStore.getState().tasks.find((task) => task.id === id)?.priority
+
+    expect(priorityOf(urgentImportant)).toBe('high')
+    expect(priorityOf(importantOnly)).toBe('medium')
+    expect(priorityOf(neither)).toBe('low')
+    // An explicit priority always wins over the derived one.
+    expect(priorityOf(explicit)).toBe('low')
+  })
+
   it('sets groupBy without persisting', async () => {
     await useTasksStore.getState().hydrate(driver)
 

@@ -5,7 +5,7 @@
 
 import Database from '@tauri-apps/plugin-sql'
 import { invoke } from '@tauri-apps/api/core'
-import type { SqlDriver, SqlResult } from './driver'
+import type { SqlDriver, SqlResult, TxStatement } from './driver'
 
 export class TauriDriver implements SqlDriver {
   private db: Database | null = null
@@ -38,7 +38,7 @@ export class TauriDriver implements SqlDriver {
    * and can never strand a pooled connection. Real atomicity is proven by
    * the Rust tests in tx.rs against a real SQLite file.
    */
-  async transaction(statements: { sql: string; params?: unknown[] }[]): Promise<SqlResult[]> {
+  async transaction(statements: TxStatement[]): Promise<SqlResult[]> {
     if (statements.length === 0) return []
     if (!this.db) throw new Error('Database not connected')
     return invoke<SqlResult[]>('execute_transaction', { statements })

@@ -3,7 +3,7 @@
  * Handles block CRUD, reordering, template application, and daily aggregates.
  */
 
-import type { SqlDriver } from '../driver'
+import { isGuardUnmet, type SqlDriver } from '../driver'
 import type { DayBlock, BlockKind, BlockRepeat } from '../types'
 
 // Row type matching SQL schema (0|1 for booleans). Exported so archive.ts
@@ -234,21 +234,23 @@ export async function moveBlockToDayAtomic(
 ): Promise<boolean> {
   const { blockId, fromDay, toDay, fromDayOrderedIds, toDayOrderedIds } = input
   // Guard on fromDay so a stale client can't move a block that's already
-  // moved elsewhere. A guard miss blocks the DAY MOVE ONLY — it does not make
-  // the call a no-op: the resequence statements below still run in the same
-  // commit, and each is WHERE id = ? AND day = ? scoped to its own day, so
-  // any row that IS on that day gets the caller's proposed sort. When the
-  // block has already been moved onto toDay by someone else, toDay's sort
-  // values are therefore rewritten even though the return is false. That
-  // never corrupts a row — sort is only a within-day tie-breaker for equal
-  // start_min — but false does NOT mean "nothing happened", and a caller that
-  // wants its in-memory sort values to match disk after a miss has to reload
-  // both days. Both cases are verified in blocks.test.ts, not just asserted
-  // here.
+  // moved elsewhere. `requireRowsAffected` makes that guard cover the WHOLE
+  // transaction: a miss rolls the resequencing back too, so `false` means
+  // "nothing happened" — the database is byte-for-byte what it was.
+  //
+  // It did not always. The guard used to be nothing but the extra `AND day =
+  // ?`, which aborts only its own statement; the resequences that followed
+  // are scoped `WHERE id = ? AND day = ?` per day and committed anyway, so a
+  // rejected move still rewrote `sort` on both days from a view of the world
+  // already known to be stale. Never corrupting (sort is only a within-day
+  // tie-breaker for equal start_min) but a lie all the same. Both outcomes
+  // are verified in blocks.test.ts against a real SQLite database, and the
+  // guard's rollback again in src-tauri/src/tx.rs against a real file.
   const statements = [
     {
       sql: 'UPDATE day_block SET day = ? WHERE id = ? AND day = ?',
       params: [toDay, blockId, fromDay],
+      requireRowsAffected: true,
     },
     ...fromDayOrderedIds.map((id, index) => ({
       sql: 'UPDATE day_block SET sort = ? WHERE id = ? AND day = ?',
@@ -259,8 +261,16 @@ export async function moveBlockToDayAtomic(
       params: [index, id, toDay],
     })),
   ]
-  const results = await driver.transaction(statements)
-  return results[0].rowsAffected !== 0
+  try {
+    await driver.transaction(statements)
+    return true
+  } catch (err) {
+    // An unmet guard is the expected "someone else got there first" outcome,
+    // reported as false with the database untouched. Anything else is a real
+    // SQL failure and must keep propagating to the store's error path.
+    if (isGuardUnmet(err)) return false
+    throw err
+  }
 }
 
 export async function moveDayBlocksAtomic(

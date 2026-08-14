@@ -11,6 +11,8 @@ import {
   type TodoFilters,
   type GroupSort,
   sortTasks,
+  quadrantOf,
+  priorityFromQuadrant,
   DEFAULT_TODO_FILTERS,
 } from '../lib/todo'
 import { messageFor } from '../lib/errors'
@@ -143,13 +145,21 @@ export const useTasksStore = create<TasksState>()((set, get) => {
     addTask: async (input) => {
       const localId = nextLocalId--
       const now = new Date().toISOString()
+      const important = input.important ?? false
+      const urgent = input.urgent ?? false
+      // An explicit priority always wins (the TODO group add-row supplies
+      // one). Otherwise derive it from the Eisenhower flags with exactly the
+      // rule migration 0006 used to backfill existing rows, so a task created
+      // as urgent+important cannot land in the "do" quadrant wearing a
+      // Medium chip. Priority is independent from here on: editing the flags
+      // later, or dragging across quadrants, deliberately leaves it alone.
       const newTask: Task = {
         id: localId,
         title: input.title.trim(),
         notes: input.notes ?? '',
-        important: input.important ?? false,
-        urgent: input.urgent ?? false,
-        priority: input.priority ?? 'medium',
+        important,
+        urgent,
+        priority: input.priority ?? priorityFromQuadrant(quadrantOf({ important, urgent })),
         dueAt: input.dueAt ?? null,
         estimateMin: input.estimateMin ?? null,
         done: false,
@@ -163,7 +173,7 @@ export const useTasksStore = create<TasksState>()((set, get) => {
       set({ tasks: sortTasks([...previous, newTask]) })
       if (!persistenceDriver) return localId
       try {
-        const id = await tasksRepo.createTask(persistenceDriver, { ...input, title: newTask.title, createdAt: now })
+        const id = await tasksRepo.createTask(persistenceDriver, { ...input, title: newTask.title, priority: newTask.priority, createdAt: now })
         set((state) => ({ tasks: state.tasks.map((task) => task.id === localId ? { ...task, id } : task) }))
         return id
       } catch (err) {
@@ -261,6 +271,12 @@ export const useTasksStore = create<TasksState>()((set, get) => {
       const state = get()
       const task = state.tasks.find((item) => item.id === id)
       if (!task) return false
+      // Dropping a row onto itself is a no-op, not a move to the top. The
+      // drop handlers pass the target row's id as beforeId for every row
+      // including the dragged one, and `id` is filtered out of the group
+      // below before indexOf runs — so without this guard the lookup misses
+      // and the insert position collapses to 0.
+      if (destination.beforeId === id) return true
       if (state.groupBy === 'deadline') {
         const currentGroup = groupByDeadline(state.tasks, now).find((group) => group.tasks.some((item) => item.id === id))?.bucket
         if (currentGroup && currentGroup !== destination.group) return false
@@ -272,7 +288,12 @@ export const useTasksStore = create<TasksState>()((set, get) => {
       if (!destinationGroup) return false
       const without = groups.map((group) => ({ ...group, ids: group.ids.filter((itemId) => itemId !== id) }))
       const target = without.find((group) => group.key === destination.group)!
-      const insertAt = destination.beforeId === null ? target.ids.length : Math.max(0, target.ids.indexOf(destination.beforeId))
+      // A beforeId that is not in the destination group is a stale drop
+      // target (the row moved or was deleted under the drag). Append, the
+      // same as beforeId === null — inserting at the top instead would be an
+      // arbitrary jump the user never asked for.
+      const beforeIndex = destination.beforeId === null ? -1 : target.ids.indexOf(destination.beforeId)
+      const insertAt = beforeIndex === -1 ? target.ids.length : beforeIndex
       target.ids.splice(insertAt, 0, id)
       const orderedIds = without.flatMap((group) => group.ids)
       const flagPatch = state.groupBy === 'matrix' && destination.group !== (groups.find((group) => group.ids.includes(id))?.key)

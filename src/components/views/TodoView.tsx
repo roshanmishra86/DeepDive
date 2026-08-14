@@ -220,6 +220,15 @@ export function TodoView() {
   }
   const dropOn = async (group: GroupKey, beforeId: number | null) => {
     if (draggingId === null) return
+    // Every row passes its own id as beforeId, so a drag that ends on the
+    // row it started from lands here as a self-drop: nothing to move.
+    if (beforeId === draggingId) {
+      dropCompleted.current = true
+      setDropHint(null)
+      setDraggingId(null)
+      setDropTargetId(null)
+      return
+    }
     const ok = await moveTask(draggingId, { group, beforeId }, now)
     dropCompleted.current = true
     if (!ok && groupBy === 'deadline') setDropHint('Move by editing the due date')
