@@ -146,6 +146,15 @@ which pnpm 11 silently stops honouring — leaving it in place makes
 resolves its platform binary through optional dependencies, so skipping the script
 is safe. Do not downgrade this key to the old syntax.
 
+`.gitattributes` pins `*.sql` to LF on every platform. sqlx checksums each
+applied migration by hashing the exact bytes embedded via `include_str!`
+(`src-tauri/src/lib.rs`). If a checkout flips `src-tauri/migrations/*.sql` to
+CRLF, those hashes stop matching the `_sqlx_migrations` rows written by an
+earlier run, `Migrator::run` aborts with a version mismatch, and **every later
+migration silently never applies** — the app then runs against an outdated
+schema and fails only at the first statement that touches a new column. Never
+edit an already-released migration file for the same reason.
+
 ## Build Artifacts
 
 Built artifacts are located in:

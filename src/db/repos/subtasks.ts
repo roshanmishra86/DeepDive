@@ -9,6 +9,7 @@ interface SubtaskRow {
   done: number
   sort: number
   created_at: string
+  due_at: string | null
 }
 
 function rowToSubtask(row: SubtaskRow): Subtask {
@@ -20,6 +21,7 @@ function rowToSubtask(row: SubtaskRow): Subtask {
     done: row.done === 1,
     sort: row.sort,
     createdAt: row.created_at,
+    dueAt: row.due_at,
   }
 }
 
@@ -55,14 +57,14 @@ export async function listSubtasksForTasks(driver: SqlDriver, taskIds: number[])
 
 export async function createSubtask(
   driver: SqlDriver,
-  input: { taskId: number; title: string; estimateMin: number; createdAt: string }
+  input: { taskId: number; title: string; estimateMin: number; createdAt: string; dueAt?: string | null }
 ): Promise<number> {
   const title = validateTitle(input.title)
   validateSubtaskEstimate(input.estimateMin)
   const result = await driver.execute(
-    `INSERT INTO subtask (task_id, title, estimate_min, created_at, sort)
-     VALUES (?, ?, ?, ?, COALESCE((SELECT MAX(sort) + 1 FROM subtask WHERE task_id = ?), 0))`,
-    [input.taskId, title, input.estimateMin, input.createdAt, input.taskId]
+    `INSERT INTO subtask (task_id, title, estimate_min, created_at, due_at, sort)
+     VALUES (?, ?, ?, ?, ?, COALESCE((SELECT MAX(sort) + 1 FROM subtask WHERE task_id = ?), 0))`,
+    [input.taskId, title, input.estimateMin, input.createdAt, input.dueAt ?? null, input.taskId]
   )
   return result.lastInsertId
 }
@@ -70,7 +72,7 @@ export async function createSubtask(
 export async function updateSubtask(
   driver: SqlDriver,
   id: number,
-  patch: { title?: string; estimateMin?: number }
+  patch: { title?: string; estimateMin?: number; dueAt?: string | null }
 ): Promise<void> {
   const updates: string[] = []
   const values: unknown[] = []
@@ -82,6 +84,10 @@ export async function updateSubtask(
     validateSubtaskEstimate(patch.estimateMin)
     updates.push('estimate_min = ?')
     values.push(patch.estimateMin)
+  }
+  if (patch.dueAt !== undefined) {
+    updates.push('due_at = ?')
+    values.push(patch.dueAt)
   }
   if (updates.length === 0) return
   values.push(id)

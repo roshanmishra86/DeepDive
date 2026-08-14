@@ -25,7 +25,8 @@ import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { render, screen, fireEvent, act } from '@testing-library/react'
 import { createTestDb } from '../nodeDriver'
 import type { SqlDriver } from '../../db/driver'
-import { useTodayStore } from '../../stores/today'
+import { useBlocksStore } from '../../stores/blocks'
+import { useDayStore } from '../../stores/day'
 import { useTasksStore } from '../../stores/tasks'
 import { BlockComposer } from '../../components/today/BlockComposer'
 import { ApplyTemplateConfirmModal } from '../../components/templates/ApplyTemplateConfirmModal'
@@ -59,14 +60,10 @@ async function readBlocks(driver: SqlDriver, day: string): Promise<BlockRow[]> {
 async function seedComposerStores(): Promise<SqlDriver> {
   const { driver } = createTestDb()
 
-  useTodayStore.setState({
-    day: null,
-    blocks: [],
-    loading: false,
-    error: null,
-    shutdownMin: null,
-    shutdownIsDefault: true,
-  })
+  useBlocksStore.setState({ blocksByDay: {}, loadedDays: [], loading: false, error: null })
+  // The day store is the clock owner, so the day under test has to be set
+  // explicitly — otherwise useTodayBlocks() reads the real calendar day.
+  useDayStore.setState({ currentDay: DAY, nowMin: START_MIN, shutdownMin: null, shutdownIsDefault: true, error: null })
   useTasksStore.setState({
     tasks: [],
     groupBy: 'matrix',
@@ -74,11 +71,12 @@ async function seedComposerStores(): Promise<SqlDriver> {
     error: null,
   })
 
-  await useTodayStore.getState().hydrate(driver, DAY)
+  await useDayStore.getState().hydrate(driver, DAY, START_MIN)
+  await useBlocksStore.getState().hydrate(driver, [DAY])
   await useTasksStore.getState().hydrate(driver)
   // setShutdown persists the 'shutdownMin' setting and flips shutdownMin in
   // state, so `shutdownNeeded` is false from the first render.
-  await useTodayStore.getState().setShutdown(SHUTDOWN_MIN, 'default')
+  await useDayStore.getState().setShutdown(SHUTDOWN_MIN, 'default')
   return driver
 }
 
@@ -114,7 +112,7 @@ describe('BlockComposer flows', () => {
     expect(onDone).toHaveBeenCalledTimes(1)
 
     // In-memory store
-    const blocks = useTodayStore.getState().blocks
+    const blocks = useBlocksStore.getState().blocksByDay[DAY] ?? []
     expect(blocks).toHaveLength(1)
     expect(blocks[0].title).toBe('Write the spec')
     expect(blocks[0].kind).toBe('deep')
@@ -130,7 +128,7 @@ describe('BlockComposer flows', () => {
   })
 
   it('edit flow: the title field shows the block title; saving a change persists it', async () => {
-    const blockId = await useTodayStore.getState().addBlock({
+    const blockId = await useBlocksStore.getState().addBlock(DAY, {
       title: 'Original title',
       kind: 'deep',
       durationMin: 60,
@@ -151,7 +149,7 @@ describe('BlockComposer flows', () => {
     })
 
     expect(onDone).toHaveBeenCalledTimes(1)
-    expect(useTodayStore.getState().blocks[0].title).toBe('Renamed block')
+    expect(useBlocksStore.getState().blocksByDay[DAY][0].title).toBe('Renamed block')
 
     const rows = await readBlocks(driver, DAY)
     expect(rows).toHaveLength(1)
@@ -159,7 +157,7 @@ describe('BlockComposer flows', () => {
   })
 
   it('delete flow: clicking Delete removes the block from the store and SQLite; onDone fires', async () => {
-    const blockId = await useTodayStore.getState().addBlock({
+    const blockId = await useBlocksStore.getState().addBlock(DAY, {
       title: 'Doomed block',
       kind: 'deep',
       durationMin: 60,
@@ -175,7 +173,7 @@ describe('BlockComposer flows', () => {
     })
 
     expect(onDone).toHaveBeenCalledTimes(1)
-    expect(useTodayStore.getState().blocks).toHaveLength(0)
+    expect(useBlocksStore.getState().blocksByDay[DAY]).toHaveLength(0)
 
     // removeBlock persists asynchronously after onDone; wait for the row to go.
     await vi.waitFor(async () => {
@@ -202,7 +200,7 @@ describe('BlockComposer flows', () => {
   })
 
   it('accessible names in edit mode: Save, Cancel, Delete and the Close button', async () => {
-    const blockId = await useTodayStore.getState().addBlock({
+    const blockId = await useBlocksStore.getState().addBlock(DAY, {
       title: 'Existing',
       kind: 'deep',
       durationMin: 60,
@@ -246,7 +244,7 @@ describe('BlockComposer flows', () => {
       })
 
       expect(onDone).not.toHaveBeenCalled()
-      expect(useTodayStore.getState().blocks).toHaveLength(0)
+      expect(useBlocksStore.getState().blocksByDay[DAY]).toHaveLength(0)
       expect(await readBlocks(driver, DAY)).toHaveLength(0)
     })
 
@@ -346,7 +344,7 @@ describe('BlockComposer flows', () => {
     })
 
     it('edit mode: retyping the duration through a below-min transient preserves the pomodoro target (PR #13 review)', async () => {
-      const blockId = await useTodayStore.getState().addBlock({
+      const blockId = await useBlocksStore.getState().addBlock(DAY, {
         title: 'Pomodoro keeper',
         kind: 'deep',
         durationMin: 60,
@@ -385,7 +383,7 @@ describe('BlockComposer flows', () => {
     })
 
     it('edit mode: typing "5" on an existing deep block shows the hint, disables Save, and Ctrl+Enter persists nothing', async () => {
-      const blockId = await useTodayStore.getState().addBlock({
+      const blockId = await useBlocksStore.getState().addBlock(DAY, {
         title: 'Existing deep block',
         kind: 'deep',
         durationMin: 60,

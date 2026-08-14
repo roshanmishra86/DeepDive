@@ -1,33 +1,37 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { useAppStore } from './stores/app'
 import { useRitualsStore } from './stores/rituals'
 import { useTasksStore } from './stores/tasks'
-import { useTodayStore } from './stores/today'
+import { useBlocksStore } from './stores/blocks'
+import { useDayStore } from './stores/day'
 import { useTemplatesStore } from './stores/templates'
 import { useTimerStore } from './stores/timer'
 import { useLibraryStore } from './stores/library'
 import { usePlayerStore } from './stores/player'
 import { openDatabase } from './db/index'
+import { messageFor } from './lib/errors'
 import { applyAccent } from './lib/accents'
-import { toDayKey } from './lib/time'
 import { activeWorkBlock } from './lib/timer'
 import { spaceTogglesTimer, escapeExitsSession } from './lib/shortcuts'
 import { TitleBar } from './components/chrome/TitleBar'
 import { Sidebar } from './components/chrome/Sidebar'
-import { RightRail } from './components/chrome/RightRail'
+import { RightRail, RailToggleStrip } from './components/chrome/RightRail'
+import { initialRailCollapsed, nextRailCollapsed, RAIL_BREAKPOINT } from './lib/railBreakpoint'
 import { PlanPanel } from './components/plan/PlanPanel'
 import { MusicBar } from './components/chrome/MusicBar'
 import { SettingsPanel } from './components/chrome/SettingsPanel'
 import { SessionOverlay } from './components/chrome/SessionOverlay'
 import { TodayView } from './components/views/TodayView'
-import { WeekView } from './components/views/WeekView'
+import { TodoView } from './components/views/TodoView'
+import { WeekPlanView } from './components/views/WeekPlanView'
 import { TemplatesView } from './components/views/TemplatesView'
 import { ArchiveView } from './components/views/ArchiveView'
 import { LibraryView } from './components/views/LibraryView'
 
 const VIEWS = {
   today: TodayView,
-  week: WeekView,
+  todo: TodoView,
+  week: WeekPlanView,
   templates: TemplatesView,
   archive: ArchiveView,
   library: LibraryView,
@@ -68,7 +72,10 @@ function useGlobalShortcuts() {
         e.preventDefault()
         const now = new Date()
         const nowMin = now.getHours() * 60 + now.getMinutes()
-        const candidate = activeWorkBlock(useTodayStore.getState().blocks, nowMin)
+        // Event handler, not a render path: both stores are read via
+        // getState() so this listener never has to re-subscribe.
+        const day = useDayStore.getState().currentDay
+        const candidate = activeWorkBlock(useBlocksStore.getState().blocksByDay[day] ?? [], nowMin)
         void useTimerStore.getState().toggle(candidate)
         return
       }
@@ -88,23 +95,36 @@ function App() {
   const settingsOpen = useAppStore((s) => s.settingsOpen)
   const sessionOpen = useAppStore((s) => s.sessionOpen)
   const planTarget = useAppStore((s) => s.planTarget)
+  const railCollapsed = useAppStore((s) => s.railCollapsed)
+  const [initError, setInitError] = useState<string | null>(null)
 
   // On mount, open the database and hydrate stores. Render normally while
-  // it resolves; failures are logged but non-fatal.
+  // it resolves.
+  //
+  // A failure here is NOT cosmetic and must never be console-only. This is
+  // the app's single hydrate for the library, player, timer, rituals and day
+  // stores — the views that open the database themselves (Today, Todo,
+  // Templates, Archive) silently paper over it, so a swallowed failure looks
+  // exactly like "the sound library shipped empty". It is also the call that
+  // runs the SQL migrations, so it is where a failed/blocked migration
+  // announces itself; anything opening the database after it connects to an
+  // un-migrated schema and fails later in confusing ways. Surface the real
+  // message.
   useEffect(() => {
     let mounted = true
     ;(async () => {
       try {
         const driver = await openDatabase()
         if (!mounted) return
-        const now = new Date()
-        const hydrationDay = toDayKey(now)
-        const nowMin = now.getHours() * 60 + now.getMinutes()
+        // The day store owns the clock; every other store takes the day key
+        // and minute-of-day from it.
+        const { currentDay: hydrationDay, nowMin } = useDayStore.getState()
         await Promise.all([
+          useDayStore.getState().hydrate(driver, hydrationDay, nowMin),
           useAppStore.getState().hydrate(driver),
           useRitualsStore.getState().hydrate(driver, hydrationDay),
           useTasksStore.getState().hydrate(driver),
-          useTodayStore.getState().hydrate(driver, hydrationDay),
+          useBlocksStore.getState().hydrate(driver, [hydrationDay]),
           useTemplatesStore.getState().hydrate(driver),
           useLibraryStore.getState().hydrate(driver),
           usePlayerStore.getState().hydrate(driver),
@@ -112,8 +132,21 @@ function App() {
           // progress after a relaunch (Phase 11 P1-3).
           useTimerStore.getState().hydrate(driver, hydrationDay, nowMin),
         ])
+        if (!mounted) return
+        // Sync the rail's collapsed state from the actual window width now
+        // that the persisted value has hydrated (Phase 9 gap fix). A narrow
+        // window always starts collapsed; a wide window keeps whatever was
+        // persisted. Must run after hydrate resolves, or this would just be
+        // overwritten by useAppStore.hydrate's persisted value.
+        useAppStore.getState().setRailCollapsed(
+          initialRailCollapsed({
+            width: window.innerWidth,
+            persisted: useAppStore.getState().railCollapsed,
+          })
+        )
       } catch (err) {
         console.error('Failed to initialize database:', err)
+        if (mounted) setInitError(messageFor(err, 'Failed to initialize the database.'))
       }
     })()
     return () => {
@@ -126,6 +159,10 @@ function App() {
     applyAccent(accent, document.documentElement)
   }, [accent])
 
+  // The single app-wide 30s clock: recomputes nowMin and rolls Today,
+  // rituals, the sidebar and the timer over at midnight.
+  useEffect(() => useDayStore.getState().start(), [])
+
   // Wall-clock timer tick. The store recomputes from `endsAt`, so a
   // suspended/minimised window catches up instead of drifting.
   useEffect(() => {
@@ -135,17 +172,51 @@ function App() {
 
   useGlobalShortcuts()
 
+  // Single shell-owned resize listener for the right rail's collapse
+  // breakpoint (1320px). Uses matchMedia so it only fires on an actual
+  // crossing, not on every resize pixel. `nextRailCollapsed` is the pure,
+  // unit-tested decision: null means no crossing, so an explicit user
+  // toggle (setRailCollapsed) is left untouched until the next one.
+  useEffect(() => {
+    const mql = window.matchMedia(`(min-width: ${RAIL_BREAKPOINT}px)`)
+    let previousWidth = window.innerWidth
+    const handleChange = () => {
+      const width = window.innerWidth
+      const decision = nextRailCollapsed({
+        width,
+        previousWidth,
+        current: useAppStore.getState().railCollapsed,
+      })
+      previousWidth = width
+      if (decision !== null) useAppStore.getState().setRailCollapsed(decision)
+    }
+    mql.addEventListener('change', handleChange)
+    return () => mql.removeEventListener('change', handleChange)
+  }, [])
+
   const ActiveView = VIEWS[view]
 
   return (
     <div className="app-shell">
       <TitleBar />
+      {initError && (
+        <div className="app-init-error" role="alert">
+          <strong>Database unavailable.</strong> Your tasks, sounds and timer history are not
+          loaded and nothing you change will be saved. {initError}
+        </div>
+      )}
       <div className="app-middle">
         <Sidebar />
         <main className="app-main">
           <ActiveView />
         </main>
-        {planTarget ? <PlanPanel /> : <RightRail />}
+        {planTarget ? (
+          <PlanPanel />
+        ) : railCollapsed ? (
+          <RailToggleStrip onExpand={() => useAppStore.getState().setRailCollapsed(false)} />
+        ) : (
+          <RightRail onCollapse={() => useAppStore.getState().setRailCollapsed(true)} />
+        )}
       </div>
       <MusicBar />
       {settingsOpen && <SettingsPanel />}

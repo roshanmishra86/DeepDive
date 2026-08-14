@@ -60,10 +60,26 @@ input:focus {
   overflow: hidden;
 }
 
+/* Startup banner for a failed database init (App.tsx). Deliberately part of
+   the shell's column flow rather than an overlay: the app keeps working
+   read-only underneath, and the user must not mistake an empty library or an
+   empty Today for real, saved state. */
+.app-init-error {
+  flex: none;
+  padding: 8px 16px;
+  background: var(--danger-surface);
+  border-bottom: 1px solid var(--danger);
+  color: var(--danger);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
 .app-middle {
   flex: 1;
   min-height: 0;
   display: flex;
+  /* Containing block for the right rail's narrow-width overlay (chrome.css). */
+  position: relative;
 }
 
 .app-main {
@@ -71,4 +87,8 @@ input:focus {
   min-width: 0;
   display: flex;
   flex-direction: column;
+  /* Never lets a wide descendant (e.g. the This Week grid) push the app
+     window into horizontal scroll — anything that needs to scroll
+     horizontally must own its own overflow-x. */
+  overflow-x: hidden;
 }

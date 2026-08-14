@@ -24,6 +24,10 @@
     "@tauri-apps/plugin-fs": "^2.5.1",
     "@tauri-apps/plugin-opener": "^2.5.4",
     "@tauri-apps/plugin-sql": "^2.4.0",
+    "@tiptap/extension-list": "^3.29.2",
+    "@tiptap/pm": "^3.29.2",
+    "@tiptap/react": "^3.29.2",
+    "@tiptap/starter-kit": "^3.29.2",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
     "zustand": "^5.0.14"

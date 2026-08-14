@@ -11,6 +11,7 @@ import {
   splitDeepHours,
   parseClock,
   parseDuration,
+  goalProgressPercent,
 } from './time'
 
 describe('formatClock', () => {
@@ -413,5 +414,38 @@ describe('parseDuration', () => {
 
   it('returns null for negative values', () => {
     expect(parseDuration('-5')).toBeNull()
+  })
+})
+
+describe('goalProgressPercent', () => {
+  it('returns 0 for a zero goal, never dividing by zero', () => {
+    expect(goalProgressPercent(300, 0)).toBe(0)
+  })
+
+  it('returns 0 for a negative or non-finite goal', () => {
+    expect(goalProgressPercent(300, -100)).toBe(0)
+    expect(goalProgressPercent(300, NaN)).toBe(0)
+    expect(goalProgressPercent(300, Infinity)).toBe(0)
+  })
+
+  it('clamps to 100 when completed exceeds the goal', () => {
+    expect(goalProgressPercent(1500, 1200)).toBe(100)
+  })
+
+  it('returns 100 exactly at the goal', () => {
+    expect(goalProgressPercent(1200, 1200)).toBe(100)
+  })
+
+  it('returns 0 for zero completed minutes', () => {
+    expect(goalProgressPercent(0, 1200)).toBe(0)
+  })
+
+  it('returns 0 for negative or non-finite completed minutes', () => {
+    expect(goalProgressPercent(-50, 1200)).toBe(0)
+    expect(goalProgressPercent(NaN, 1200)).toBe(0)
+  })
+
+  it('computes a proportional percentage between 0 and the goal', () => {
+    expect(goalProgressPercent(600, 1200)).toBe(50)
   })
 })

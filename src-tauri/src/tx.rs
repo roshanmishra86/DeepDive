@@ -13,11 +13,26 @@ use sqlx::{Connection, SqliteConnection};
 use std::path::Path;
 use tauri::Manager;
 
+/// Prefix on the error a `requireRowsAffected` violation produces. The
+/// frontend matches on it (see `isGuardUnmet` in `src/db/driver.ts`) to tell an
+/// unmet guard — an ordinary "someone else got there first" outcome the
+/// caller handles — apart from a genuine SQL failure. Changing this string
+/// changes a cross-language contract; the TS constant must change with it.
+pub const GUARD_UNMET: &str = "TX_GUARD_UNMET";
+
 #[derive(Debug, Deserialize)]
 pub struct TxStatement {
     sql: String,
     #[serde(default)]
     params: Vec<serde_json::Value>,
+    /// Turns this statement into the transaction's guard: if it affects zero
+    /// rows, the whole transaction rolls back instead of committing the rest.
+    /// Exists because a guard expressed only as `WHERE ... AND day = ?`
+    /// aborts *itself* on a miss while every following statement still
+    /// commits — which is how a failed cross-day block move used to leave
+    /// both days resequenced (`moveBlockToDayAtomic`).
+    #[serde(default, rename = "requireRowsAffected")]
+    require_rows_affected: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -70,10 +85,18 @@ pub async fn run_in_transaction(
             };
         }
         match query.execute(&mut *tx).await {
-            Ok(result) => results.push(TxResult {
-                rows_affected: result.rows_affected(),
-                last_insert_id: result.last_insert_rowid(),
-            }),
+            Ok(result) => {
+                if stmt.require_rows_affected && result.rows_affected() == 0 {
+                    let _ = tx.rollback().await;
+                    return Err(format!(
+                        "{GUARD_UNMET}: statement {i} affected no rows, transaction rolled back"
+                    ));
+                }
+                results.push(TxResult {
+                    rows_affected: result.rows_affected(),
+                    last_insert_id: result.last_insert_rowid(),
+                })
+            }
             Err(e) => {
                 // Best-effort rollback; the connection is dropped right after
                 // either way, so nothing can be left stranded for later users.
@@ -142,6 +165,17 @@ mod tests {
         TxStatement {
             sql: "INSERT INTO t (n) VALUES (?)".to_string(),
             params: vec![serde_json::Value::Number(n.into())],
+            require_rows_affected: false,
+        }
+    }
+
+    /// An UPDATE guarded on a row that may not exist, mirroring the shape of
+    /// moveBlockToDayAtomic's day guard.
+    fn guarded_update(id: i64) -> TxStatement {
+        TxStatement {
+            sql: "UPDATE t SET n = n WHERE id = ?".to_string(),
+            params: vec![serde_json::Value::Number(id.into())],
+            require_rows_affected: true,
         }
     }
 
@@ -203,6 +237,72 @@ mod tests {
             !path.exists(),
             "the command must not create a second, empty database at a wrong path"
         );
+    }
+
+    #[tokio::test]
+    async fn unmet_row_guard_rolls_back_every_other_statement() {
+        let path = temp_db_path("guard-miss");
+        let _ = std::fs::remove_file(&path);
+        setup_schema(&path).await;
+
+        run_in_transaction(&path, &[insert_stmt(1)])
+            .await
+            .expect("seed");
+
+        // id 999 does not exist, so the guarded statement affects no rows.
+        // The inserts on either side of it must not survive.
+        let result = run_in_transaction(
+            &path,
+            &[insert_stmt(2), guarded_update(999), insert_stmt(3)],
+        )
+        .await;
+
+        let err = result.expect_err("an unmet guard must fail the transaction");
+        assert!(
+            err.starts_with(GUARD_UNMET),
+            "the error must carry the sentinel the frontend matches on, got: {err}"
+        );
+        assert_eq!(
+            read_all_n(&path).await,
+            vec![1],
+            "an unmet guard must leave the database exactly as it was"
+        );
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[tokio::test]
+    async fn met_row_guard_commits_normally() {
+        let path = temp_db_path("guard-hit");
+        let _ = std::fs::remove_file(&path);
+        setup_schema(&path).await;
+
+        run_in_transaction(&path, &[insert_stmt(1)])
+            .await
+            .expect("seed");
+
+        // id 1 exists, so the guard is met and the whole transaction commits.
+        run_in_transaction(&path, &[guarded_update(1), insert_stmt(2)])
+            .await
+            .expect("a met guard must commit");
+        assert_eq!(read_all_n(&path).await, vec![1, 2]);
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[tokio::test]
+    async fn statements_default_to_no_row_guard_when_deserialized() {
+        // The frontend omits requireRowsAffected on every statement that is
+        // not a guard; serde must read that as false, not fail.
+        let stmt: TxStatement = serde_json::from_str(r#"{"sql":"UPDATE t SET n = 1","params":[]}"#)
+            .expect("deserialize");
+        assert!(!stmt.require_rows_affected);
+
+        let guard: TxStatement = serde_json::from_str(
+            r#"{"sql":"UPDATE t SET n = 1","params":[],"requireRowsAffected":true}"#,
+        )
+        .expect("deserialize");
+        assert!(guard.require_rows_affected);
     }
 
     #[tokio::test]

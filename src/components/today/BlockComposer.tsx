@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react'
-import { useTodayStore } from '../../stores/today'
+import { useBlocksStore } from '../../stores/blocks'
+import { useDayStore } from '../../stores/day'
+import { useTodayBlocks } from '../../stores/useTodayBlocks'
 import { useTasksStore } from '../../stores/tasks'
 import { openDatabase } from '../../db/index'
 import * as tracksRepo from '../../db/repos/tracks'
@@ -18,13 +20,27 @@ import {
   nearestBreakDuration,
   BREAK_DURATION_PRESETS,
 } from '../../lib/today'
-import type { BlockKind, BlockRepeat, Track } from '../../db/types'
+import type { BlockKind, BlockRepeat, DayBlock, Track } from '../../db/types'
 
 interface BlockComposerProps {
   blockId: number | null
   startMin: number
   onDone: () => void
+  /**
+   * The day this composer creates/edits a block for. Defaults to
+   * `currentDay` (Today's own behaviour, unchanged when the prop is
+   * omitted). The This Week calendar passes a specific day so "+ Add
+   * block" on a non-today column lands the block there.
+   */
+  day?: string
 }
+
+// One frozen array for every "day not loaded yet" read, mirroring
+// stores/useTodayBlocks.ts's EMPTY — a fresh `[]` per render would be a new
+// reference on every selector call, which is harmless here (this component
+// doesn't feed it back into a store-driven effect) but wasteful.
+const EMPTY_BLOCKS: DayBlock[] = []
+Object.freeze(EMPTY_BLOCKS)
 
 const KIND_OPTIONS: { value: BlockKind; label: string }[] = [
   { value: 'deep', label: 'Deep' },
@@ -39,13 +55,21 @@ const REPEAT_OPTIONS: { value: BlockRepeat; label: string }[] = [
   { value: 'weekdays', label: 'Weekdays' },
 ]
 
-export function BlockComposer({ blockId, startMin: startMinProp, onDone }: BlockComposerProps) {
-  const blocks = useTodayStore((s) => s.blocks)
-  const addBlock = useTodayStore((s) => s.addBlock)
-  const editBlock = useTodayStore((s) => s.editBlock)
-  const removeBlock = useTodayStore((s) => s.removeBlock)
-  const shutdownMin = useTodayStore((s) => s.shutdownMin)
-  const setShutdown = useTodayStore((s) => s.setShutdown)
+export function BlockComposer({ blockId, startMin: startMinProp, onDone, day: dayProp }: BlockComposerProps) {
+  const currentDay = useDayStore((s) => s.currentDay)
+  const day = dayProp ?? currentDay
+  const isToday = day === currentDay
+  // Today keeps its existing selector (identical behaviour when the prop is
+  // omitted); any other day reads that day's slice directly off the
+  // canonical store — there is no second cache to keep in sync.
+  const todayBlocks = useTodayBlocks()
+  const otherDayBlocks = useBlocksStore((s) => (isToday ? EMPTY_BLOCKS : s.blocksByDay[day] ?? EMPTY_BLOCKS))
+  const blocks = isToday ? todayBlocks : otherDayBlocks
+  const addBlock = useBlocksStore((s) => s.addBlock)
+  const editBlock = useBlocksStore((s) => s.editBlock)
+  const removeBlock = useBlocksStore((s) => s.removeBlock)
+  const shutdownMin = useDayStore((s) => s.shutdownMin)
+  const setShutdown = useDayStore((s) => s.setShutdown)
 
   const tasks = useTasksStore((s) => s.tasks)
   const addTask = useTasksStore((s) => s.addTask)
@@ -100,7 +124,10 @@ export function BlockComposer({ blockId, startMin: startMinProp, onDone }: Block
   const durationIssue = draft.kind === 'break' ? null : durationIssueFor(durationText, draft.kind)
   const durationValid = durationIssue !== 'unparseable'
   const durationBelowMin = durationIssue === 'below-min'
-  const shutdownNeeded = !block && shutdownMin === null
+  // Shutdown is a today-only concept (stores/day.ts): a block being created
+  // for another day never gates on it, and per-day shutdowns are not a
+  // thing this app models.
+  const shutdownNeeded = isToday && !block && shutdownMin === null
   const shutdownParsed = shutdownNeeded ? parseClock(shutdownInputText, 0) : null
   const showPomodoros = draft.kind !== 'break' && draft.kind !== 'ritual'
 
@@ -196,6 +223,7 @@ export function BlockComposer({ blockId, startMin: startMinProp, onDone }: Block
         })
       }
       await editBlock(
+        day,
         block.id,
         {
           title,
@@ -223,10 +251,12 @@ export function BlockComposer({ blockId, startMin: startMinProp, onDone }: Block
       await setShutdown(shutdownParsed, 'default')
     }
 
-    const check = checkShutdown(draft.startMin, draft.durationMin, effectiveShutdown)
-    if (!check.fits) {
-      setShutdownAlert(true)
-      return
+    if (isToday) {
+      const check = checkShutdown(draft.startMin, draft.durationMin, effectiveShutdown)
+      if (!check.fits) {
+        setShutdownAlert(true)
+        return
+      }
     }
 
     const action = resolveTaskAction(null, draft.important, draft.urgent)
@@ -241,7 +271,7 @@ export function BlockComposer({ blockId, startMin: startMinProp, onDone }: Block
       })
     }
 
-    await addBlock({
+    await addBlock(day, {
       title,
       kind: draft.kind,
       durationMin: draft.durationMin,
@@ -283,7 +313,7 @@ export function BlockComposer({ blockId, startMin: startMinProp, onDone }: Block
 
   const handleDelete = () => {
     if (!block) return
-    void removeBlock(block.id)
+    void removeBlock(day, block.id)
     onDone()
   }
 
@@ -299,7 +329,9 @@ export function BlockComposer({ blockId, startMin: startMinProp, onDone }: Block
   }
 
   const fitCheck =
-    !block && shutdownMin !== null ? checkShutdown(draft.startMin, draft.durationMin, shutdownMin) : null
+    isToday && !block && shutdownMin !== null
+      ? checkShutdown(draft.startMin, draft.durationMin, shutdownMin)
+      : null
   const canShorten =
     fitCheck !== null &&
     (draft.kind === 'break'
@@ -571,7 +603,7 @@ export function BlockComposer({ blockId, startMin: startMinProp, onDone }: Block
             </div>
             <div className="composer-alert-actions">
               <button type="button" className="btn-primary" onClick={handleAddToThisWeek}>
-                Add to This Week
+                Add to TODO
               </button>
               {canShorten && (
                 <button type="button" className="btn-secondary" onClick={handleShorten}>

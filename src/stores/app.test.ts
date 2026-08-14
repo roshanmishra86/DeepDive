@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
-import { useAppStore } from './app'
+import { useAppStore, DEFAULT_WEEKLY_GOAL_MIN } from './app'
 import { createTestDb } from '../test/nodeDriver'
 import type { SqlDriver } from '../db/driver'
 import { DEFAULT_ACCENT } from '../lib/accents'
@@ -12,6 +12,7 @@ describe('useAppStore', () => {
       accent: DEFAULT_ACCENT,
       timerStyle: 'ring',
       repeatStyle: 'chip',
+      weeklyGoalMin: DEFAULT_WEEKLY_GOAL_MIN,
       settingsOpen: false,
       sessionOpen: false,
     })
@@ -24,6 +25,7 @@ describe('useAppStore', () => {
       expect(state.accent).toBe(DEFAULT_ACCENT)
       expect(state.timerStyle).toBe('ring')
       expect(state.repeatStyle).toBe('chip')
+      expect(state.weeklyGoalMin).toBe(DEFAULT_WEEKLY_GOAL_MIN)
       expect(state.settingsOpen).toBe(false)
       expect(state.sessionOpen).toBe(false)
     })
@@ -192,6 +194,7 @@ describe('useAppStore', () => {
         accent: DEFAULT_ACCENT,
         timerStyle: 'ring',
         repeatStyle: 'chip',
+        weeklyGoalMin: DEFAULT_WEEKLY_GOAL_MIN,
         settingsOpen: false,
         sessionOpen: false,
       })
@@ -205,11 +208,14 @@ describe('useAppStore', () => {
     })
 
     it('hydrates persisted values from database', async () => {
+      await driver.execute("UPDATE setting SET value = '900' WHERE key = 'weeklyGoalMin'")
+
       await useAppStore.getState().hydrate(driver)
       const state = useAppStore.getState()
       expect(state.accent).toBe('green')
       expect(state.timerStyle).toBe('ring')
       expect(state.repeatStyle).toBe('chip')
+      expect(state.weeklyGoalMin).toBe(900)
     })
 
     it('falls back to default on garbage value in DB', async () => {
@@ -217,6 +223,7 @@ describe('useAppStore', () => {
       // For now, just verify the valid path works.
       await useAppStore.getState().hydrate(driver)
       expect(useAppStore.getState().accent).toBe('green')
+      expect(useAppStore.getState().weeklyGoalMin).toBe(DEFAULT_WEEKLY_GOAL_MIN)
     })
 
     it('falls back to defaults on genuinely invalid values written to the setting table', async () => {
@@ -229,6 +236,9 @@ describe('useAppStore', () => {
       await driver.execute(
         "UPDATE setting SET value = 'not-a-real-repeat-style' WHERE key = 'repeatStyle'"
       )
+      await driver.execute(
+        "UPDATE setting SET value = 'not-a-number' WHERE key = 'weeklyGoalMin'"
+      )
 
       await useAppStore.getState().hydrate(driver)
 
@@ -236,6 +246,7 @@ describe('useAppStore', () => {
       expect(state.accent).toBe(DEFAULT_ACCENT)
       expect(state.timerStyle).toBe('ring')
       expect(state.repeatStyle).toBe('chip')
+      expect(state.weeklyGoalMin).toBe(DEFAULT_WEEKLY_GOAL_MIN)
     })
 
     it('does not crash and leaves state as-is when the driver throws during hydrate', async () => {
@@ -244,7 +255,7 @@ describe('useAppStore', () => {
         select: () => Promise.reject(new Error('boom')),
         transaction: () => Promise.reject(new Error('boom')),
       }
-      useAppStore.setState({ accent: 'blue', timerStyle: 'numeric', repeatStyle: 'icon' })
+      useAppStore.setState({ accent: 'blue', timerStyle: 'numeric', repeatStyle: 'icon', weeklyGoalMin: 600 })
 
       await expect(useAppStore.getState().hydrate(throwingDriver)).resolves.not.toThrow()
 
@@ -253,11 +264,13 @@ describe('useAppStore', () => {
       expect(state.accent).toBe('blue')
       expect(state.timerStyle).toBe('numeric')
       expect(state.repeatStyle).toBe('icon')
+      expect(state.weeklyGoalMin).toBe(600)
     })
 
     it('setters persist to database', async () => {
       await useAppStore.getState().hydrate(driver)
       useAppStore.getState().setAccent('blue')
+      useAppStore.getState().setWeeklyGoalMin(1500)
 
       // Give the fire-and-forget write time to complete
       await new Promise((resolve) => setTimeout(resolve, 100))
@@ -268,6 +281,12 @@ describe('useAppStore', () => {
         ['accent']
       )
       expect(settings[0]?.value).toBe('blue')
+
+      const goal = await driver.select<{ key: string; value: string }>(
+        'SELECT * FROM setting WHERE key = ?',
+        ['weeklyGoalMin']
+      )
+      expect(goal[0]?.value).toBe('1500')
     })
 
     it('handles null driver gracefully', async () => {

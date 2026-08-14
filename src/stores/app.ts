@@ -3,13 +3,18 @@ import type { SqlDriver } from '../db/driver'
 import { ACCENTS, DEFAULT_ACCENT, type AccentKey } from '../lib/accents'
 import * as settingsRepo from '../db/repos/settings'
 
-export type View = 'today' | 'week' | 'templates' | 'archive' | 'library'
+// 'todo' is the Eisenhower backlog (formerly the 'week' view); 'week' is the
+// Mon–Sun calendar of real time blocks.
+export type View = 'today' | 'todo' | 'week' | 'templates' | 'archive' | 'library'
 export type TimerStyle = 'ring' | 'numeric' | 'bar'
 export type RepeatStyle = 'chip' | 'icon' | 'none'
 export type PlanTarget =
   | { kind: 'task'; id: number }
   | { kind: 'block'; id: number }
   | null
+
+// 20 h of planned deep work per week — matches migration 0006's seeded value.
+export const DEFAULT_WEEKLY_GOAL_MIN = 1200
 
 // Module-level driver reference for persistence callbacks
 let persistenceDriver: SqlDriver | null = null
@@ -37,18 +42,37 @@ interface AppState {
   accent: AccentKey
   timerStyle: TimerStyle
   repeatStyle: RepeatStyle
+  weeklyGoalMin: number
   settingsOpen: boolean
   planTarget: PlanTarget
   sessionOpen: boolean
+  /**
+   * Whether the right rail is collapsed to a narrow toggle strip. Defaults
+   * to false; auto-toggled by the shell's single resize listener when the
+   * window crosses the 1320px breakpoint (see `lib/railBreakpoint.ts`), but
+   * an explicit user toggle (`setRailCollapsed`) wins until the next
+   * crossing. Persisted like the other chrome settings.
+   */
+  railCollapsed: boolean
+  /**
+   * Set by Today's "This is a task. ↗" link; consumed by TodoView to clear
+   * filters, expand the task's group, scroll it into view and highlight it,
+   * then clear itself. Null means no pending cross-view focus.
+   */
+  pendingTodoFocus: number | null
   setView: (view: View) => void
   setAccent: (accent: AccentKey) => void
   setTimerStyle: (style: TimerStyle) => void
   setRepeatStyle: (style: RepeatStyle) => void
+  setWeeklyGoalMin: (minutes: number) => void
+  setRailCollapsed: (collapsed: boolean) => void
   openSettings: () => void
   closeSettings: () => void
   openPlan: (target: Exclude<PlanTarget, null>) => void
   closePlan: () => void
   setPlanTarget: (target: Exclude<PlanTarget, null>) => void
+  focusTask: (id: number) => void
+  clearTodoFocus: () => void
   enterSession: () => void
   exitSession: () => void
   hydrate: (driver: SqlDriver | null) => Promise<void>
@@ -59,9 +83,12 @@ export const useAppStore = create<AppState>()((set) => ({
   accent: DEFAULT_ACCENT,
   timerStyle: 'ring',
   repeatStyle: 'chip',
+  weeklyGoalMin: DEFAULT_WEEKLY_GOAL_MIN,
   settingsOpen: false,
   planTarget: null,
   sessionOpen: false,
+  railCollapsed: false,
+  pendingTodoFocus: null,
   setView: (view) => set({ view }),
   setAccent: (accent) => {
     set({ accent })
@@ -90,6 +117,24 @@ export const useAppStore = create<AppState>()((set) => ({
       )
     }
   },
+  setWeeklyGoalMin: (weeklyGoalMin) => {
+    set({ weeklyGoalMin })
+    // Fire-and-forget persistence
+    if (persistenceDriver) {
+      settingsRepo.setSetting(persistenceDriver, 'weeklyGoalMin', String(weeklyGoalMin)).catch((err) =>
+        console.error('Failed to persist weeklyGoalMin:', err)
+      )
+    }
+  },
+  setRailCollapsed: (railCollapsed) => {
+    set({ railCollapsed })
+    // Fire-and-forget persistence
+    if (persistenceDriver) {
+      settingsRepo
+        .setSetting(persistenceDriver, 'railCollapsed', railCollapsed ? 'true' : 'false')
+        .catch((err) => console.error('Failed to persist railCollapsed:', err))
+    }
+  },
   openSettings: () => {
     const switchRevision = ++planSwitchRevision
     if (!planFlush) {
@@ -113,6 +158,8 @@ export const useAppStore = create<AppState>()((set) => ({
   },
   closePlan: () => set({ planTarget: null }),
   setPlanTarget: (planTarget) => set({ planTarget, settingsOpen: false }),
+  focusTask: (id) => set({ pendingTodoFocus: id }),
+  clearTodoFocus: () => set({ pendingTodoFocus: null }),
   enterSession: () => set({ sessionOpen: true }),
   exitSession: () => set({ sessionOpen: false }),
   hydrate: async (driver) => {
@@ -140,10 +187,25 @@ export const useAppStore = create<AppState>()((set) => ({
           ? (repeatStyleValue as RepeatStyle)
           : 'chip'
 
+      // Validate and apply weeklyGoalMin — a corrupt or absent row falls back
+      // to the default rather than putting NaN in front of a progress bar.
+      const weeklyGoalValue = Number(settings.weeklyGoalMin)
+      const validWeeklyGoalMin =
+        Number.isFinite(weeklyGoalValue) && weeklyGoalValue > 0
+          ? Math.round(weeklyGoalValue)
+          : DEFAULT_WEEKLY_GOAL_MIN
+
+      // Validate and apply railCollapsed — any unrecognised stored value
+      // (missing key, corrupt value) falls back to expanded (false).
+      const railCollapsedValue = settings.railCollapsed
+      const validRailCollapsed = railCollapsedValue === 'true'
+
       set({
         accent: validAccent,
         timerStyle: validTimerStyle,
         repeatStyle: validRepeatStyle,
+        weeklyGoalMin: validWeeklyGoalMin,
+        railCollapsed: validRailCollapsed,
       })
     } catch (err) {
       console.error('Failed to hydrate app store:', err)

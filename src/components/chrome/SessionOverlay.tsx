@@ -1,7 +1,7 @@
-import { useEffect, useState } from 'react'
 import { useAppStore } from '../../stores/app'
 import { useTimerStore } from '../../stores/timer'
-import { useTodayStore } from '../../stores/today'
+import { useDayStore } from '../../stores/day'
+import { useTodayBlocks } from '../../stores/useTodayBlocks'
 import { usePlayerStore } from '../../stores/player'
 import { formatClock } from '../../lib/time'
 import {
@@ -26,7 +26,7 @@ const RING_C = 829.4 // 2π · 132
  */
 export function SessionOverlay() {
   const exitSession = useAppStore((s) => s.exitSession)
-  const blocks = useTodayStore((s) => s.blocks)
+  const blocks = useTodayBlocks()
   const {
     phase,
     totalSec,
@@ -47,19 +47,8 @@ export function SessionOverlay() {
   const playing = usePlayerStore((s) => s.playing)
   const togglePlay = usePlayerStore((s) => s.togglePlay)
 
-  const [nowMin, setNowMin] = useState(() => {
-    const d = new Date()
-    return d.getHours() * 60 + d.getMinutes()
-  })
-
-  // Update nowMin every 30s (same pattern as TodayView).
-  useEffect(() => {
-    const id = window.setInterval(() => {
-      const d = new Date()
-      setNowMin(d.getHours() * 60 + d.getMinutes())
-    }, 30000)
-    return () => window.clearInterval(id)
-  }, [])
+  // Single app-wide clock, owned by the day store (App.tsx starts it).
+  const nowMin = useDayStore((s) => s.nowMin)
 
   const activeBlock = activeWorkBlock(blocks, nowMin)
   const fresh = isFreshCycle({ phase, running, remainingSec, totalSec, pomodorosDone })

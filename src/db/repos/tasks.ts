@@ -4,7 +4,7 @@
  */
 
 import type { SqlDriver } from '../driver'
-import type { Task } from '../types'
+import type { Task, TaskPriority } from '../types'
 
 // Internal row type matching SQL schema (0|1 for booleans)
 interface TaskRow {
@@ -13,6 +13,7 @@ interface TaskRow {
   notes: string
   important: number
   urgent: number
+  priority: TaskPriority
   due_at: string | null
   estimate_min: number | null
   done: number
@@ -30,6 +31,7 @@ function rowToTask(row: TaskRow): Task {
     notes: row.notes,
     important: row.important === 1,
     urgent: row.urgent === 1,
+    priority: row.priority,
     dueAt: row.due_at,
     estimateMin: row.estimate_min,
     done: row.done === 1,
@@ -70,16 +72,17 @@ export async function createTask(
     notes?: string
     important?: boolean
     urgent?: boolean
+    priority?: TaskPriority
     dueAt?: string | null
     estimateMin?: number | null
     createdAt: string
   }
 ): Promise<number> {
   const result = await driver.execute(
-    `INSERT INTO task (title, notes, important, urgent, due_at, estimate_min, created_at, sort)
-     VALUES (?, ?, ?, ?, ?, ?, ?, COALESCE((SELECT MAX(sort) + 1 FROM task WHERE archived = 0), 0))`,
+    `INSERT INTO task (title, notes, important, urgent, priority, due_at, estimate_min, created_at, sort)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, COALESCE((SELECT MAX(sort) + 1 FROM task WHERE archived = 0), 0))`,
     [input.title, input.notes ?? '', input.important ? 1 : 0, input.urgent ? 1 : 0,
-      input.dueAt ?? null, input.estimateMin ?? null, input.createdAt]
+      input.priority ?? 'medium', input.dueAt ?? null, input.estimateMin ?? null, input.createdAt]
   )
   return result.lastInsertId
 }
@@ -107,6 +110,10 @@ export async function updateTask(
   if (patch.urgent !== undefined) {
     updates.push('urgent = ?')
     values.push(patch.urgent ? 1 : 0)
+  }
+  if (patch.priority !== undefined) {
+    updates.push('priority = ?')
+    values.push(patch.priority)
   }
   if (patch.dueAt !== undefined) {
     updates.push('due_at = ?')

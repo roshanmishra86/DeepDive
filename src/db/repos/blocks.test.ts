@@ -3,6 +3,13 @@ import { createTestDb } from '../../test/nodeDriver'
 import type { SqlDriver } from '../driver'
 import * as blocks from './blocks'
 
+interface BlockRowSnapshot {
+  id: number
+  day: string
+  start_min: number
+  sort: number
+}
+
 describe('blocks repository', () => {
   let driver: SqlDriver
 
@@ -265,6 +272,45 @@ describe('blocks repository', () => {
     expect(block?.quiet).toBe(true)
   })
 
+  it('round-trips noteUpdatedAt, and updateBlock persists it alongside note', async () => {
+    const day = '2026-08-17'
+    const id = await blocks.createBlock(driver, {
+      day,
+      title: 'Noted block',
+      kind: 'deep',
+      startMin: 300,
+      durationMin: 90,
+      note: 'First draft',
+      noteUpdatedAt: '2026-08-17T09:00:00.000Z',
+    })
+
+    let block = (await blocks.listBlocksForDay(driver, day)).find((b) => b.id === id)
+    expect(block?.noteUpdatedAt).toBe('2026-08-17T09:00:00.000Z')
+
+    await blocks.updateBlock(driver, id, {
+      note: 'Second draft',
+      noteUpdatedAt: '2026-08-17T10:30:00.000Z',
+    })
+
+    block = (await blocks.listBlocksForDay(driver, day)).find((b) => b.id === id)
+    expect(block?.note).toBe('Second draft')
+    expect(block?.noteUpdatedAt).toBe('2026-08-17T10:30:00.000Z')
+  })
+
+  it('defaults noteUpdatedAt to null when not provided', async () => {
+    const day = '2026-08-18'
+    const id = await blocks.createBlock(driver, {
+      day,
+      title: 'Unnoted block',
+      kind: 'shallow',
+      startMin: 300,
+      durationMin: 30,
+    })
+
+    const block = (await blocks.listBlocksForDay(driver, day)).find((b) => b.id === id)
+    expect(block?.noteUpdatedAt).toBeNull()
+  })
+
   it('enforces the repeat CHECK constraint at the SQL boundary', async () => {
     const day = '2026-08-15'
     let error: unknown = null
@@ -299,6 +345,291 @@ describe('blocks repository', () => {
     const retrieved = await blocks.listBlocksForDay(driver, day)
     const block = retrieved.find((b) => b.id === id)
     expect(block?.trackId).toBeNull()
+  })
+
+  describe('listBlocksForRange', () => {
+    it('returns blocks across multiple days ordered by day, then start_min, then sort', async () => {
+      const idB = await blocks.createBlock(driver, {
+        day: '2026-08-20',
+        title: 'Day 20, later start',
+        kind: 'deep',
+        startMin: 400,
+        durationMin: 60,
+        sort: 0,
+      })
+      const idA = await blocks.createBlock(driver, {
+        day: '2026-08-19',
+        title: 'Day 19, sort 1',
+        kind: 'deep',
+        startMin: 300,
+        durationMin: 60,
+        sort: 1,
+      })
+      const idA0 = await blocks.createBlock(driver, {
+        day: '2026-08-19',
+        title: 'Day 19, sort 0',
+        kind: 'deep',
+        startMin: 300,
+        durationMin: 60,
+        sort: 0,
+      })
+      const idC = await blocks.createBlock(driver, {
+        day: '2026-08-21',
+        title: 'Day 21',
+        kind: 'deep',
+        startMin: 300,
+        durationMin: 60,
+      })
+
+      const range = await blocks.listBlocksForRange(driver, '2026-08-19', '2026-08-21')
+      expect(range.map((b) => b.id)).toEqual([idA0, idA, idB, idC])
+    })
+
+    it('is inclusive at both bounds', async () => {
+      const idFrom = await blocks.createBlock(driver, {
+        day: '2026-08-22',
+        title: 'From bound',
+        kind: 'deep',
+        startMin: 300,
+        durationMin: 60,
+      })
+      const idTo = await blocks.createBlock(driver, {
+        day: '2026-08-23',
+        title: 'To bound',
+        kind: 'deep',
+        startMin: 300,
+        durationMin: 60,
+      })
+      await blocks.createBlock(driver, {
+        day: '2026-08-24',
+        title: 'Outside range',
+        kind: 'deep',
+        startMin: 300,
+        durationMin: 60,
+      })
+
+      const range = await blocks.listBlocksForRange(driver, '2026-08-22', '2026-08-23')
+      expect(range.map((b) => b.id)).toEqual([idFrom, idTo])
+    })
+
+    it('returns an empty array for a range with no blocks', async () => {
+      const range = await blocks.listBlocksForRange(driver, '2099-01-01', '2099-01-02')
+      expect(range).toEqual([])
+    })
+  })
+
+  describe('moveBlockToDayAtomic', () => {
+    it('moves the block to toDay, keeps start_min unchanged, and resequences both days', async () => {
+      const fromDay = '2026-08-25'
+      const toDay = '2026-08-26'
+      const otherDay = '2026-08-27'
+
+      const moving = await blocks.createBlock(driver, {
+        day: fromDay,
+        title: 'Moving block',
+        kind: 'deep',
+        startMin: 540, // 09:00
+        durationMin: 60,
+        sort: 0,
+      })
+      const staysOnFrom = await blocks.createBlock(driver, {
+        day: fromDay,
+        title: 'Stays on fromDay',
+        kind: 'deep',
+        startMin: 300,
+        durationMin: 60,
+        sort: 1,
+      })
+      const alreadyOnTo = await blocks.createBlock(driver, {
+        day: toDay,
+        title: 'Already on toDay',
+        kind: 'deep',
+        startMin: 300,
+        durationMin: 60,
+        sort: 0,
+      })
+      const untouched = await blocks.createBlock(driver, {
+        day: otherDay,
+        title: 'Untouched day',
+        kind: 'deep',
+        startMin: 300,
+        durationMin: 60,
+        sort: 0,
+      })
+
+      const ok = await blocks.moveBlockToDayAtomic(driver, {
+        blockId: moving,
+        fromDay,
+        toDay,
+        fromDayOrderedIds: [staysOnFrom],
+        toDayOrderedIds: [alreadyOnTo, moving],
+      })
+      expect(ok).toBe(true)
+
+      const movedBlock = (await blocks.listBlocksForRange(driver, toDay, toDay)).find(
+        (b) => b.id === moving
+      )
+      expect(movedBlock).not.toBeUndefined()
+      expect(movedBlock?.day).toBe(toDay)
+      expect(movedBlock?.startMin).toBe(540) // unchanged by the move
+
+      const fromDayBlocks = await blocks.listBlocksForDay(driver, fromDay)
+      expect(fromDayBlocks.map((b) => b.id)).toEqual([staysOnFrom])
+      expect(fromDayBlocks[0].sort).toBe(0)
+
+      const toDayBlocks = await blocks.listBlocksForDay(driver, toDay)
+      expect(toDayBlocks.map((b) => b.id)).toEqual([alreadyOnTo, moving])
+      expect(toDayBlocks[0].sort).toBe(0)
+      expect(toDayBlocks[1].sort).toBe(1)
+
+      const otherDayBlocks = await blocks.listBlocksForDay(driver, otherDay)
+      expect(otherDayBlocks.map((b) => b.id)).toEqual([untouched])
+      expect(otherDayBlocks[0].sort).toBe(0)
+    })
+
+    it('returns false and mutates nothing when fromDay does not match (guard miss)', async () => {
+      const actualDay = '2026-08-28'
+      const wrongFromDay = '2026-08-29'
+      const toDay = '2026-08-30'
+
+      const blockId = await blocks.createBlock(driver, {
+        day: actualDay,
+        title: 'Not actually on wrongFromDay',
+        kind: 'deep',
+        startMin: 300,
+        durationMin: 60,
+        sort: 0,
+      })
+      const otherOnActualDay = await blocks.createBlock(driver, {
+        day: actualDay,
+        title: 'Sibling on actualDay',
+        kind: 'deep',
+        startMin: 400,
+        durationMin: 60,
+        sort: 1,
+      })
+
+      const before = await driver.select<BlockRowSnapshot>(
+        'SELECT id, day, start_min, sort FROM day_block ORDER BY id'
+      )
+
+      const ok = await blocks.moveBlockToDayAtomic(driver, {
+        blockId,
+        fromDay: wrongFromDay,
+        toDay,
+        fromDayOrderedIds: [otherOnActualDay, blockId], // deliberately wrong day binding
+        toDayOrderedIds: [blockId],
+      })
+      expect(ok).toBe(false)
+
+      const after = await driver.select<BlockRowSnapshot>(
+        'SELECT id, day, start_min, sort FROM day_block ORDER BY id'
+      )
+      expect(after).toEqual(before)
+    })
+
+    it('returns false and resequences NOTHING when the block has already been moved onto toDay', async () => {
+      // The realistic stale case: another client already moved the block to
+      // toDay. The guarded day move affects 0 rows, and because that
+      // statement carries requireRowsAffected the whole transaction rolls
+      // back — including the resequences, which are scoped per day and would
+      // otherwise match rows on both days and commit this caller's proposed
+      // ordering from an already-stale view. Regression guard: `false` must
+      // mean the database is untouched.
+      const fromDay = '2026-09-10'
+      const toDay = '2026-09-11'
+
+      const alreadyMoved = await blocks.createBlock(driver, {
+        day: toDay,
+        title: 'Already moved by someone else',
+        kind: 'deep',
+        startMin: 540,
+        durationMin: 60,
+        sort: 0,
+      })
+      const otherOnTo = await blocks.createBlock(driver, {
+        day: toDay,
+        title: 'Other block on toDay',
+        kind: 'deep',
+        startMin: 300,
+        durationMin: 60,
+        sort: 1,
+      })
+      const siblingOnFrom = await blocks.createBlock(driver, {
+        day: fromDay,
+        title: 'Sibling still on fromDay',
+        kind: 'deep',
+        startMin: 300,
+        durationMin: 60,
+        sort: 5,
+      })
+
+      const before = await driver.select<BlockRowSnapshot>(
+        'SELECT id, day, start_min, sort FROM day_block ORDER BY id'
+      )
+
+      const ok = await blocks.moveBlockToDayAtomic(driver, {
+        blockId: alreadyMoved,
+        fromDay,
+        toDay,
+        fromDayOrderedIds: [siblingOnFrom],
+        toDayOrderedIds: [otherOnTo, alreadyMoved],
+      })
+      expect(ok).toBe(false)
+
+      // Every row on both days is exactly as it was — the caller's proposed
+      // ordering (otherOnTo 1 -> 0, alreadyMoved 0 -> 1, siblingOnFrom
+      // 5 -> 0) was rolled back with the move it belonged to.
+      const after = await driver.select<BlockRowSnapshot>(
+        'SELECT id, day, start_min, sort FROM day_block ORDER BY id'
+      )
+      expect(after).toEqual(before)
+      expect(after.find((r) => r.id === alreadyMoved)?.sort).toBe(0)
+      expect(after.find((r) => r.id === otherOnTo)?.sort).toBe(1)
+      expect(after.find((r) => r.id === siblingOnFrom)?.sort).toBe(5)
+    })
+
+    // moveBlockToDayAtomic has no natural way to fail mid-transaction through
+    // its public signature (blockId/day are always well-typed strings and
+    // numbers). Directly drive driver.transaction with the same statement
+    // shape it builds, but inject a genuine NOT NULL violation on the sort
+    // resequence, to prove the whole commit — including the day move that
+    // ran first — rolls back together.
+    it('rolls back the day move when a resequence statement genuinely fails', async () => {
+      const fromDay = '2026-08-31'
+      const toDay = '2026-09-01'
+      const blockId = await blocks.createBlock(driver, {
+        day: fromDay,
+        title: 'Should stay put',
+        kind: 'deep',
+        startMin: 300,
+        durationMin: 60,
+        sort: 0,
+      })
+
+      await expect(
+        driver.transaction([
+          {
+            sql: 'UPDATE day_block SET day = ? WHERE id = ? AND day = ?',
+            params: [toDay, blockId, fromDay],
+          },
+          {
+            // sort is NOT NULL — this genuinely fails.
+            sql: 'UPDATE day_block SET sort = ? WHERE id = ? AND day = ?',
+            params: [null, blockId, toDay],
+          },
+        ])
+      ).rejects.toThrow()
+
+      const rows = await driver.select<BlockRowSnapshot>(
+        'SELECT id, day, start_min, sort FROM day_block WHERE id = ?',
+        [blockId]
+      )
+      // If the day move had leaked through despite the resequence failing,
+      // this would read toDay. It must still read fromDay.
+      expect(rows[0].day).toBe(fromDay)
+      expect(rows[0].sort).toBe(0)
+    })
   })
 
   it('preserves pomodoros and sort when applying a template to a day', async () => {

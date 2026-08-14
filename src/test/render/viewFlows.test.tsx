@@ -33,7 +33,8 @@ import { useAppStore } from '../../stores/app'
 import { useLibraryStore } from '../../stores/library'
 import { usePlayerStore, injectAudioElementForTests } from '../../stores/player'
 import { useTimerStore, FOCUS_SEC, POMODOROS_PER_BLOCK } from '../../stores/timer'
-import { useTodayStore } from '../../stores/today'
+import { useBlocksStore } from '../../stores/blocks'
+import { useDayStore } from '../../stores/day'
 import { useTasksStore } from '../../stores/tasks'
 import { DEFAULT_ACCENT } from '../../lib/accents'
 import { ArchiveView } from '../../components/views/ArchiveView'
@@ -49,7 +50,7 @@ import { SessionOverlay } from '../../components/chrome/SessionOverlay'
  * to return a seeded node driver and thereby exercise the REAL query path
  * (hasAnyRecords, headlineStats, dayStatuses, dayRecord). The error test
  * makes the mocked openDatabase reject, landing in ArchiveView's own catch
- * (the same setState error contract TodayView/WeekView use).
+ * (the same setState error contract TodayView/TodoView use).
  */
 const dbMock = vi.hoisted(() => ({
   driver: null as SqlDriver | null,
@@ -137,14 +138,10 @@ function resetTimerStore() {
 }
 
 function resetTodayStore() {
-  useTodayStore.setState({
-    day: null,
-    blocks: [],
-    loading: false,
-    error: null,
-    shutdownMin: null,
-    shutdownIsDefault: true,
-  })
+  useBlocksStore.setState({ blocksByDay: {}, loadedDays: [], loading: false, error: null })
+  // The day store owns the clock; these widgets read today's slice through
+  // it, so its state is reset alongside the blocks store.
+  useDayStore.setState({ currentDay: '2026-08-04', nowMin: 540, shutdownMin: null, shutdownIsDefault: true, error: null })
 }
 
 function resetTasksStore() {

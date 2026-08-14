@@ -30,3 +30,46 @@ describe('migration 0005 upgrade', () => {
     expect(await driver.select<{ value: string }>('SELECT value FROM setting WHERE key = ?', ['loopUntilBlockEnd'])).toEqual([])
   })
 })
+
+describe('migration 0006 upgrade', () => {
+  it('backfills priority from every quadrant and leaves existing notes untouched', async () => {
+    const db = createTestDb(5)
+    const { driver } = db
+    const insertTask = (title: string, important: number, urgent: number) =>
+      driver.execute(
+        'INSERT INTO task (title, notes, important, urgent, created_at) VALUES (?, ?, ?, ?, ?)',
+        [title, `${title} notes`, important, urgent, '2026-08-10T08:00:00Z']
+      )
+    const both = await insertTask('Important and urgent', 1, 1)
+    const importantOnly = await insertTask('Important only', 1, 0)
+    const urgentOnly = await insertTask('Urgent only', 0, 1)
+    const neither = await insertTask('Neither', 0, 0)
+    const block = await driver.execute(
+      'INSERT INTO day_block (day, title, kind, start_min, duration_min, note) VALUES (?, ?, ?, ?, ?, ?)',
+      ['2026-08-10', 'Legacy block', 'deep', 540, 90, 'Plain text note with <p> in it']
+    )
+
+    db.applySql(readFileSync(join(import.meta.dirname, '../../src-tauri/migrations/0006_notes_priority_and_week.sql'), 'utf8'))
+
+    const taskRows = await driver.select<{ id: number; notes: string; priority: string }>(
+      'SELECT id, notes, priority FROM task ORDER BY id',
+      []
+    )
+    expect(taskRows).toEqual([
+      { id: both.lastInsertId, notes: 'Important and urgent notes', priority: 'high' },
+      { id: importantOnly.lastInsertId, notes: 'Important only notes', priority: 'medium' },
+      { id: urgentOnly.lastInsertId, notes: 'Urgent only notes', priority: 'medium' },
+      { id: neither.lastInsertId, notes: 'Neither notes', priority: 'low' },
+    ])
+
+    // Existing note text survives verbatim, and note_updated_at stays NULL —
+    // the migration must not claim a note was edited when it was not.
+    const blockRows = await driver.select<{ note: string; note_updated_at: string | null }>(
+      'SELECT note, note_updated_at FROM day_block WHERE id = ?',
+      [block.lastInsertId]
+    )
+    expect(blockRows[0]).toEqual({ note: 'Plain text note with <p> in it', note_updated_at: null })
+
+    expect(await driver.select<{ value: string }>('SELECT value FROM setting WHERE key = ?', ['weeklyGoalMin'])).toEqual([{ value: '1200' }])
+  })
+})

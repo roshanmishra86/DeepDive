@@ -1,9 +1,21 @@
 import { create } from 'zustand'
 import type { SqlDriver } from '../db/driver'
-import type { Subtask, Task } from '../db/types'
+import type { Subtask, Task, TaskPriority } from '../db/types'
 import * as tasksRepo from '../db/repos/tasks'
 import * as subtasksRepo from '../db/repos/subtasks'
-import { groupByDeadline, groupByMatrix, type DeadlineBucket, type Quadrant, sortTasks } from '../lib/week'
+import {
+  groupByDeadline,
+  groupByMatrix,
+  type DeadlineBucket,
+  type Quadrant,
+  type TodoFilters,
+  type GroupSort,
+  sortTasks,
+  quadrantOf,
+  priorityFromQuadrant,
+  DEFAULT_TODO_FILTERS,
+} from '../lib/todo'
+import { messageFor } from '../lib/errors'
 
 type TaskEdit = Partial<Omit<Task, 'id' | 'createdAt' | 'archived'>>
 type TaskDestination = { group: Quadrant | DeadlineBucket; beforeId: number | null }
@@ -12,6 +24,8 @@ interface TasksState {
   tasks: Task[]
   archivedTasks: Task[]
   groupBy: 'matrix' | 'deadline'
+  filters: TodoFilters
+  sortByGroup: Record<string, GroupSort>
   loading: boolean
   loadingArchived: boolean
   error: string | null
@@ -27,6 +41,7 @@ interface TasksState {
     notes?: string
     important?: boolean
     urgent?: boolean
+    priority?: TaskPriority
     dueAt?: string | null
     estimateMin?: number | null
   }) => Promise<number | null>
@@ -37,26 +52,26 @@ interface TasksState {
   removeTask: (id: number) => Promise<void>
   archiveTask: (id: number, archivedAt: string) => Promise<boolean>
   unarchiveTask: (id: number) => Promise<boolean>
-  moveTask: (id: number, destination: TaskDestination) => Promise<boolean>
+  moveTask: (id: number, destination: TaskDestination, now: Date) => Promise<boolean>
   saveTaskNotes: (id: number, notes: string) => Promise<boolean>
   loadSubtasks: (taskId: number) => Promise<void>
-  createSubtask: (input: { taskId: number; title: string; estimateMin: number; createdAt?: string }) => Promise<number | null>
-  updateSubtask: (id: number, taskId: number, patch: { title?: string; estimateMin?: number }) => Promise<boolean>
+  createSubtask: (input: { taskId: number; title: string; estimateMin: number; createdAt?: string; dueAt?: string | null }) => Promise<number | null>
+  updateSubtask: (id: number, taskId: number, patch: { title?: string; estimateMin?: number; dueAt?: string | null }) => Promise<boolean>
   setSubtaskDone: (id: number, taskId: number, done: boolean) => Promise<boolean>
   deleteSubtask: (id: number, taskId: number) => Promise<boolean>
   reorderSubtasks: (taskId: number, orderedIds: number[]) => Promise<boolean>
   getSubtaskAllocation: (subtaskId: number) => Promise<{ allocatedMin: number; blockCount: number }>
   setGroupBy: (g: 'matrix' | 'deadline') => void
+  setFilters: (patch: Partial<TodoFilters>) => void
+  resetFilters: () => void
+  setGroupSort: (group: string, sort: GroupSort) => void
+  setPriority: (id: number, priority: TaskPriority) => Promise<void>
 }
 
 let nextLocalId = -1
 let nextLocalSubtaskId = -1
 let persistenceDriver: SqlDriver | null = null
 const subtaskRequests = new Map<number, Promise<void>>()
-
-function messageFor(err: unknown, fallback: string): string {
-  return err instanceof Error ? err.message : fallback
-}
 
 function replaceTask(tasks: Task[], updated: Task): Task[] {
   return sortTasks(tasks.map((task) => (task.id === updated.id ? updated : task)))
@@ -74,11 +89,15 @@ export const useTasksStore = create<TasksState>()((set, get) => {
     }
     try {
       const rows = await tasksRepo.listTasks(persistenceDriver, { archived })
+      // Bulk-load subtasks for BOTH branches. Active tasks used to arrive with
+      // no subtasks at all, leaving inline subtask rows and the right rail's
+      // "≈Xh left" rollup silently incomplete until the per-task lazy
+      // loadSubtasks fired. That lazy path stays as the archive/edge fallback.
+      const subtasks = await subtasksRepo.listSubtasksForTasks(persistenceDriver, rows.map((task) => task.id))
+      const byTask = new Map<number, Subtask[]>()
+      for (const task of rows) byTask.set(task.id, [])
+      for (const subtask of subtasks) byTask.get(subtask.taskId)?.push(subtask)
       if (archived) {
-        const subtasks = await subtasksRepo.listSubtasksForTasks(persistenceDriver, rows.map((task) => task.id))
-        const byTask = new Map<number, Subtask[]>()
-        for (const task of rows) byTask.set(task.id, [])
-        for (const subtask of subtasks) byTask.get(subtask.taskId)?.push(subtask)
         set((state) => ({
           archivedTasks: rows,
           loadingArchived: false,
@@ -88,7 +107,14 @@ export const useTasksStore = create<TasksState>()((set, get) => {
           },
         }))
       } else {
-        set({ tasks: sortTasks(rows), loading: false })
+        set((state) => ({
+          tasks: sortTasks(rows),
+          loading: false,
+          subtasksByTask: {
+            ...state.subtasksByTask,
+            ...Object.fromEntries(byTask),
+          },
+        }))
       }
     } catch (err) {
       set({ [loadingKey]: false, [errorKey]: messageFor(err, 'Could not load tasks') } as Partial<TasksState>)
@@ -99,6 +125,8 @@ export const useTasksStore = create<TasksState>()((set, get) => {
     tasks: [],
     archivedTasks: [],
     groupBy: 'matrix',
+    filters: DEFAULT_TODO_FILTERS,
+    sortByGroup: {},
     loading: false,
     loadingArchived: false,
     error: null,
@@ -117,12 +145,21 @@ export const useTasksStore = create<TasksState>()((set, get) => {
     addTask: async (input) => {
       const localId = nextLocalId--
       const now = new Date().toISOString()
+      const important = input.important ?? false
+      const urgent = input.urgent ?? false
+      // An explicit priority always wins (the TODO group add-row supplies
+      // one). Otherwise derive it from the Eisenhower flags with exactly the
+      // rule migration 0006 used to backfill existing rows, so a task created
+      // as urgent+important cannot land in the "do" quadrant wearing a
+      // Medium chip. Priority is independent from here on: editing the flags
+      // later, or dragging across quadrants, deliberately leaves it alone.
       const newTask: Task = {
         id: localId,
         title: input.title.trim(),
         notes: input.notes ?? '',
-        important: input.important ?? false,
-        urgent: input.urgent ?? false,
+        important,
+        urgent,
+        priority: input.priority ?? priorityFromQuadrant(quadrantOf({ important, urgent })),
         dueAt: input.dueAt ?? null,
         estimateMin: input.estimateMin ?? null,
         done: false,
@@ -136,7 +173,7 @@ export const useTasksStore = create<TasksState>()((set, get) => {
       set({ tasks: sortTasks([...previous, newTask]) })
       if (!persistenceDriver) return localId
       try {
-        const id = await tasksRepo.createTask(persistenceDriver, { ...input, title: newTask.title, createdAt: now })
+        const id = await tasksRepo.createTask(persistenceDriver, { ...input, title: newTask.title, priority: newTask.priority, createdAt: now })
         set((state) => ({ tasks: state.tasks.map((task) => task.id === localId ? { ...task, id } : task) }))
         return id
       } catch (err) {
@@ -230,22 +267,33 @@ export const useTasksStore = create<TasksState>()((set, get) => {
       return true
     },
 
-    moveTask: async (id, destination) => {
+    moveTask: async (id, destination, now) => {
       const state = get()
       const task = state.tasks.find((item) => item.id === id)
       if (!task) return false
+      // Dropping a row onto itself is a no-op, not a move to the top. The
+      // drop handlers pass the target row's id as beforeId for every row
+      // including the dragged one, and `id` is filtered out of the group
+      // below before indexOf runs — so without this guard the lookup misses
+      // and the insert position collapses to 0.
+      if (destination.beforeId === id) return true
       if (state.groupBy === 'deadline') {
-        const currentGroup = groupByDeadline(state.tasks, new Date()).find((group) => group.tasks.some((item) => item.id === id))?.bucket
+        const currentGroup = groupByDeadline(state.tasks, now).find((group) => group.tasks.some((item) => item.id === id))?.bucket
         if (currentGroup && currentGroup !== destination.group) return false
       }
       const groups = state.groupBy === 'matrix'
         ? groupByMatrix(state.tasks).map((group) => ({ key: group.quadrant, ids: group.tasks.map((item) => item.id) }))
-        : groupByDeadline(state.tasks, new Date()).map((group) => ({ key: group.bucket, ids: group.tasks.map((item) => item.id) }))
+        : groupByDeadline(state.tasks, now).map((group) => ({ key: group.bucket, ids: group.tasks.map((item) => item.id) }))
       const destinationGroup = groups.find((group) => group.key === destination.group)
       if (!destinationGroup) return false
       const without = groups.map((group) => ({ ...group, ids: group.ids.filter((itemId) => itemId !== id) }))
       const target = without.find((group) => group.key === destination.group)!
-      const insertAt = destination.beforeId === null ? target.ids.length : Math.max(0, target.ids.indexOf(destination.beforeId))
+      // A beforeId that is not in the destination group is a stale drop
+      // target (the row moved or was deleted under the drag). Append, the
+      // same as beforeId === null — inserting at the top instead would be an
+      // arbitrary jump the user never asked for.
+      const beforeIndex = destination.beforeId === null ? -1 : target.ids.indexOf(destination.beforeId)
+      const insertAt = beforeIndex === -1 ? target.ids.length : beforeIndex
       target.ids.splice(insertAt, 0, id)
       const orderedIds = without.flatMap((group) => group.ids)
       const flagPatch = state.groupBy === 'matrix' && destination.group !== (groups.find((group) => group.ids.includes(id))?.key)
@@ -313,7 +361,7 @@ export const useTasksStore = create<TasksState>()((set, get) => {
         const id = persistenceDriver
           ? await subtasksRepo.createSubtask(persistenceDriver, { ...input, createdAt: input.createdAt ?? new Date().toISOString() })
           : nextLocalSubtaskId--
-        const created: Subtask = { id, taskId: input.taskId, title: input.title.trim(), estimateMin: input.estimateMin, done: false, sort: (get().subtasksByTask[input.taskId] ?? []).length, createdAt: input.createdAt ?? new Date().toISOString() }
+        const created: Subtask = { id, taskId: input.taskId, title: input.title.trim(), estimateMin: input.estimateMin, done: false, sort: (get().subtasksByTask[input.taskId] ?? []).length, createdAt: input.createdAt ?? new Date().toISOString(), dueAt: input.dueAt ?? null }
         set((state) => ({ subtasksByTask: { ...state.subtasksByTask, [input.taskId]: [...(state.subtasksByTask[input.taskId] ?? []), created] } }))
         return id
       } catch (err) {
@@ -358,5 +406,11 @@ export const useTasksStore = create<TasksState>()((set, get) => {
       catch (err) { set({ error: messageFor(err, 'Could not load allocation') }); return { allocatedMin: 0, blockCount: 0 } }
     },
     setGroupBy: (groupBy) => set({ groupBy }),
+    setFilters: (patch) => set((state) => ({ filters: { ...state.filters, ...patch } })),
+    resetFilters: () => set({ filters: DEFAULT_TODO_FILTERS }),
+    setGroupSort: (group, sort) => set((state) => ({ sortByGroup: { ...state.sortByGroup, [group]: sort } })),
+    setPriority: async (id, priority) => {
+      await get().editTask(id, { priority })
+    },
   }
 })

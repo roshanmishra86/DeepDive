@@ -1,14 +1,17 @@
-import { useEffect, useState } from 'react'
-import { useTodayStore } from '../../stores/today'
-import { toDayKey } from '../../lib/time'
+import { useEffect, useRef, useState } from 'react'
+import { useBlocksStore } from '../../stores/blocks'
+import { useDayStore } from '../../stores/day'
+import { useTodayBlocks } from '../../stores/useTodayBlocks'
 import { openDatabase } from '../../db/index'
 import { layout, daySummary, blockState, conflicts, moveBlockTo, nextFreeStart } from '../../lib/today'
-import { formatDuration, minutesToClock, parseClock } from '../../lib/time'
+import { formatDuration, minutesToClock, parseClock, fromDayKey } from '../../lib/time'
 import { TimelineBlock } from '../today/TimelineBlock'
+import { BlockNotesPanel } from '../today/BlockNotesPanel'
 import { useDragList } from '../common/useDragList'
 import { BlockComposer } from '../today/BlockComposer'
 import { ApplyTemplateMenu } from '../today/ApplyTemplateMenu'
 import { SaveTemplateModal } from '../templates/SaveTemplateModal'
+import type { DayBlock } from '../../db/types'
 
 type ComposerState =
   | { mode: 'closed' }
@@ -16,25 +19,113 @@ type ComposerState =
   | { mode: 'edit'; blockId: number }
 
 export function TodayView() {
-  const blocks = useTodayStore((s) => s.blocks)
-  const loading = useTodayStore((s) => s.loading)
-  const error = useTodayStore((s) => s.error)
-  const hydrate = useTodayStore((s) => s.hydrate)
-  const shutdownMin = useTodayStore((s) => s.shutdownMin)
-  const setShutdown = useTodayStore((s) => s.setShutdown)
+  const blocks = useTodayBlocks()
+  const day = useDayStore((s) => s.currentDay)
+  const loading = useBlocksStore((s) => s.loading)
+  const error = useBlocksStore((s) => s.error)
+  const hydrate = useBlocksStore((s) => s.hydrate)
+  const shutdownMin = useDayStore((s) => s.shutdownMin)
+  const setShutdown = useDayStore((s) => s.setShutdown)
 
-  const [nowMin, setNowMin] = useState(() => {
-    const d = new Date()
-    return d.getHours() * 60 + d.getMinutes()
-  })
+  // Single app-wide clock, owned by the day store (App.tsx starts it).
+  const nowMin = useDayStore((s) => s.nowMin)
   const { drag, start, over, clear } = useDragList<number>()
-  const moveTo = useTodayStore((s) => s.moveTo)
+  const moveWithinDay = useBlocksStore((s) => s.moveWithinDay)
 
   const [composerState, setComposerState] = useState<ComposerState>({ mode: 'closed' })
   const [templateMenuOpen, setTemplateMenuOpen] = useState(false)
   const [saveTemplateOpen, setSaveTemplateOpen] = useState(false)
   const [shutdownEditing, setShutdownEditing] = useState(false)
   const [shutdownText, setShutdownText] = useState('')
+
+  // --- Notes panel selection lifecycle -------------------------------------
+  // See BlockNotesPanel's flush prop and the rules below; mirrors the plan's
+  // five selection rules for the inline notes panel.
+  const [selectedBlockId, setSelectedBlockId] = useState<number | null>(null)
+  const flushNotesRef = useRef<(() => Promise<boolean>) | null>(null)
+  const notesFocusedRef = useRef(false)
+  const prevBlocksRef = useRef<DayBlock[]>(blocks)
+  const prevActiveIdRef = useRef<number | null>(null)
+
+  useEffect(() => {
+    const prevBlocks = prevBlocksRef.current
+    prevBlocksRef.current = blocks
+    const activeId = blocks.find((b) => blockState(b, nowMin) === 'active')?.id ?? null
+
+    // Rule 1: seed the selection (active block, else first) whenever the
+    // panel has no selection and there is something to select. Deliberately
+    // NOT a one-shot "first render" guard: `useTodayBlocks()` returns the
+    // frozen EMPTY array until async hydration resolves, so the very first
+    // effect pass can see `blocks.length === 0` on a real app mount — a
+    // guard burned on that pass would leave the panel stuck on its empty
+    // state forever. Re-checking whenever `selectedBlockId` is null also
+    // covers deleting the last block and later adding a new one. Not gated
+    // on focus: an empty/unseeded panel has nothing pending to protect.
+    if (selectedBlockId === null && blocks.length > 0) {
+      prevActiveIdRef.current = activeId
+      setSelectedBlockId(activeId ?? blocks[0].id)
+      return
+    }
+
+    let next: number | null | undefined // undefined = no change this pass
+    if (selectedBlockId !== null && !blocks.some((b) => b.id === selectedBlockId)) {
+      // Rule 4: the selected block was deleted, or hydration/rollover
+      // dropped it — fall back to the nearest remaining block by start
+      // time (not gated by focus: the block backing the editor is gone).
+      if (blocks.length === 0) {
+        next = null
+      } else {
+        const removed = prevBlocks.find((b) => b.id === selectedBlockId)
+        if (!removed) {
+          next = blocks[0].id
+        } else {
+          let best = blocks[0]
+          let bestDiff = Math.abs(best.startMin - removed.startMin)
+          for (const b of blocks) {
+            const diff = Math.abs(b.startMin - removed.startMin)
+            if (diff < bestDiff || (diff === bestDiff && b.startMin < best.startMin)) {
+              best = b
+              bestDiff = diff
+            }
+          }
+          next = best.id
+        }
+      }
+    } else if (
+      activeId !== prevActiveIdRef.current &&
+      activeId !== null &&
+      activeId !== selectedBlockId &&
+      !notesFocusedRef.current
+    ) {
+      // Rule 3: follow a newly active block, but never while the notes
+      // editor holds focus — a block entering session must not yank the
+      // panel away from someone mid-sentence.
+      next = activeId
+    }
+
+    prevActiveIdRef.current = activeId
+
+    if (next !== undefined) {
+      // Rule 5: flush any pending edit before the selection changes. Only
+      // move the selection once the flush actually succeeded — a failed
+      // save must not also lose the draft by yanking the editor away from
+      // it, so on failure the selection (and the failed draft) stays put.
+      const target = next
+      void (flushNotesRef.current?.() ?? Promise.resolve(true)).then((ok) => {
+        if (ok) setSelectedBlockId(target)
+      })
+    }
+  }, [blocks, nowMin, selectedBlockId])
+
+  const selectBlockNotes = (blockId: number) => {
+    if (blockId === selectedBlockId) return
+    void (flushNotesRef.current?.() ?? Promise.resolve(true)).then((ok) => {
+      if (ok) setSelectedBlockId(blockId)
+    })
+  }
+
+  const selectedBlock = blocks.find((b) => b.id === selectedBlockId) ?? null
+  const notesNow = new Date(fromDayKey(day).getTime() + nowMin * 60000)
 
   // Hydrate on mount
   useEffect(() => {
@@ -43,8 +134,11 @@ export function TodayView() {
       try {
         const driver = await openDatabase()
         if (!mounted) return
-        const hydrationDay = toDayKey(new Date())
-        await hydrate(driver, hydrationDay)
+        // The day key comes from the clock owner, never from a local
+        // `new Date()` — that split is what produced the UTC-day-key defect.
+        const { currentDay: hydrationDay, nowMin: hydrationNowMin } = useDayStore.getState()
+        await useDayStore.getState().hydrate(driver, hydrationDay, hydrationNowMin)
+        await hydrate(driver, [hydrationDay])
       } catch (err) {
         console.error('Failed to hydrate today view:', err)
       }
@@ -53,15 +147,6 @@ export function TodayView() {
       mounted = false
     }
   }, [hydrate])
-
-  // Update nowMin every 30s
-  useEffect(() => {
-    const id = window.setInterval(() => {
-      const d = new Date()
-      setNowMin(d.getHours() * 60 + d.getMinutes())
-    }, 30000)
-    return () => window.clearInterval(id)
-  }, [])
 
   const sourceIndex = drag.sourceId === null ? -1 : blocks.findIndex((block) => block.id === drag.sourceId)
   const previewBlocks = sourceIndex !== -1 && drag.targetIndex !== null
@@ -207,7 +292,9 @@ export function TodayView() {
         </div>
       </div>
 
-      {/* Timeline */}
+      {/* Timeline + notes panel */}
+      <div className="today-body">
+      <div className="today-timeline-col">
       {isEmptyAndClosed ? (
         <div className="today-timeline">
           <div className="timeline-gutter" />
@@ -282,17 +369,32 @@ export function TodayView() {
                   onDragOver={() => over(blocks.findIndex((block) => block.id === row.block.id))}
                   onDrop={() => {
                     const targetIndex = blocks.findIndex((block) => block.id === row.block.id)
-                    if (drag.sourceId !== null && targetIndex !== -1 && targetIndex !== sourceIndex) void moveTo(drag.sourceId, targetIndex)
+                    if (drag.sourceId !== null && targetIndex !== -1 && targetIndex !== sourceIndex) void moveWithinDay(day, drag.sourceId, targetIndex)
                     clear()
                   }}
                   onDragEnd={clear}
                   dragTarget={drag.targetIndex === blocks.findIndex((block) => block.id === row.block.id) && drag.sourceId !== row.block.id}
+                  onSelectNotes={selectBlockNotes}
+                  selected={row.block.id === selectedBlockId}
                 />
               )
             })}
           </div>
         </div>
       )}
+      </div>
+
+      <div className="today-notes-panel">
+        <BlockNotesPanel
+          block={selectedBlock}
+          now={notesNow}
+          flushRef={flushNotesRef}
+          onFocusChange={(focused) => {
+            notesFocusedRef.current = focused
+          }}
+        />
+      </div>
+      </div>
 
       {/* Template menu */}
       {templateMenuOpen && (

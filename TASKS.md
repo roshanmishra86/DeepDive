@@ -76,6 +76,7 @@ fonts: Newsreader (serif display), IBM Plex Sans (UI), IBM Plex Mono (numerals/t
 | Fonts | **Bundled via `@fontsource`** | Mockup loads Google Fonts over CDN. An offline desktop app must not. |
 | Window chrome | **`decorations: false`** + custom title bar | The design draws its own Windows-style title bar with minimize/maximize/close. |
 | Audio source | **`tauri-plugin-dialog` + `convertFileSrc()`** on an absolute path | Mockup uses `URL.createObjectURL`, which dies on restart. Storing the path lets the library survive relaunch. Requires `assetProtocol` scope in capabilities. |
+| Rich-text editor | **TipTap (ProseMirror)** — `@tiptap/react`, `@tiptap/pm`, `@tiptap/starter-kit`, `@tiptap/extension-list` | **Reverses the Styling row above.** Adds roughly 300–500 KB to the bundle, the exact class of heavyweight UI dependency that row rejects Tailwind for. Accepted anyway because the Phase 12 notes surface needs real rich-text editing — bold/italic, lists, links, task lists, undo/redo on a shared document model — that a `<textarea>` cannot provide, and no lighter ProseMirror-class editor with the same feature set was evaluated as a substitute. This is a deliberate, one-off exception, not a reversal of the no-Tailwind position. |
 
 ### Deviations from the mockup (deliberate)
 
@@ -1713,4 +1714,124 @@ files** (829 + 7 lib + 1 render) · `pnpm check:css` pass · `pnpm build` pass �
 | WebView2 absent on older Windows 10 | `downloadBootstrapper` install mode. |
 | `convertFileSrc` blocked by CSP / asset scope | Explicit `assetProtocol` scope in the capability file, verified in Phase 8. |
 | `setInterval` timer drifts when the window is minimised | Compute remaining time from a stored wall-clock deadline, not by decrementing. |
+
+---
+
+### Phase 12 — Today notes, TODO, and This Week redesign *(owner: main session + writer sub-agents, verified by main session)*
+
+This section records the redesign specified in `updated_design_plan.md` (its own Phase 1–10
+numbering, unrelated to this file's phase count). It replaces the Eisenhower backlog previously
+called "Week" with a real **TODO** view, adds a per-block rich-notes panel to **Today**, and builds
+a genuinely new **This Week** calendar over a canonical multi-day block store. Seven commits land
+the work (`77ffa5d` rename, `72a7a60` migration 0006, `4386269` canonical block store, `ce86f28`
+TipTap editor, `6899ea8` Today notes panel, `3aecd5d` TODO view, `28c6b7f` This Week calendar);
+Phase 9's responsive/accessibility pass (rail-collapse breakpoint, `railBreakpoint.ts`) is
+uncommitted in the working tree at the time of writing. No migration, capability, `tauri.conf.json`
+or CI-workflow changes ship outside `72a7a60`; `package.json` only gained the four TipTap runtime
+dependencies (`git diff main..HEAD -- package.json scripts/ .github/` — no script or toolchain
+changes, so `README.md`/`CLAUDE.md` are correctly untouched by this phase).
+
+The single most consequential decision is recorded in §1: **TipTap (ProseMirror)** as the notes
+editor, a deliberate reversal of the standing "no heavyweight UI dependencies" position that the
+Styling row rejects Tailwind under, accepted because a `<textarea>` cannot give the notes surface
+real rich-text editing. Notes are stored as a versioned TipTap JSON envelope
+(`{ v: 1, ...doc }`, `src/lib/richText.ts`) inside the existing `day_block.note` TEXT column;
+anything that doesn't parse as `{ v: 1, type: 'doc' }` is treated as legacy plain text and
+converted to a paragraph doc, never discarded. `day_block.note_updated_at` (migration `0006`) is
+written in the same statement as `note`, so "Last edited" has no in-memory-only source that lies
+after a restart. Blocks stopped being a today-only concept: `src/stores/blocks.ts` (evolved from
+`stores/today.ts`) is the one canonical `blocksByDay` cache, and `src/stores/day.ts` is the sole
+owner of the wall clock, including midnight rollover for Today, rituals, the sidebar and the timer.
+
+#### Verification
+
+| Check | Result |
+| --- | --- |
+| `tsc -b` | pass |
+| `tsc -p tsconfig.test.json` | pass |
+| `oxlint` | clean |
+| `node scripts/check-css-classes.mjs` | pass — "All CSS classes are defined." |
+| `vitest run` | **1073 tests, 47 files**, 0 failures — measured three times on the final tree, identical each run. (One earlier observation of 46/1061 was recorded mid-session; the delta is exactly the 12 `railBreakpoint` tests, i.e. that one file failed to collect while a concurrent sub-agent was still rewriting it. It is a write race against an in-flight edit, not suite instability — the three clean runs were taken after all agents had finished.) |
+| `git diff main..HEAD -- package.json scripts/ .github/` | only 4 new runtime `dependencies` (`@tiptap/*`); no `scripts`, no CI, no toolchain change — `README.md`/`CLAUDE.md` correctly left untouched |
+| `--text-muted` / `--text-faint` | unchanged: `src/styles/tokens.css` still ships the Phase 10 AA values `#655f55` / `#716a5f`, not the mockup's failing `#8b8375` / `#a09889` |
+
+#### Defects found in verification and fixed
+
+- [x] **`upcomingTasks` used a non-transitive comparator.** `src/lib/todo.ts`'s ranking called
+  `sortTasks([a, b])` inside the `Array.prototype.sort` comparator — a fresh two-element sort per
+  comparison, which is not a consistent total order and gives V8 an unstable result. Replaced with
+  a direct `(quadrant, sort, id)` comparison inline, the same total order `sortTasks` encodes, with
+  no per-comparison allocation or resort.
+- [x] **`TodoView`'s cross-view focus effect cancelled its own presentation work.** The effect that
+  reacted to `pendingTodoFocus` called `clearTodoFocus()`, and `pendingTodoFocus` was in that same
+  effect's dependency array — so React tore the effect down (running its cleanup, cancelling the
+  in-flight `requestAnimationFrame` and the 2s fade timeout) the instant the store value flipped to
+  `null`. The target row never took DOM focus and the highlight never faded. Fixed by splitting into
+  two effects: a decision effect that owns `pendingTodoFocus`/filter-clearing/`clearTodoFocus()`, and
+  a presentation effect keyed only on the resulting `focusedTaskId` that does the scroll/focus/fade.
+- [x] **The rail-collapse breakpoint only reacted to `matchMedia` crossings.** A window launched
+  already below 1320px kept the right rail expanded, squeezing `.app-main` to the exact ~570px
+  Phase 9 exists to prevent — nothing in the original logic evaluated the *starting* width, only
+  transitions across it. Fixed with `initialRailCollapsed(width, persisted)` in
+  `src/lib/railBreakpoint.ts`, applied once the persisted `setting` row hydrates: a narrow launch
+  width always starts collapsed regardless of what was persisted; a wide launch width honours the
+  persisted value. Covered by unit tests, uncommitted at time of writing alongside the rest of
+  Phase 9.
+- [x] **`check-css-classes.mjs` mis-parsed `WeekDayColumn`'s className and failed the gate.** The
+  checker's template-literal extraction (`/\$\{[^}]*'([^']*)'[^}]*\}/g`) has a `[^']*` group that
+  is not anchored to a single `${...}` interpolation — on a className built from multiple adjacent
+  interpolations it crosses between them and extracts garbage tokens (`?`, `}${isPast`) as if they
+  were class names. Worked around, not patched in the checker: `WeekDayColumn` (and `TaskRow`, same
+  idiom) build `className` via `[...].filter(Boolean).join(' ')` instead of a template literal,
+  which the checker's regex set doesn't match at all and so doesn't mis-parse.
+- [x] **A writer sub-agent silently excluded `break` blocks from `completionEstimate`.** The
+  `weekPlan.ts` spec writes `kind !== 'break'` explicitly for `blocksScheduled`, `averageBlockMin`
+  and `dayHours`, and deliberately omits it for `completionEstimate` — breaks count as elapsed time
+  like any other block. The sub-agent's first pass added the same guard to `completionEstimate` by
+  pattern-matching the three neighbouring metrics. Reverted to the literal formula (breaks count on
+  both sides of the ratio) and pinned with a test (`weekPlan.test.ts`, "counts break blocks in
+  completionEstimate on both sides of the ratio") so the omission can't silently drift back in.
+
+#### Known limitations, deliberately not fixed
+
+- [ ] **`check-css-classes.mjs` extracts nothing from the array `.filter(Boolean).join(' ')`
+  idiom.** The checker only recognizes `className="..."`, `className='...'`, and
+  `className={\`...\`}`; `className={[...].filter(Boolean).join(' ')}` matches none of its
+  extraction regexes, so it silently contributes zero class names to the check — not a partial
+  extraction, a total miss. `TaskRow` and `WeekDayColumn` were moved to exactly this idiom (see the
+  defect above) specifically to dodge the template-literal parsing bug, which means every class
+  name they reference — including their conditional state classes — is now unverified against the
+  stylesheet. This is a real blind spot in the project's most-valued gate (`check:css` "fails if a
+  class used in `src/components/` has no rule in `src/styles/`" — CLAUDE.md), reopened rather than
+  closed by the Phase 8 workaround. Fixing the checker to also parse the array-join idiom is
+  unstarted work, not scoped to this phase.
+- [x] **`WeekPlanView`'s `anchorMonday` now rolls over at midnight.** Previously seeded once via
+  `useState(() => startOfWeek(fromDayKey(useDayStore.getState().currentDay)))` on mount and never
+  re-derived, so an app left open across a week-boundary midnight (Sunday night into Monday) kept
+  showing the old week on This Week until the user navigated away and back, or manually paged the
+  date picker. Fixed with an effect that re-derives the current week's Monday from `currentDay` and
+  advances `anchorMonday` whenever they diverge — but only when the user hasn't manually navigated
+  away: a `manuallyAnchored` ref is set the moment the user pages the date picker via the prev/next
+  arrows, and once set, the auto-advance effect leaves `anchorMonday` alone, so a week rollover
+  crossing midnight can no longer yank the view back to "this week" out from under someone looking
+  at a different one.
+
+#### Manual end-to-end checks not performed
+
+The following items from `updated_design_plan.md`'s Verification section require a human running
+`node_modules/.bin/tauri dev` on a desktop session and were **not** performed as part of this
+documentation pass — they are outstanding, not passing by inference from the automated gates:
+
+- Opening a pre-`0006` database and confirming legacy plain-text notes still render and re-save
+  cleanly.
+- Typing formatted notes, switching views, returning, restarting the app, and confirming both the
+  note content and "Last edited" survive.
+- Dragging a 09:00 Tuesday block to Thursday and confirming it lands at Thursday 09:00 (unit/repo
+  tests cover the transaction and ordering logic; not the live drag interaction).
+- Adding a block to Thursday from This Week and confirming it appears in Today when Thursday
+  arrives.
+- Resizing across 1320px and confirming the rail collapses, the toggle works, and an explicit
+  toggle survives until the next breakpoint crossing.
+- Leaving the app open across local midnight and confirming Today, rituals, sidebar, timer, and
+  This Week's `anchorMonday` all roll over.
 | Google-Fonts-dependent typography fails offline | Bundled `@fontsource` packages. |

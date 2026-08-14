@@ -119,6 +119,18 @@ describe('tasks repository', () => {
     expect(active.some((t) => t.id === id)).toBe(true)
   })
 
+  it('round-trips priority through create and update', async () => {
+    const id = await tasks.createTask(driver, {
+      title: 'Priority test',
+      createdAt: new Date().toISOString(),
+      priority: 'high',
+    })
+    expect((await tasks.getTask(driver, id))?.priority).toBe('high')
+
+    await tasks.updateTask(driver, id, { priority: 'low' })
+    expect((await tasks.getTask(driver, id))?.priority).toBe('low')
+  })
+
   it('deletes a task', async () => {
     const id = await tasks.createTask(driver, {
       title: 'Delete me',

@@ -1,5 +1,5 @@
 /**
- * Pure functions for This Week view logic. All functions are deterministic and
+ * Pure functions for the TODO (backlog) view logic. All functions are deterministic and
  * testable without DOM or React, using the node environment.
  *
  * Eisenhower matrix groups tasks by importance and urgency.
@@ -7,8 +7,27 @@
  * All functions read-only; no mutations.
  */
 
-import type { Task, Subtask } from '../db/types'
+import type { Task, Subtask, TaskPriority } from '../db/types'
 import { startOfWeek, formatDuration } from './time'
+
+/**
+ * Priority metadata for display and sorting.
+ */
+export interface PriorityMeta {
+  priority: TaskPriority
+  label: string
+  dot: string
+}
+
+/**
+ * Task priorities in order: high, medium, low.
+ * Dots use CSS custom properties for consistent theming.
+ */
+export const PRIORITIES: PriorityMeta[] = [
+  { priority: 'high', label: 'High', dot: 'var(--danger)' },
+  { priority: 'medium', label: 'Medium', dot: 'var(--warn)' },
+  { priority: 'low', label: 'Low', dot: 'var(--text-faint)' },
+]
 
 /**
  * Composes a `dueAt` ISO instant from a `YYYY-MM-DD` date (from
@@ -64,7 +83,7 @@ export type Quadrant = 'do' | 'plan' | 'delegate' | 'drop'
  * delegate: !important && urgent
  * drop: !important && !urgent
  */
-export function quadrantOf(task: Task): Quadrant {
+export function quadrantOf(task: Pick<Task, 'important' | 'urgent'>): Quadrant {
   if (task.important && task.urgent) return 'do'
   if (task.important && !task.urgent) return 'plan'
   if (!task.important && task.urgent) return 'delegate'
@@ -78,11 +97,25 @@ export interface QuadrantMeta {
 }
 
 export const QUADRANTS: QuadrantMeta[] = [
-  { quadrant: 'do', label: 'Urgent & important — do now', dot: 'var(--danger)' },
-  { quadrant: 'plan', label: 'Important, not urgent — block time', dot: 'var(--accent)' },
-  { quadrant: 'delegate', label: 'Urgent, not important — batch or delegate', dot: 'var(--warn)' },
-  { quadrant: 'drop', label: 'Neither — drop for now', dot: 'var(--border-strong)' },
+  { quadrant: 'do', label: 'Urgent & important', dot: 'var(--danger)' },
+  { quadrant: 'plan', label: 'Important, not urgent', dot: 'var(--accent)' },
+  { quadrant: 'delegate', label: 'Urgent, not important (batch or delegate)', dot: 'var(--warn)' },
+  { quadrant: 'drop', label: 'Neither (someday / drop if needed)', dot: 'var(--border-strong)' },
 ]
+
+/**
+ * Maps a task's Eisenhower quadrant to its priority level.
+ * do → high
+ * plan, delegate → medium
+ * drop → low
+ *
+ * This mirrors the migration 0006 backfill logic.
+ */
+export function priorityFromQuadrant(quadrant: Quadrant): TaskPriority {
+  if (quadrant === 'do') return 'high'
+  if (quadrant === 'plan' || quadrant === 'delegate') return 'medium'
+  return 'low'
+}
 
 export type DeadlineBucket = 'soon' | 'week' | 'later' | 'none'
 
@@ -130,6 +163,152 @@ export const DEADLINE_BUCKETS: DeadlineMeta[] = [
   { bucket: 'later', label: 'Beyond this week', dot: 'var(--text-faint)' },
   { bucket: 'none', label: 'No deadline', dot: 'var(--border-strong)' },
 ]
+
+/**
+ * Filter options for the TODO view.
+ * showCompleted: include or exclude done tasks
+ * deadline: filter by deadline bucket ('any' = no filter, 'has' = must have parseable due date, 'none' = no due date or unparseable)
+ * overdueOnly: filter to only overdue tasks (requires a parseable dueAt before now)
+ */
+export interface TodoFilters {
+  showCompleted: boolean
+  deadline: 'any' | 'has' | 'none'
+  overdueOnly: boolean
+}
+
+/**
+ * Default filter state: show all tasks, all deadlines, not just overdue.
+ */
+export const DEFAULT_TODO_FILTERS: TodoFilters = {
+  showCompleted: true,
+  deadline: 'any',
+  overdueOnly: false,
+}
+
+/**
+ * Apply filter rules to a task list.
+ * - showCompleted: false drops tasks where done is true
+ * - deadline: 'has' keeps only tasks with a non-null, parseable dueAt;
+ *   'none' keeps tasks with null or unparseable dueAt
+ * - overdueOnly: true keeps only tasks whose parseable dueAt instant is before now
+ *
+ * Returns a new filtered array without mutating the input. Preserves input order.
+ */
+export function applyFilters(tasks: Task[], filters: TodoFilters, now: Date): Task[] {
+  return tasks.filter((task) => {
+    // showCompleted filter
+    if (!filters.showCompleted && task.done) return false
+
+    // deadline filter
+    if (filters.deadline !== 'any') {
+      const due = task.dueAt ? new Date(task.dueAt) : null
+      const hasValidDue = due && !Number.isNaN(due.getTime())
+
+      if (filters.deadline === 'has' && !hasValidDue) return false
+      if (filters.deadline === 'none' && hasValidDue) return false
+    }
+
+    // overdueOnly filter
+    if (filters.overdueOnly) {
+      const due = task.dueAt ? new Date(task.dueAt) : null
+      if (!due || Number.isNaN(due.getTime())) return false
+      if (due.getTime() >= now.getTime()) return false
+    }
+
+    return true
+  })
+}
+
+/**
+ * Check whether any filter differs from the default, i.e., if filters
+ * could hide a task.
+ */
+export function filtersActive(filters: TodoFilters): boolean {
+  return (
+    filters.showCompleted !== DEFAULT_TODO_FILTERS.showCompleted ||
+    filters.deadline !== DEFAULT_TODO_FILTERS.deadline ||
+    filters.overdueOnly !== DEFAULT_TODO_FILTERS.overdueOnly
+  )
+}
+
+/**
+ * Sort mode for tasks within a group.
+ */
+export type GroupSort = 'manual' | 'due' | 'priority' | 'title'
+
+/**
+ * Sort tasks within a group by the specified mode.
+ *
+ * - manual: use sortTasks (canonical ordering)
+ * - due: tasks with parseable dueAt ascending by instant, then tasks without, ties keep input order
+ * - priority: high, medium, low (per PRIORITIES order), ties keep input order
+ * - title: case-insensitive ascending by title using localeCompare, ties keep input order
+ *
+ * Only 'manual' may reorder done-vs-incomplete; others sort purely on their key.
+ * Never mutates the input; returns a new sorted array.
+ */
+export function sortGroup(tasks: Task[], mode: GroupSort): Task[] {
+  const copy = [...tasks]
+  if (mode === 'manual') {
+    return sortTasks(copy)
+  }
+
+  const priorityOrder = new Map(PRIORITIES.map((p, i) => [p.priority, i]))
+
+  copy.sort((a, b) => {
+    if (mode === 'due') {
+      const aDue = a.dueAt ? new Date(a.dueAt) : null
+      const bDue = b.dueAt ? new Date(b.dueAt) : null
+      const aValid = aDue && !Number.isNaN(aDue.getTime())
+      const bValid = bDue && !Number.isNaN(bDue.getTime())
+
+      if (aValid && bValid) return aDue!.getTime() - bDue!.getTime()
+      if (aValid) return -1
+      if (bValid) return 1
+      return 0
+    }
+
+    if (mode === 'priority') {
+      const aOrder = priorityOrder.get(a.priority) ?? 3
+      const bOrder = priorityOrder.get(b.priority) ?? 3
+      return aOrder - bOrder
+    }
+
+    if (mode === 'title') {
+      return a.title.localeCompare(b.title, undefined, { sensitivity: 'base' })
+    }
+
+    return 0
+  })
+
+  return copy
+}
+
+/**
+ * Reason why dragging is disabled, or null if dragging is allowed.
+ * User-facing message for display.
+ */
+export type DragDisabledReason = string | null
+
+/**
+ * Determine if dragging is disabled and why.
+ * Precedence:
+ * 1. sort !== 'manual' → "Set sort to Manual to reorder by hand."
+ * 2. filtersActive → "Clear filters to reorder by hand."
+ * 3. null (dragging allowed)
+ */
+export function dragDisabledReason(args: {
+  sort: GroupSort
+  filters: TodoFilters
+}): DragDisabledReason {
+  if (args.sort !== 'manual') {
+    return 'Set sort to Manual to reorder by hand.'
+  }
+  if (filtersActive(args.filters)) {
+    return 'Clear filters to reorder by hand.'
+  }
+  return null
+}
 
 /**
  * Groups tasks by Eisenhower quadrant.
@@ -239,6 +418,35 @@ export function formatDueLabel(dueAt: string, now: Date): string {
 }
 
 /**
+ * Presentation form of `formatDueLabel` for the TODO row's due chip, e.g.
+ * "Due today, 5:00 PM" / "Due Sat, 16 Aug" / "Due 15 Aug" / "Overdue".
+ * Reuses `formatDueLabel`'s bucketing (today/tomorrow/within-7-days/beyond)
+ * as the single source of truth for *which* bucket a date falls in, then
+ * only reformats for the chip: adds the "Due "/"Overdue" prefix, and — since
+ * `formatDueLabel`'s within-7-days bucket returns a bare weekday ("Sat") —
+ * appends the ", D Mon" the chip needs but the plain label omits. Returns ""
+ * for an unparseable `dueAt` (caller renders a "No deadline" chip instead).
+ */
+export function formatDueChipLabel(dueAt: string, now: Date): string {
+  const label = formatDueLabel(dueAt, now)
+  if (!label) return ''
+  if (label === 'overdue') return 'Overdue'
+  if (label.startsWith('today') || label.startsWith('tomorrow')) return `Due ${label}`
+
+  const weekdays = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+  if (weekdays.includes(label)) {
+    const due = new Date(dueAt)
+    const monthNames = [
+      'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+    ]
+    return `Due ${label}, ${due.getDate()} ${monthNames[due.getMonth()]}`
+  }
+
+  return `Due ${label}`
+}
+
+/**
  * Formats task metadata as a single line joined by " · ".
  * Includes estimate as "≈{formatDuration}..." when set, and
  * "due {formatDueLabel}" when dueAt is set. Returns null when
@@ -339,8 +547,9 @@ export function upcomingTasks(
   const incomplete = tasks.filter((t) => !t.done)
   const quadrantMeta = new Map(QUADRANTS.map((m) => [m.quadrant, m.dot]))
 
-  // Sort by quadrant priority, then within each quadrant
-  const sorted = incomplete.sort((a, b) => {
+  // Sort by quadrant priority, then within each quadrant by sort order
+  const copy = [...incomplete]
+  copy.sort((a, b) => {
     const quadrantOrder = { do: 0, plan: 1, delegate: 2, drop: 3 }
     const quadA = quadrantOf(a)
     const quadB = quadrantOf(b)
@@ -349,12 +558,12 @@ export function upcomingTasks(
 
     if (orderA !== orderB) return orderA - orderB
 
-    // Within same quadrant, use sortTasks
-    const sorted = sortTasks([a, b])
-    return sorted[0].id === a.id ? -1 : 1
+    // Within same quadrant, sort by manual sort order, then by id
+    if (a.sort !== b.sort) return a.sort - b.sort
+    return a.id - b.id
   })
 
-  return sorted.slice(0, limit).map((task) => ({
+  return copy.slice(0, limit).map((task) => ({
     task,
     rankColor: quadrantMeta.get(quadrantOf(task))!,
   }))

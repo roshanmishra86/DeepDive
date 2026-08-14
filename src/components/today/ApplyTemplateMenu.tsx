@@ -1,5 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
-import { useTodayStore } from '../../stores/today'
+import { useBlocksStore } from '../../stores/blocks'
+import { useDayStore } from '../../stores/day'
+import { useTodayBlocks } from '../../stores/useTodayBlocks'
 import { openDatabase } from '../../db/index'
 import { listTemplates } from '../../db/repos/templates'
 import type { Template } from '../../db/types'
@@ -12,8 +14,9 @@ interface ApplyTemplateMenuProps {
 }
 
 export function ApplyTemplateMenu({ onClose }: ApplyTemplateMenuProps) {
-  const blocks = useTodayStore((s) => s.blocks)
-  const applyTemplate = useTodayStore((s) => s.applyTemplate)
+  const blocks = useTodayBlocks()
+  const currentDay = useDayStore((s) => s.currentDay)
+  const applyTemplate = useBlocksStore((s) => s.applyTemplate)
 
   const [templates, setTemplates] = useState<Template[]>([])
   const [loading, setLoading] = useState(true)
@@ -40,11 +43,11 @@ export function ApplyTemplateMenu({ onClose }: ApplyTemplateMenuProps) {
 
   const handleApply = async () => {
     if (!selectedId) return
-    const ok = await applyTemplate(selectedId)
+    const ok = await applyTemplate(currentDay, selectedId)
     if (ok) {
       onClose()
     } else {
-      setError(useTodayStore.getState().error ?? 'Failed to apply template')
+      setError(useBlocksStore.getState().error ?? 'Failed to apply template')
     }
   }
 

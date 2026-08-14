@@ -1,16 +1,20 @@
-import { useEffect, useState } from 'react'
+import { useMemo, useState } from 'react'
+import type { Subtask } from '../../db/types'
 import { useAppStore } from '../../stores/app'
 import { useTasksStore } from '../../stores/tasks'
-import { useTodayStore } from '../../stores/today'
+import { useDayStore } from '../../stores/day'
+import { useTodayBlocks } from '../../stores/useTodayBlocks'
 import {
   useTimerStore,
   pomodoroCounterLabel,
 } from '../../stores/timer'
-import { formatClock } from '../../lib/time'
+import { formatClock, fromDayKey } from '../../lib/time'
 import { activeWorkBlock, displayPomodoroTarget, isFreshCycle } from '../../lib/timer'
-import { upcomingTasks, taskMeta } from '../../lib/week'
+import { upcomingTasks, taskMeta } from '../../lib/todo'
 import { ArrowCounterClockwise } from '@phosphor-icons/react/dist/csr/ArrowCounterClockwise'
 import { X } from '@phosphor-icons/react/dist/csr/X'
+
+const EMPTY: Subtask[] = []
 
 const RING_R = 86
 const RING_C = 540.35 // 2π · 86
@@ -18,7 +22,7 @@ const RING_C = 540.35 // 2π · 86
 function PomodoroWidget() {
   const timerStyle = useAppStore((s) => s.timerStyle)
   const enterSession = useAppStore((s) => s.enterSession)
-  const blocks = useTodayStore((s) => s.blocks)
+  const blocks = useTodayBlocks()
   const {
     phase,
     totalSec,
@@ -32,19 +36,8 @@ function PomodoroWidget() {
     reset,
   } = useTimerStore()
 
-  const [nowMin, setNowMin] = useState(() => {
-    const d = new Date()
-    return d.getHours() * 60 + d.getMinutes()
-  })
-
-  // Update nowMin every 30s (same pattern as TodayView).
-  useEffect(() => {
-    const id = window.setInterval(() => {
-      const d = new Date()
-      setNowMin(d.getHours() * 60 + d.getMinutes())
-    }, 30000)
-    return () => window.clearInterval(id)
-  }, [])
+  // Single app-wide clock, owned by the day store (App.tsx starts it).
+  const nowMin = useDayStore((s) => s.nowMin)
 
   const activeBlock = activeWorkBlock(blocks, nowMin)
   const fresh = isFreshCycle({ phase, running, remainingSec, totalSec, pomodorosDone })
@@ -201,21 +194,70 @@ function DistractionLog() {
   )
 }
 
-export function RightRail() {
+/**
+ * Narrow toggle strip rendered by the shell in place of the full rail once
+ * `railCollapsed` is true. Carries the timer's remaining time — sourced the
+ * same way `PomodoroWidget` does, via `useTimerStore` + `formatClock` — so
+ * the primary signal survives the collapse.
+ */
+export function RailToggleStrip({ onExpand }: { onExpand: () => void }) {
+  const phase = useTimerStore((s) => s.phase)
+  const remainingSec = useTimerStore((s) => s.remainingSec)
+  const clock = formatClock(remainingSec)
+  const phaseLabel = phase === 'focus' ? 'Focus' : 'Rest'
+
+  return (
+    <button
+      type="button"
+      className="rail-toggle-strip"
+      onClick={onExpand}
+      aria-label={`Expand right rail — ${phaseLabel} ${clock} remaining`}
+      data-testid="rail-toggle-strip"
+    >
+      <span className="rail-toggle-icon" aria-hidden="true">‹</span>
+      <span className="rail-toggle-clock" data-testid="rail-toggle-clock">{clock}</span>
+    </button>
+  )
+}
+
+export function RightRail({ onCollapse }: { onCollapse?: () => void }) {
   const setView = useAppStore((s) => s.setView)
   const tasks = useTasksStore((s) => s.tasks)
+  const subtasksByTask = useTasksStore((s) => s.subtasksByTask)
 
-  const now = new Date()
+  // One clock, owned by the day store — rebuilt the same way TodoView and
+  // WeekPlanView do, never read from `new Date()` directly. Otherwise "due
+  // today"/"tomorrow"/"overdue" labels go stale until an unrelated rerender.
+  const currentDay = useDayStore((s) => s.currentDay)
+  const nowMin = useDayStore((s) => s.nowMin)
+  const now = useMemo(() => {
+    const date = fromDayKey(currentDay)
+    date.setMinutes(nowMin)
+    return date
+  }, [currentDay, nowMin])
   const upcoming = upcomingTasks(tasks, now, 5)
 
   return (
     <aside className="right-rail">
+      {onCollapse && (
+        <div className="rail-head">
+          <button
+            type="button"
+            className="rail-collapse-btn"
+            onClick={onCollapse}
+            aria-label="Collapse right rail"
+            data-testid="rail-collapse"
+          >
+            ›
+          </button>
+        </div>
+      )}
       <PomodoroWidget />
 
       <div className="rail-scroll">
         <div className="rail-upcoming-head">
           <span className="rail-label">Upcoming this week</span>
-          <button type="button" className="rail-all" onClick={() => setView('week')}>
+          <button type="button" className="rail-all" onClick={() => setView('todo')}>
             All
           </button>
         </div>
@@ -226,7 +268,7 @@ export function RightRail() {
         ) : (
           <div className="rail-upcoming">
             {upcoming.map((item, i) => {
-              const meta = taskMeta(item.task, now)
+              const meta = taskMeta(item.task, now, subtasksByTask[item.task.id] ?? EMPTY)
               return (
                 <div key={item.task.id} className="rail-upcoming-item">
                   <span className="rail-upcoming-n" style={{ color: item.rankColor }}>

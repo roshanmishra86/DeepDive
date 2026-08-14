@@ -22,14 +22,14 @@ export type { TemplateWithStats, TemplateDetail }
  * Error contract (P2-A, PR review): every mutator here catches its own
  * persistence errors, sets `error`, reverts the optimistic update, and
  * RETURNS rather than throwing — this matches every other store in the app
- * (`stores/today.ts`, `stores/tasks.ts`), none of which ever rejects from an
+ * (`stores/blocks.ts`, `stores/tasks.ts`), none of which ever rejects from an
  * action. That existing convention, not "make it throw," is what this store
  * stays consistent with. What changed here: actions that need to report
  * success/failure to a caller that gates a UI transition on it (closing a
  * modal, navigating away) do so via their RETURN VALUE, generalizing the
  * pattern `createTemplate`/`saveDayAsTemplate` already used (`number | null`)
  * to the void-returning mutators (`updateTemplate`, `deleteTemplate` here;
- * `applyTemplate` in `stores/today.ts`), which now return `boolean`. Callers
+ * `applyTemplate` in `stores/blocks.ts`), which now return `boolean`. Callers
  * that only need the immediate optimistic state (e.g. `setWeekday`,
  * `addBlock`'s callers that don't need to know if the DB write landed) can
  * still just await and ignore the return value.
