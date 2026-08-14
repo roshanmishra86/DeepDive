@@ -1,0 +1,6 @@
+# sqlx checksums every applied migration by hashing the exact bytes of the SQL
+# embedded via include_str! (src-tauri/src/lib.rs). If a checkout flips these
+# files to CRLF, the hashes no longer match what is recorded in
+# _sqlx_migrations, Migrator::run aborts with a version mismatch, and every
+# later migration silently never applies. Pin them to LF on every platform.
+*.sql text eol=lf

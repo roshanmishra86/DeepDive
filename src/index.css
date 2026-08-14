@@ -60,6 +60,20 @@ input:focus {
   overflow: hidden;
 }
 
+/* Startup banner for a failed database init (App.tsx). Deliberately part of
+   the shell's column flow rather than an overlay: the app keeps working
+   read-only underneath, and the user must not mistake an empty library or an
+   empty Today for real, saved state. */
+.app-init-error {
+  flex: none;
+  padding: 8px 16px;
+  background: var(--danger-surface);
+  border-bottom: 1px solid var(--danger);
+  color: var(--danger);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
 .app-middle {
   flex: 1;
   min-height: 0;

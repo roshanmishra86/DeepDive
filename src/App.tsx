@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { useAppStore } from './stores/app'
 import { useRitualsStore } from './stores/rituals'
 import { useTasksStore } from './stores/tasks'
@@ -9,6 +9,7 @@ import { useTimerStore } from './stores/timer'
 import { useLibraryStore } from './stores/library'
 import { usePlayerStore } from './stores/player'
 import { openDatabase } from './db/index'
+import { messageFor } from './lib/errors'
 import { applyAccent } from './lib/accents'
 import { activeWorkBlock } from './lib/timer'
 import { spaceTogglesTimer, escapeExitsSession } from './lib/shortcuts'
@@ -95,9 +96,20 @@ function App() {
   const sessionOpen = useAppStore((s) => s.sessionOpen)
   const planTarget = useAppStore((s) => s.planTarget)
   const railCollapsed = useAppStore((s) => s.railCollapsed)
+  const [initError, setInitError] = useState<string | null>(null)
 
   // On mount, open the database and hydrate stores. Render normally while
-  // it resolves; failures are logged but non-fatal.
+  // it resolves.
+  //
+  // A failure here is NOT cosmetic and must never be console-only. This is
+  // the app's single hydrate for the library, player, timer, rituals and day
+  // stores — the views that open the database themselves (Today, Todo,
+  // Templates, Archive) silently paper over it, so a swallowed failure looks
+  // exactly like "the sound library shipped empty". It is also the call that
+  // runs the SQL migrations, so it is where a failed/blocked migration
+  // announces itself; anything opening the database after it connects to an
+  // un-migrated schema and fails later in confusing ways. Surface the real
+  // message.
   useEffect(() => {
     let mounted = true
     ;(async () => {
@@ -134,6 +146,7 @@ function App() {
         )
       } catch (err) {
         console.error('Failed to initialize database:', err)
+        if (mounted) setInitError(messageFor(err, 'Failed to initialize the database.'))
       }
     })()
     return () => {
@@ -186,6 +199,12 @@ function App() {
   return (
     <div className="app-shell">
       <TitleBar />
+      {initError && (
+        <div className="app-init-error" role="alert">
+          <strong>Database unavailable.</strong> Your tasks, sounds and timer history are not
+          loaded and nothing you change will be saved. {initError}
+        </div>
+      )}
       <div className="app-middle">
         <Sidebar />
         <main className="app-main">

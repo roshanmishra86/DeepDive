@@ -13,6 +13,7 @@ import {
   sortTasks,
   DEFAULT_TODO_FILTERS,
 } from '../lib/todo'
+import { messageFor } from '../lib/errors'
 
 type TaskEdit = Partial<Omit<Task, 'id' | 'createdAt' | 'archived'>>
 type TaskDestination = { group: Quadrant | DeadlineBucket; beforeId: number | null }
@@ -69,10 +70,6 @@ let nextLocalId = -1
 let nextLocalSubtaskId = -1
 let persistenceDriver: SqlDriver | null = null
 const subtaskRequests = new Map<number, Promise<void>>()
-
-function messageFor(err: unknown, fallback: string): string {
-  return err instanceof Error ? err.message : fallback
-}
 
 function replaceTask(tasks: Task[], updated: Task): Task[] {
   return sortTasks(tasks.map((task) => (task.id === updated.id ? updated : task)))
