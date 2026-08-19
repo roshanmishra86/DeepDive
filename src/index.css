@@ -2,14 +2,14 @@
 
 body {
   -webkit-font-smoothing: antialiased;
-  overflow: hidden;
+  overflow: clip;
 }
 
 ::-webkit-scrollbar {
   width: 10px;
 }
 ::-webkit-scrollbar-thumb {
-  background: #d5cfc4;
+  background: var(--border-strong);
   border-radius: 8px;
   border: 3px solid transparent;
   background-clip: content-box;
@@ -39,7 +39,7 @@ button {
 }
 
 button:disabled {
-  cursor: default;
+  cursor: not-allowed;
 }
 
 input {
@@ -51,13 +51,18 @@ input:focus {
   outline: none;
 }
 
+:where(button, input, select, textarea):focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
 .app-shell {
   height: 100%;
   display: flex;
   flex-direction: column;
   background: var(--bg-window);
   position: relative;
-  overflow: hidden;
+  overflow: clip;
 }
 
 /* Startup banner for a failed database init (App.tsx). Deliberately part of
@@ -90,5 +95,5 @@ input:focus {
   /* Never lets a wide descendant (e.g. the This Week grid) push the app
      window into horizontal scroll — anything that needs to scroll
      horizontally must own its own overflow-x. */
-  overflow-x: hidden;
+  overflow-x: clip;
 }

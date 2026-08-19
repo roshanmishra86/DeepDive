@@ -48,8 +48,8 @@ function PomodoroWidget() {
   // While fresh, preview the currently-active block; once a cycle starts,
   // the attachment snapshot takes over (it survives the block ending).
   const blockLabel = fresh
-    ? (activeBlock?.title ?? 'No block attached')
-    : (blockTitle ?? 'No block attached')
+    ? (activeBlock?.title ?? 'Unscheduled focus')
+    : (blockTitle ?? 'Unscheduled focus')
   const counterTarget = displayPomodoroTarget(fresh, activeBlock, pomodorosPerBlock)
   const startLabel = running ? 'Pause' : remainingSec < totalSec ? 'Continue' : 'Start'
 
@@ -65,7 +65,7 @@ function PomodoroWidget() {
       {timerStyle === 'ring' && (
         <div className="pomodoro-ring" data-testid="timer-ring">
           <svg width="198" height="198" viewBox="0 0 198 198" style={{ transform: 'rotate(-90deg)' }}>
-            <circle cx="99" cy="99" r={RING_R} fill="none" stroke="#e2dbcd" strokeWidth="7" />
+            <circle cx="99" cy="99" r={RING_R} fill="none" stroke="var(--timer-track)" strokeWidth="7" />
             <circle
               cx="99"
               cy="99"

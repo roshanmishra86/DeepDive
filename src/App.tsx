@@ -96,6 +96,7 @@ function App() {
   const sessionOpen = useAppStore((s) => s.sessionOpen)
   const planTarget = useAppStore((s) => s.planTarget)
   const railCollapsed = useAppStore((s) => s.railCollapsed)
+  const timerRunning = useTimerStore((s) => s.running)
   const [initError, setInitError] = useState<string | null>(null)
 
   // On mount, open the database and hydrate stores. Render normally while
@@ -158,6 +159,15 @@ function App() {
   useEffect(() => {
     applyAccent(accent, document.documentElement)
   }, [accent])
+
+  // The idle rail stays compact so the day plan is the primary surface. As
+  // soon as a focus cycle begins, reveal the timer automatically; an active
+  // session should never be hidden behind a secondary control.
+  useEffect(() => {
+    if (timerRunning && useAppStore.getState().railCollapsed) {
+      useAppStore.getState().setRailCollapsed(false)
+    }
+  }, [timerRunning])
 
   // The single app-wide 30s clock: recomputes nowMin and rolls Today,
   // rituals, the sidebar and the timer over at midnight.

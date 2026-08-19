@@ -168,8 +168,9 @@ export function LibraryView() {
       <div className="lib-view">
         {header}
         <div className="lib-body">
-          <div className="view-empty">
-            <div className="view-empty-title">Loading library…</div>
+          <div className="view-state" role="status">
+            <div className="view-state-eyebrow">Sound library</div>
+            <div className="view-state-title">Loading library…</div>
           </div>
         </div>
       </div>
@@ -181,10 +182,10 @@ export function LibraryView() {
       <div className="lib-view">
         {header}
         <div className="lib-body">
-          <div className="view-empty">
-            <div className="view-empty-title" style={{ color: 'var(--danger)' }}>
-              Error: {error}
-            </div>
+          <div className="view-state view-state-error" role="alert">
+            <div className="view-state-eyebrow">Sound library</div>
+            <div className="view-state-title">Could not load the library</div>
+            <div className="view-state-description">{error}</div>
           </div>
         </div>
       </div>

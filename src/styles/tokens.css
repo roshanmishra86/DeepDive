@@ -2,15 +2,22 @@
   --accent: #2f5d50;
   --accent-hover: #264a40;
   --accent-surface: #eef2f0;
+  --accent-ink: #fbfaf7;
   --bg-app: #e2ded6;
   --bg-window: #f7f5f1;
   --bg-chrome: #efece5;
   --bg-panel: #f2efe8;
   --bg-card: #fbfaf7;
   --on-accent: #fbfaf7;
+  --surface-hover: #f1eee6;
+  --surface-strong: #e2dbcd;
+  --surface-quiet: #e6e0d3;
+  --surface-accent-muted: #b9c7bf;
   --border: #e0d9ca;
   --border-strong: #d8d1c2;
   --border-subtle: #ece6da;
+  --border-chrome: #e4ded1;
+  --border-window: #ddd6c9;
   --text: #221f19;
   /* Phase 10 (WCAG AA): the mockup's #8b8375 / #a09889 fail the 4.5:1 body-text
      threshold on every panel background (3.2–3.6:1 and 2.4–2.7:1). Both tokens
@@ -19,12 +26,29 @@
      darker so the two levels stay distinct. Deliberate mockup deviation. */
   --text-muted: #655f55;
   --text-faint: #716a5f;
+  --text-secondary: #4a463c;
+  --text-chrome: #6f675a;
   --warn: #b8862f;
   --danger: #a84a30;
   /* Derived from --danger so the two cannot drift (was a literal rgba). */
   --danger-surface: color-mix(in srgb, var(--danger) 10%, transparent);
   --close: #c8493b;
+  --focus-ring: var(--accent);
+  --overlay: rgb(34 31 25 / 50%);
+  --shadow-rail: -8px 0 24px rgb(34 31 25 / 18%);
+  --shadow-modal: 0 20px 60px rgb(34 31 25 / 30%);
+  --timer-track: var(--surface-strong);
+  --dur-fast: 150ms;
+  --dur-medium: 300ms;
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
   --font-display: "Newsreader Variable", "Newsreader", Georgia, "Times New Roman", serif;
+  --font-serif: var(--font-display);
   --font-ui: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
   --font-mono: "IBM Plex Mono", ui-monospace, "Cascadia Mono", Consolas, monospace;
 }

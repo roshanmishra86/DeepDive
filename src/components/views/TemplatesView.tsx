@@ -47,8 +47,9 @@ export function TemplatesView() {
           </div>
         </div>
         <div className="tpl-body">
-          <div className="view-empty">
-            <div className="view-empty-title">Loading templates…</div>
+          <div className="view-state" role="status">
+            <div className="view-state-eyebrow">Templates</div>
+            <div className="view-state-title">Loading templates…</div>
           </div>
         </div>
       </div>

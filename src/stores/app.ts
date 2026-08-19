@@ -48,7 +48,8 @@ interface AppState {
   sessionOpen: boolean
   /**
    * Whether the right rail is collapsed to a narrow toggle strip. Defaults
-   * to false; auto-toggled by the shell's single resize listener when the
+   * to true so an idle workspace leads with planning, not timer chrome;
+   * auto-toggled by the shell's single resize listener when the
    * window crosses the 1320px breakpoint (see `lib/railBreakpoint.ts`), but
    * an explicit user toggle (`setRailCollapsed`) wins until the next
    * crossing. Persisted like the other chrome settings.
@@ -87,7 +88,7 @@ export const useAppStore = create<AppState>()((set) => ({
   settingsOpen: false,
   planTarget: null,
   sessionOpen: false,
-  railCollapsed: false,
+  railCollapsed: true,
   pendingTodoFocus: null,
   setView: (view) => set({ view }),
   setAccent: (accent) => {
@@ -195,10 +196,10 @@ export const useAppStore = create<AppState>()((set) => ({
           ? Math.round(weeklyGoalValue)
           : DEFAULT_WEEKLY_GOAL_MIN
 
-      // Validate and apply railCollapsed — any unrecognised stored value
-      // (missing key, corrupt value) falls back to expanded (false).
+      // Validate and apply railCollapsed — a missing setting keeps the
+      // compact default, while explicit user choices remain authoritative.
       const railCollapsedValue = settings.railCollapsed
-      const validRailCollapsed = railCollapsedValue === 'true'
+      const validRailCollapsed = railCollapsedValue !== 'false'
 
       set({
         accent: validAccent,

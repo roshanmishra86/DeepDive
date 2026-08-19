@@ -37,6 +37,7 @@ export function TodayView() {
   const [saveTemplateOpen, setSaveTemplateOpen] = useState(false)
   const [shutdownEditing, setShutdownEditing] = useState(false)
   const [shutdownText, setShutdownText] = useState('')
+  const isEmptyAndClosed = blocks.length === 0 && composerState.mode === 'closed'
 
   // --- Notes panel selection lifecycle -------------------------------------
   // See BlockNotesPanel's flush prop and the rules below; mirrors the plan's
@@ -180,8 +181,9 @@ export function TodayView() {
   if (loading) {
     return (
       <div className="today-view">
-        <div className="view-empty">
-          <div>Loading blocks…</div>
+        <div className="view-state" role="status">
+          <div className="view-state-eyebrow">Today</div>
+          <div className="view-state-title">Loading your day…</div>
         </div>
       </div>
     )
@@ -190,14 +192,14 @@ export function TodayView() {
   if (error) {
     return (
       <div className="today-view">
-        <div className="view-empty">
-          <div style={{ color: 'var(--danger)' }}>Error: {error}</div>
+        <div className="view-state view-state-error" role="alert">
+          <div className="view-state-eyebrow">Today</div>
+          <div className="view-state-title">Could not load today’s blocks</div>
+          <div className="view-state-description">{error}</div>
         </div>
       </div>
     )
   }
-
-  const isEmptyAndClosed = blocks.length === 0 && composerState.mode === 'closed'
 
   const rows = layout(previewBlocks)
 
@@ -259,37 +261,39 @@ export function TodayView() {
             </div>
           )}
         </div>
-        <div className="today-actions">
-          <button
-            className="btn-secondary"
-            onClick={() => setSaveTemplateOpen(true)}
-            disabled={blocks.length === 0}
-            aria-label="Save today as template"
-          >
-            Save as template
-          </button>
-          <button
-            className="btn-secondary"
-            onClick={() => setTemplateMenuOpen(true)}
-            aria-label="Apply template to today"
-          >
-            <svg width="13" height="13" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.2">
-              <path d="M4.6 3.5A3.4 3.4 0 1 1 3.5 6" />
-              <path d="M3.5 2.2V6h3.4" />
-            </svg>
-            Apply template
-          </button>
-          <button
-            className="btn-primary"
-            onClick={openNewComposer}
-            aria-label="Create new block"
-          >
-            <svg width="13" height="13" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.3">
-              <path d="M7 2.5v9M2.5 7h9" />
-            </svg>
-            New block
-          </button>
-        </div>
+        {!isEmptyAndClosed && (
+          <div className="today-actions">
+            <button
+              className="btn-secondary"
+              onClick={() => setSaveTemplateOpen(true)}
+              disabled={blocks.length === 0}
+              aria-label="Save today as template"
+            >
+              Save as template
+            </button>
+            <button
+              className="btn-secondary"
+              onClick={() => setTemplateMenuOpen(true)}
+              aria-label="Apply template to today"
+            >
+              <svg width="13" height="13" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.2">
+                <path d="M4.6 3.5A3.4 3.4 0 1 1 3.5 6" />
+                <path d="M3.5 2.2V6h3.4" />
+              </svg>
+              Apply template
+            </button>
+            <button
+              className="btn-primary"
+              onClick={openNewComposer}
+              aria-label="Create new block"
+            >
+              <svg width="13" height="13" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.3">
+                <path d="M7 2.5v9M2.5 7h9" />
+              </svg>
+              New block
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Timeline + notes panel */}
@@ -297,21 +301,30 @@ export function TodayView() {
       <div className="today-timeline-col">
       {isEmptyAndClosed ? (
         <div className="today-timeline">
-          <div className="timeline-gutter" />
-          <div className="timeline-blocks">
-            <button
-              type="button"
-              className="timeline-ghost-row"
-              onClick={openNewComposer}
-            >
-              Add your first block — starts now at {minutesToClock(nowMin)}
-            </button>
-            <div style={{ marginTop: '12px' }}>
-              <button className="btn-secondary" onClick={() => setTemplateMenuOpen(true)}>
-                Apply template
-              </button>
+          <section className="today-empty-workbench" aria-labelledby="today-empty-title">
+            <div className="today-empty-index" aria-hidden="true">01</div>
+            <div className="today-empty-intro">
+              <div className="today-empty-eyebrow">Start here</div>
+              <h2 id="today-empty-title" className="today-empty-title">Build a workable day.</h2>
+              <p className="today-empty-copy">
+                Set one focused block first. You can add the rest around it once the day has a centre.
+              </p>
+              <div className="today-empty-actions">
+                <button type="button" className="btn-primary" onClick={openNewComposer}>
+                  Plan a block
+                </button>
+                <button type="button" className="btn-secondary" onClick={() => setTemplateMenuOpen(true)}>
+                  Use a template
+                </button>
+              </div>
+              <div className="today-empty-timing">The first available start is {minutesToClock(nowMin)}.</div>
             </div>
-          </div>
+            <ol className="today-empty-steps">
+              <li><span>1</span><div><strong>Choose the work</strong><small>Name the one thing that deserves uninterrupted time.</small></div></li>
+              <li><span>2</span><div><strong>Set the boundary</strong><small>Give it a start and finish so the plan can hold.</small></div></li>
+              <li><span>3</span><div><strong>Begin when ready</strong><small>The focus timer will surface when your session starts.</small></div></li>
+            </ol>
+          </section>
         </div>
       ) : (
         <div className="today-timeline">
@@ -384,16 +397,18 @@ export function TodayView() {
       )}
       </div>
 
-      <div className="today-notes-panel">
-        <BlockNotesPanel
-          block={selectedBlock}
-          now={notesNow}
-          flushRef={flushNotesRef}
-          onFocusChange={(focused) => {
-            notesFocusedRef.current = focused
-          }}
-        />
-      </div>
+      {rows.length > 0 && (
+        <div className="today-notes-panel">
+          <BlockNotesPanel
+            block={selectedBlock}
+            now={notesNow}
+            flushRef={flushNotesRef}
+            onFocusChange={(focused) => {
+              notesFocusedRef.current = focused
+            }}
+          />
+        </div>
+      )}
       </div>
 
       {/* Template menu */}

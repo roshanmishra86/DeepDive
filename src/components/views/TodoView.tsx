@@ -263,8 +263,9 @@ export function TodoView() {
     return (
       <div className="todo-view">
         <div className="todo-body">
-          <div className="view-empty">
-            <div className="view-empty-title">Loading tasks…</div>
+          <div className="view-state" role="status">
+            <div className="view-state-eyebrow">TODO</div>
+            <div className="view-state-title">Loading tasks…</div>
           </div>
         </div>
       </div>
@@ -275,10 +276,10 @@ export function TodoView() {
     return (
       <div className="todo-view">
         <div className="todo-body">
-          <div className="view-empty">
-            <div className="view-empty-title" style={{ color: 'var(--danger)' }}>
-              Error: {error}
-            </div>
+          <div className="view-state view-state-error" role="alert">
+            <div className="view-state-eyebrow">TODO</div>
+            <div className="view-state-title">Could not load tasks</div>
+            <div className="view-state-description">{error}</div>
           </div>
         </div>
       </div>

@@ -1,3 +1,8 @@
+/* Hallmark · app surface: Today idle workbench · genre: editorial
+ * macrostructure: Workbench · theme: preserved warm-paper · enrichment: none
+ * nav: N3 side rail · pre-emit critique: P5 H5 E4 S5 R5 V4
+ */
+
 /* ═══════════════════════════════════════════════════════════════════════════════
    Deep Work Chrome Styles
    All views, chrome regions, and interactive elements for Phase 2 (App Chrome)
@@ -10,7 +15,7 @@
   align-items: stretch;
   justify-content: space-between;
   background: var(--bg-chrome);
-  border-bottom: 1px solid #ddd6c9;
+  border-bottom: 1px solid var(--border-window);
   user-select: none;
 }
 
@@ -34,7 +39,7 @@
   font-size: 12px;
   letter-spacing: 0.06em;
   text-transform: uppercase;
-  color: #6f675a;
+  color: var(--text-chrome);
   font-weight: 500;
 }
 
@@ -58,7 +63,7 @@
   width: 46px;
   display: grid;
   place-items: center;
-  color: #6f675a;
+  color: var(--text-chrome);
   flex: none;
   border: none;
   padding: 0;
@@ -85,7 +90,7 @@
 .sidebar {
   width: 212px;
   flex: none;
-  border-right: 1px solid #e4ded1;
+  border-right: 1px solid var(--border-chrome);
   background: var(--bg-panel);
   display: flex;
   flex-direction: column;
@@ -103,7 +108,7 @@
 
 .sidebar-divider {
   height: 1px;
-  background: #e4ded1;
+  background: var(--border-chrome);
   margin: 4px 16px 16px;
 }
 
@@ -180,7 +185,7 @@
   align-items: center;
   gap: 9px;
   font-size: 12.5px;
-  color: #4a463c;
+  color: var(--text-secondary);
   background: none;
   border: none;
   cursor: pointer;
@@ -293,7 +298,7 @@
 }
 
 .deep-card {
-  border: 1px solid #e2dbcd;
+  border: 1px solid var(--surface-strong);
   border-radius: 6px;
   padding: 13px 14px;
   background: var(--bg-card);
@@ -345,7 +350,7 @@
 .deep-bar-track {
   flex: 1;
   height: 26px;
-  background: #e6e0d3;
+  background: var(--surface-quiet);
   border-radius: 2px;
   display: flex;
   align-items: flex-end;
@@ -355,7 +360,7 @@
 .deep-bar-fill {
   width: 100%;
   height: 60%;
-  background: #b9c7bf;
+  background: var(--surface-accent-muted);
   border-radius: 2px;
 }
 
@@ -1161,7 +1166,7 @@
   background: transparent;
   color: var(--text-muted);
   border: none;
-  transition: all 0.15s;
+  transition: color var(--dur-fast) var(--ease-out), background-color var(--dur-fast) var(--ease-out);
 }
 
 .settings-option:hover {
@@ -1464,6 +1469,41 @@
   margin: 0 auto;
 }
 
+.view-state {
+  align-self: center;
+  max-width: 48ch;
+  padding: 56px 40px;
+  text-align: center;
+}
+
+.view-state-eyebrow {
+  margin-bottom: var(--space-2);
+  color: var(--text-faint);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.view-state-title {
+  color: var(--text);
+  font-family: var(--font-display);
+  font-size: 24px;
+  line-height: 1.15;
+}
+
+.view-state-description {
+  margin-top: var(--space-2);
+  color: var(--text-muted);
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.view-state-error .view-state-title,
+.view-state-error .view-state-description {
+  color: var(--danger);
+}
+
 /* ═══════════════════════════════════════════════════════════════════════════════
    Phase 4 — Today View
 ═══════════════════════════════════════════════════════════════════════════════ */
@@ -1511,6 +1551,133 @@
 .today-actions {
   display: flex;
   gap: 8px;
+}
+
+/* The unplanned day is a workbench, not an empty dashboard. One primary
+   action establishes the day before secondary tools return to the header. */
+.today-empty-workbench {
+  width: min(100%, 920px);
+  display: grid;
+  grid-template-columns: 52px minmax(0, 1fr) minmax(210px, 0.72fr);
+  gap: var(--space-5);
+  align-items: start;
+  margin: var(--space-2) 0;
+  padding: var(--space-6) 0;
+  border-top: 1px solid var(--border-strong);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.today-empty-index,
+.today-empty-eyebrow,
+.today-empty-timing {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.today-empty-index {
+  color: var(--accent);
+  padding-top: 5px;
+}
+
+.today-empty-intro {
+  min-width: 0;
+}
+
+.today-empty-eyebrow {
+  color: var(--text-faint);
+  margin-bottom: var(--space-2);
+}
+
+.today-empty-title {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: clamp(30px, 4vw, 43px);
+  font-weight: 500;
+  line-height: 1;
+  letter-spacing: -0.025em;
+  overflow-wrap: anywhere;
+}
+
+.today-empty-copy {
+  max-width: 47ch;
+  margin: var(--space-3) 0 0;
+  color: var(--text-secondary);
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.today-empty-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-top: var(--space-5);
+}
+
+.today-empty-actions .btn-primary,
+.today-empty-actions .btn-secondary {
+  min-height: 38px;
+}
+
+.today-empty-timing {
+  margin-top: var(--space-4);
+  color: var(--text-faint);
+  letter-spacing: 0.04em;
+  text-transform: none;
+}
+
+.today-empty-steps {
+  display: grid;
+  gap: var(--space-3);
+  margin: 0;
+  padding: 2px 0 0;
+  list-style: none;
+}
+
+.today-empty-steps li {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  gap: var(--space-2);
+}
+
+.today-empty-steps span {
+  color: var(--accent);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  padding-top: 2px;
+}
+
+.today-empty-steps strong,
+.today-empty-steps small {
+  display: block;
+}
+
+.today-empty-steps strong {
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.today-empty-steps small {
+  margin-top: 2px;
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+@media (max-width: 1200px) {
+  .today-empty-workbench {
+    grid-template-columns: 42px minmax(0, 1fr);
+    gap: var(--space-4);
+  }
+
+  .today-empty-steps {
+    grid-column: 2;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    padding-top: var(--space-4);
+    border-top: 1px solid var(--border-subtle);
+  }
 }
 
 .today-timeline {
@@ -1782,7 +1949,7 @@
   place-items: center;
   color: var(--text-muted);
   cursor: pointer;
-  transition: all 0.15s;
+  transition: color var(--dur-fast) var(--ease-out), background-color var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out);
 }
 
 .btn-icon:hover:not(:disabled) {
@@ -2392,7 +2559,7 @@ div.timeline-block-meta + .timeline-conflict-badge,
   align-items: center;
   gap: 10px;
   cursor: pointer;
-  transition: all 0.15s;
+  transition: border-color var(--dur-fast) var(--ease-out), background-color var(--dur-fast) var(--ease-out);
 }
 
 .template-item:hover {
@@ -2429,11 +2596,11 @@ div.timeline-block-meta + .timeline-conflict-badge,
   border: none;
   border-radius: 5px;
   font-size: 12.5px;
-  color: var(--bg-card);
+  color: var(--accent-ink);
   background: var(--accent);
   cursor: pointer;
   font-weight: 500;
-  transition: all 0.15s;
+  transition: background-color var(--dur-fast) var(--ease-out);
   display: inline-flex;
   align-items: center;
   gap: 7px;
@@ -2462,7 +2629,7 @@ div.timeline-block-meta + .timeline-conflict-badge,
   background: var(--bg-card);
   cursor: pointer;
   font-weight: 500;
-  transition: all 0.15s;
+  transition: border-color var(--dur-fast) var(--ease-out), background-color var(--dur-fast) var(--ease-out);
   display: inline-flex;
   align-items: center;
   gap: 7px;
@@ -2666,7 +2833,7 @@ button:focus-visible {
   border: 1px solid var(--border-strong);
   color: var(--text-muted);
   text-align: left;
-  transition: all 0.15s;
+  transition: border-color var(--dur-fast) var(--ease-out), background-color var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
 }
 
 .todo-filter-toggle:hover {
@@ -2710,7 +2877,7 @@ button:focus-visible {
   background: transparent;
   border: none;
   color: var(--text-muted);
-  transition: all 0.15s;
+  transition: color var(--dur-fast) var(--ease-out), background-color var(--dur-fast) var(--ease-out);
 }
 
 .segmented-btn:hover {
@@ -2913,8 +3080,8 @@ button:focus-visible {
   flex: none;
   cursor: pointer;
   appearance: none;
-  background: white;
-  transition: all 0.15s;
+  background: var(--bg-card);
+  transition: background-color var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out);
 }
 
 .task-check:checked {
