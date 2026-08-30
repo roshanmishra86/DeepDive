@@ -5,6 +5,7 @@ import { useBlocksStore } from '../../stores/blocks'
 import { formatDuration } from '../../lib/time'
 import { formatRelativeLabel } from '../../lib/relativeTime'
 import { isTauri } from '../../lib/platform'
+import { flushAndDestroyWindow } from '../../lib/windowClose'
 import { NotesEditor } from '../common/NotesEditor'
 import type { DayBlock } from '../../db/types'
 import { ArrowSquareOut } from '@phosphor-icons/react/dist/csr/ArrowSquareOut'
@@ -45,7 +46,6 @@ export function BlockNotesPanel({ block, now, flushRef, onFocusChange }: BlockNo
   const initializedBlockId = useRef<number | null>(null)
   const debounce = useRef<ReturnType<typeof setTimeout> | null>(null)
   const writeChain = useRef(Promise.resolve(true))
-  const bypassClose = useRef(false)
   const draftRef = useRef(draft)
   draftRef.current = draft
   // Sticky block identity: updated only when `block` is non-null, so a
@@ -131,12 +131,9 @@ export function BlockNotesPanel({ block, now, flushRef, onFocusChange }: BlockNo
     let unlisten: (() => void) | undefined
     let cancelled = false
     void getCurrentWindow().onCloseRequested(async (event) => {
-      if (bypassClose.current || (revision.current <= savedRevision.current && saveState !== 'Saving…')) return
+      if (revision.current <= savedRevision.current && saveState !== 'Saving…') return
       event.preventDefault()
-      const ok = await flush()
-      if (!ok) return
-      bypassClose.current = true
-      await getCurrentWindow().close()
+      await flushAndDestroyWindow(flush)
     }).then((fn) => {
       if (cancelled) fn()
       else unlisten = fn

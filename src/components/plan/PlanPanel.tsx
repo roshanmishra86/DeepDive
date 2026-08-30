@@ -14,6 +14,7 @@ import { exportTaskMarkdown, importMarkdownNotes, markdownFilename } from '../..
 import { notePlainText } from '../../lib/richText'
 import { NotesEditor } from '../common/NotesEditor'
 import { isTauri } from '../../lib/platform'
+import { flushAndDestroyWindow } from '../../lib/windowClose'
 import type { Subtask } from '../../db/types'
 
 type SaveState = 'Saved' | 'Saving…' | 'Save failed'
@@ -42,7 +43,6 @@ export function PlanPanel() {
   const initializedTarget = useRef<string | null>(null)
   const debounce = useRef<ReturnType<typeof setTimeout> | null>(null)
   const writeChain = useRef(Promise.resolve(true))
-  const bypassClose = useRef(false)
   const draftRef = useRef(draft)
   draftRef.current = draft
 
@@ -109,12 +109,9 @@ export function PlanPanel() {
     let unlisten: (() => void) | undefined
     let cancelled = false
     void getCurrentWindow().onCloseRequested(async (event) => {
-      if (bypassClose.current || (revision.current <= savedRevision.current && saveState !== 'Saving…')) return
+      if (revision.current <= savedRevision.current && saveState !== 'Saving…') return
       event.preventDefault()
-      const ok = await flush()
-      if (!ok) return
-      bypassClose.current = true
-      await getCurrentWindow().close()
+      await flushAndDestroyWindow(flush)
     }).then((fn) => {
       if (cancelled) fn()
       else unlisten = fn
