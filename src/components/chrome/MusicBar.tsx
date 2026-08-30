@@ -20,6 +20,8 @@ export function MusicBar() {
   const trackId = usePlayerStore((s) => s.trackId)
   const trackName = usePlayerStore((s) => s.trackName)
   const trackMeta = usePlayerStore((s) => s.trackMeta)
+  const currentItem = usePlayerStore((s) => s.currentItem)
+  const sourceError = usePlayerStore((s) => s.sourceError)
   const playing = usePlayerStore((s) => s.playing)
   const volume = usePlayerStore((s) => s.volume)
   const positionSec = usePlayerStore((s) => s.positionSec)
@@ -35,8 +37,9 @@ export function MusicBar() {
   const queueLength = usePlayerStore((s) => s.queue.length)
   const setView = useAppStore((s) => s.setView)
 
-  const hasTrack = trackId !== null
-  const seekable = hasTrack && durationSec > 0
+  const hasTrack = trackId !== null || currentItem !== null
+  const isLive = currentItem?.live ?? false
+  const seekable = hasTrack && !isLive && durationSec > 0
   const pct = seekable ? Math.min(100, (positionSec / durationSec) * 100) : 0
 
   const handleSeekClick = (e: React.MouseEvent<HTMLDivElement>) => {
@@ -61,7 +64,7 @@ export function MusicBar() {
     <footer className="musicbar">
       <div className="musicbar-track">
         <div className="musicbar-art" aria-hidden>
-          <MusicNotes size={18} />
+          {currentItem?.artworkUrl ? <img src={currentItem.artworkUrl} alt="" onError={(e) => { e.currentTarget.hidden = true }} /> : <MusicNotes size={18} />}
         </div>
         <div className="musicbar-names">
           <div className="musicbar-name" data-testid="musicbar-name">
@@ -69,7 +72,9 @@ export function MusicBar() {
           </div>
           <div className="musicbar-meta">
             {hasTrack ? (
-              missing ? (
+              sourceError ? (
+                sourceError
+              ) : missing ? (
                 `File not found — ${trackMeta}`
               ) : (
                 trackMeta
@@ -137,11 +142,11 @@ export function MusicBar() {
       </div>
 
       <div className="musicbar-progress">
-        <span className="musicbar-time">{formatClockSec(positionSec)}</span>
+        <span className={isLive ? 'musicbar-live' : 'musicbar-time'}>{isLive ? 'LIVE' : formatClockSec(positionSec)}</span>
         <div
           className="musicbar-progress-track"
           role="slider"
-          aria-label="Seek"
+          aria-label={isLive ? 'Live stream — seeking unavailable' : 'Seek'}
           aria-valuemin={0}
           aria-valuemax={Math.round(durationSec)}
           aria-valuenow={Math.round(positionSec)}
@@ -152,7 +157,7 @@ export function MusicBar() {
         >
           <div className="musicbar-progress-fill" style={{ width: `${pct}%` }} />
         </div>
-        <span className="musicbar-time">{formatClockSec(durationSec)}</span>
+        <span className="musicbar-time">{isLive ? (currentItem?.codec ?? 'Radio') : formatClockSec(durationSec)}</span>
       </div>
 
       <div className="musicbar-volume">

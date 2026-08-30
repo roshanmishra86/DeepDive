@@ -1,6 +1,7 @@
 use tauri_plugin_sql::{Migration, MigrationKind};
 
 mod tx;
+mod catalog;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -54,6 +55,12 @@ pub fn run() {
                                 sql: include_str!("../migrations/0006_notes_priority_and_week.sql"),
                                 kind: MigrationKind::Up,
                             },
+                            Migration {
+                                version: 7,
+                                description: "Remote audio sources",
+                                sql: include_str!("../migrations/0007_remote_audio.sql"),
+                                kind: MigrationKind::Up,
+                            },
                         ],
                     )
                     .build(),
@@ -63,7 +70,14 @@ pub fn run() {
             app.handle().plugin(tauri_plugin_opener::init())?;
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![tx::execute_transaction])
+        .invoke_handler(tauri::generate_handler![
+            tx::execute_transaction,
+            catalog::search_radio,
+            catalog::refresh_radio_station,
+            catalog::report_radio_click,
+            catalog::search_archive,
+            catalog::get_archive_item_tracks
+        ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

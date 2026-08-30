@@ -73,3 +73,24 @@ describe('migration 0006 upgrade', () => {
     expect(await driver.select<{ value: string }>('SELECT value FROM setting WHERE key = ?', ['weeklyGoalMin'])).toEqual([{ value: '1200' }])
   })
 })
+
+describe('migration 0007 upgrade', () => {
+  it('preserves block references, backfills sources, and enforces remote identity', async () => {
+    const db = createTestDb(6)
+    const { driver } = db
+    const builtin = await driver.execute('INSERT INTO track (path, display_name, category) VALUES (?, ?, ?)', ['builtin:focus.mp3', 'Focus', 'focus'])
+    const local = await driver.execute('INSERT INTO track (path, display_name, category) VALUES (?, ?, ?)', ['/music/local.mp3', 'Local', 'other'])
+    const block = await driver.execute('INSERT INTO day_block (day, title, kind, start_min, duration_min, track_id) VALUES (?, ?, ?, ?, ?, ?)', ['2026-08-30', 'Deep block', 'deep', 540, 60, local.lastInsertId])
+    db.applySql(readFileSync(join(import.meta.dirname, '../../src-tauri/migrations/0007_remote_audio.sql'), 'utf8'))
+    expect(await driver.select('SELECT id, source_kind FROM track ORDER BY id', [])).toEqual([{ id: builtin.lastInsertId, source_kind: 'builtin' }, { id: local.lastInsertId, source_kind: 'local' }])
+    expect(await driver.select('SELECT track_id FROM day_block WHERE id = ?', [block.lastInsertId])).toEqual([{ track_id: local.lastInsertId }])
+    await driver.execute('INSERT INTO track (path, display_name, source_kind, source_id, playback_url) VALUES (?, ?, ?, ?, ?)', ['radio:a', 'A', 'radio', 'a', 'https://radio.example/a'])
+    let duplicateError: unknown = null
+    try {
+      await driver.execute('INSERT INTO track (path, display_name, source_kind, source_id, playback_url) VALUES (?, ?, ?, ?, ?)', ['radio:a-copy', 'A copy', 'radio', 'a', 'https://radio.example/a-copy'])
+    } catch (error) {
+      duplicateError = error
+    }
+    expect(duplicateError).not.toBeNull()
+  })
+})

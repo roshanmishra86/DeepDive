@@ -1,4 +1,4 @@
-import type { RepeatMode, Track } from '../db/types'
+import type { PlayableItem, RepeatMode, Track } from '../db/types'
 
 export type EndedAction =
   | { type: 'queue'; index: number }
@@ -14,7 +14,7 @@ export function nextRepeatMode(mode: RepeatMode): RepeatMode {
 
 export function resolveEndedAction(
   mode: RepeatMode,
-  queue: number[],
+  queue: Array<number | PlayableItem>,
   queueIndex: number,
   trackId: number | null,
   tracks: ReadonlyArray<Pick<Track, 'id'>>
@@ -26,12 +26,12 @@ export function resolveEndedAction(
     for (let offset = 0; offset < queue.length; offset += 1) {
       const index = start + offset
       if (index >= queue.length) break
-      if (tracks.some((track) => track.id === queue[index])) return { type: 'queue', index }
+      if (typeof queue[index] !== 'number' || tracks.some((track) => track.id === queue[index])) return { type: 'queue', index }
     }
     if (mode === 'queue') {
       for (let offset = 0; offset < queue.length; offset += 1) {
         const index = offset
-        if (tracks.some((track) => track.id === queue[index])) return { type: 'queue', index }
+        if (typeof queue[index] !== 'number' || tracks.some((track) => track.id === queue[index])) return { type: 'queue', index }
       }
     }
     return { type: 'stop' }

@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import type { SqlDriver } from '../db/driver'
-import type { Track } from '../db/types'
+import type { PlayableItem, Track } from '../db/types'
 import * as tracksRepo from '../db/repos/tracks'
 import * as settingsRepo from '../db/repos/settings'
 import { defaultCategory, displayNameFromPath } from '../lib/library'
@@ -39,6 +39,7 @@ interface LibraryState {
   // from the filename. Re-registering an already-known path refreshes its
   // duration instead of duplicating the row. Returns the track id.
   registerTrack: (path: string, durationSec: number | null) => Promise<number | null>
+  saveRemote: (item: PlayableItem) => Promise<number | null>
 
   // Deletes the track row (never the file). Stops playback first when the
   // removed track is the one currently loaded in the player.
@@ -153,6 +154,19 @@ export const useLibraryStore = create<LibraryState>()((set, get) => ({
     }
   },
 
+  saveRemote: async (item) => {
+    if (!persistenceDriver) { set({ error: 'Saving favourites requires the desktop app.' }); return null }
+    try {
+      const id = await tracksRepo.upsertRemoteTrack(persistenceDriver, item)
+      set({ tracks: await tracksRepo.listTracks(persistenceDriver), error: null })
+      return id
+    } catch (err) {
+      console.error('Failed to save remote track:', err)
+      set({ error: String(err) })
+      return null
+    }
+  },
+
   removeTrack: async (id) => {
     if (!persistenceDriver) {
       set({ error: 'Removing tracks requires the desktop app.' })
@@ -162,7 +176,8 @@ export const useLibraryStore = create<LibraryState>()((set, get) => ({
     // otherwise the player would keep pointing at a row that no longer
     // exists. Deferred cross-store access; see the module doc comment.
     const player = usePlayerStore.getState()
-    if (player.trackId === id) {
+    const removing = get().tracks.find((track) => track.id === id)
+    if (player.trackId === id && removing?.sourceKind !== 'radio' && removing?.sourceKind !== 'archive') {
       player.stop()
     }
     // A queued entry pointing at a deleted row would be skipped silently by

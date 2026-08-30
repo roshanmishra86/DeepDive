@@ -1,291 +1,74 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { open } from '@tauri-apps/plugin-dialog'
 import { convertFileSrc } from '@tauri-apps/api/core'
 import { getCurrentWindow } from '@tauri-apps/api/window'
-import { UploadSimple } from '@phosphor-icons/react/dist/csr/UploadSimple'
+import { openUrl } from '@tauri-apps/plugin-opener'
+import { ArrowDown, ArrowUp, CaretDown, CaretLeft, CaretRight, Heart, ListPlus, MagnifyingGlass, Pause, Play, Trash, UploadSimple, VinylRecord } from '@phosphor-icons/react'
 import { useLibraryStore } from '../../stores/library'
+import { usePlayerStore } from '../../stores/player'
 import { isTauri } from '../../lib/platform'
-import {
-  AUDIO_EXTENSIONS,
-  AUDIO_EXTENSIONS_LABEL,
-  audioFilePaths,
-  fileNameFromPath,
-} from '../../lib/library'
+import { AUDIO_EXTENSIONS, AUDIO_EXTENSIONS_LABEL, audioFilePaths, fileNameFromPath } from '../../lib/library'
 import { isBuiltinPath } from '../../lib/builtinTracks'
+import { archivePlayable, getArchiveItemTracks, radioPlayable, searchArchive, searchRadio, type ArchiveItemSummary, type ArchiveSort, type ArchiveTrack, type PagedResult, type RadioSort, type RadioStation } from '../../lib/catalog'
+import type { Track } from '../../db/types'
 import { TrackCard } from '../library/TrackCard'
 import { ToggleSwitch } from '../library/ToggleSwitch'
 
-/**
- * Reads a file's duration by loading metadata on a throwaway audio element.
- * Returns null outside Tauri or when the metadata cannot be read — a null
- * duration is representable (`track.durationSec` is nullable), so a failed
- * probe never blocks a registration.
- */
+type Tab = 'local' | 'radio' | 'archive'
+const FOCUS_TAGS = ['classical', 'ambient', 'piano', 'instrumental', 'slow', 'study']
+
 async function readAudioDurationSec(path: string): Promise<number | null> {
   if (!isTauri() || typeof Audio === 'undefined') return null
   try {
-    const el = new Audio()
-    el.preload = 'metadata'
+    const el = new Audio(); el.preload = 'metadata'
     const duration = await new Promise<number>((resolve, reject) => {
-      const cleanup = () => {
-        el.removeEventListener('loadedmetadata', onMeta)
-        el.removeEventListener('error', onError)
-      }
-      const onMeta = () => {
-        cleanup()
-        resolve(el.duration)
-      }
-      const onError = () => {
-        cleanup()
-        reject(new Error('metadata load failed'))
-      }
-      el.addEventListener('loadedmetadata', onMeta)
-      el.addEventListener('error', onError)
-      el.src = convertFileSrc(path)
+      const done = () => { el.removeEventListener('loadedmetadata', ready); el.removeEventListener('error', fail) }
+      const ready = () => { done(); resolve(el.duration) }; const fail = () => { done(); reject(new Error('metadata load failed')) }
+      el.addEventListener('loadedmetadata', ready); el.addEventListener('error', fail); el.src = convertFileSrc(path)
     })
     return Number.isFinite(duration) ? Math.round(duration) : null
-  } catch {
-    return null
-  }
+  } catch { return null }
 }
 
-export function LibraryView() {
-  const tracks = useLibraryStore((s) => s.tracks)
-  const loading = useLibraryStore((s) => s.loading)
-  const error = useLibraryStore((s) => s.error)
-  const fadeInSec = useLibraryStore((s) => s.fadeInSec)
-  const silenceDuringRest = useLibraryStore((s) => s.silenceDuringRest)
-  const registerTrack = useLibraryStore((s) => s.registerTrack)
-  const setFadeIn = useLibraryStore((s) => s.setFadeIn)
-  const setSilenceDuringRest = useLibraryStore((s) => s.setSilenceDuringRest)
-
-  const [notice, setNotice] = useState<string | null>(null)
-  const [lastLoadedName, setLastLoadedName] = useState<string | null>(null)
-  const [dragHover, setDragHover] = useState(false)
-
-  // Two grids: the tracks shipped with the app, and the user's own files.
-  // The built-in section is hidden when empty, but "On this machine" always
-  // renders — it carries the "+ Add from disk" card, which must stay
-  // reachable even with no user files loaded. The "no tracks yet" empty state
-  // only fires when both are empty (built-ins failing to seed, e.g. no driver
-  // in the browser preview, is a real empty-library state).
-  const builtins = tracks.filter((t) => isBuiltinPath(t.path))
-  const userTracks = tracks.filter((t) => !isBuiltinPath(t.path))
-
-  const handleDropPaths = async (paths: string[]) => {
-    const audioPaths = audioFilePaths(paths)
-    if (audioPaths.length === 0) {
-      setNotice(`Only audio files (${AUDIO_EXTENSIONS_LABEL}) can be loaded.`)
-      return
-    }
-    for (const path of audioPaths) {
-      const durationSec = await readAudioDurationSec(path)
-      const id = await registerTrack(path, durationSec)
-      if (id !== null) {
-        setLastLoadedName(fileNameFromPath(path))
-        setNotice(null)
-      }
-    }
-  }
-
-  // OS drag-drop onto the webview. Tauri emits drag-drop events through the
-  // window listener (dragDropEnabled defaults to true); outside Tauri there
-  // is no drop source, so no listener is attached and the drop-zone remains
-  // click-only. The drop-zone copy promises dropping, so it must be real.
-  useEffect(() => {
-    if (!isTauri()) return
-    let unlisten: (() => void) | undefined
-    let cancelled = false
-    void getCurrentWindow()
-      .onDragDropEvent((event) => {
-        const payload = event.payload
-        if (payload.type === 'enter' || payload.type === 'over') {
-          setDragHover(true)
-        } else if (payload.type === 'leave') {
-          setDragHover(false)
-        } else if (payload.type === 'drop') {
-          setDragHover(false)
-          void handleDropPaths(payload.paths)
-        }
-      })
-      .then((fn) => {
-        // The effect may have been cleaned up while the promise was in flight.
-        if (cancelled) fn()
-        else unlisten = fn
-      })
-    return () => {
-      cancelled = true
-      unlisten?.()
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
-
-  const handlePick = async () => {
-    if (!isTauri()) {
-      // Plain `vite dev`: the dialog plugin and disk access do not exist.
-      // Say so instead of crashing.
-      setNotice('Loading audio files needs the Deep Work desktop app — this browser preview cannot read your disk.')
-      return
-    }
-    try {
-      const selected = await open({
-        multiple: false,
-        filters: [{ name: 'Audio', extensions: [...AUDIO_EXTENSIONS] }],
-      })
-      if (typeof selected !== 'string' || selected === '') return // cancelled
-      const durationSec = await readAudioDurationSec(selected)
-      const id = await registerTrack(selected, durationSec)
-      if (id !== null) {
-        setLastLoadedName(fileNameFromPath(selected))
-        setNotice(null)
-      }
-    } catch (err) {
-      console.error('Failed to load audio file:', err)
-      setNotice('Could not load that file.')
-    }
-  }
-
-  const header = (
-    <div className="lib-header">
-      <div>
-        <div className="lib-title">Sound library</div>
-        <div className="lib-subtitle">
-          Ships with 10 built-in tracks, plus your own local mp3 files. Nothing streams.
-        </div>
-      </div>
-      <button type="button" className="lib-load-btn" onClick={() => void handlePick()}>
-        <UploadSimple size={13} />
-        Load mp3
-      </button>
-    </div>
-  )
-
-  // Same loading/error contract as ArchiveView: without these branches a
-  // failed hydrate renders as an empty library, indistinguishable from a
-  // genuinely empty one.
-  if (loading) {
-    return (
-      <div className="lib-view">
-        {header}
-        <div className="lib-body">
-          <div className="view-state" role="status">
-            <div className="view-state-eyebrow">Sound library</div>
-            <div className="view-state-title">Loading library…</div>
-          </div>
-        </div>
-      </div>
-    )
-  }
-
-  if (error && tracks.length === 0) {
-    return (
-      <div className="lib-view">
-        {header}
-        <div className="lib-body">
-          <div className="view-state view-state-error" role="alert">
-            <div className="view-state-eyebrow">Sound library</div>
-            <div className="view-state-title">Could not load the library</div>
-            <div className="view-state-description">{error}</div>
-          </div>
-        </div>
-      </div>
-    )
-  }
-
-  return (
-    <div className="lib-view">
-      {header}
-
-      <div className="lib-body">
-        {notice && (
-          <div className="lib-notice" role="status">
-            {notice}
-          </div>
-        )}
-        {/* Mutator failures (remove/category/toggles) land here; hydrate
-            failures with an empty library take the full error view above. */}
-        {!notice && error && (
-          <div className="lib-notice" role="alert">
-            {error}
-          </div>
-        )}
-
-        <button
-          type="button"
-          className={dragHover ? 'lib-dropzone lib-dropzone-hover' : 'lib-dropzone'}
-          onClick={() => void handlePick()}
-        >
-          <span className="lib-dropzone-title">Drop an .mp3 here, or click to choose</span>
-          <span className="lib-dropzone-sub">
-            {lastLoadedName ?? `No file loaded yet — ${AUDIO_EXTENSIONS_LABEL}`}
-          </span>
-        </button>
-
-        {tracks.length === 0 ? (
-          <div className="view-empty">
-            <div className="view-empty-title">No tracks yet</div>
-            <div className="view-empty-text">
-              Load an audio file from disk ({AUDIO_EXTENSIONS_LABEL}) — the file stays where it
-              is; the library keeps the path.
-            </div>
-          </div>
-        ) : (
-          <>
-            {builtins.length > 0 && (
-              <>
-                <div className="lib-section-label">Built in</div>
-                <div className="lib-grid">
-                  {builtins.map((t) => (
-                    <TrackCard key={t.id} track={t} />
-                  ))}
-                </div>
-              </>
-            )}
-
-            <div className="lib-section-label">On this machine</div>
-            <div className="lib-grid">
-              {userTracks.map((t) => (
-                <TrackCard key={t.id} track={t} />
-              ))}
-              <button type="button" className="lib-card-add" onClick={() => void handlePick()}>
-                + Add from disk
-              </button>
-            </div>
-          </>
-        )}
-
-        <div className="lib-section-label">Session defaults</div>
-        <div className="lib-defaults">
-          <div className="lib-default-row">
-            <span
-              className={
-                fadeInSec > 0 ? 'lib-default-label' : 'lib-default-label lib-default-label-off'
-              }
-            >
-              Fade in over 8 s when a block starts
-            </span>
-            <ToggleSwitch
-              checked={fadeInSec > 0}
-              onChange={(on) => void setFadeIn(on)}
-              label="Fade in over 8 s when a block starts"
-            />
-          </div>
-          <div className="lib-default-row">
-            <span
-              className={
-                silenceDuringRest ? 'lib-default-label' : 'lib-default-label lib-default-label-off'
-              }
-            >
-              Silence during rest
-            </span>
-            <ToggleSwitch
-              checked={silenceDuringRest}
-              onChange={(on) => void setSilenceDuringRest(on)}
-              label="Silence during rest"
-            />
-          </div>
-        </div>
-      </div>
-    </div>
-  )
+function CatalogState({ kind, message }: { kind: 'loading' | 'empty' | 'error'; message: string }) {
+  if (kind === 'loading') return <div className="catalog-skeleton" role="status" aria-label={message}>{[0,1,2,3].map((n) => <div className="catalog-skeleton-row" key={n} />)}</div>
+  return <div className={kind === 'error' ? 'catalog-state catalog-state-error' : 'catalog-state'} role={kind === 'error' ? 'alert' : 'status'}><VinylRecord size={24} /><strong>{kind === 'error' ? 'Catalog unavailable' : 'Nothing found'}</strong><span>{message}</span></div>
 }
+
+function QueuePanel() {
+  const queue = usePlayerStore((s) => s.queue); const tracks = useLibraryStore((s) => s.tracks)
+  const clearQueue = usePlayerStore((s) => s.clearQueue); const reorder = usePlayerStore((s) => s.reorderQueue)
+  const dequeue = usePlayerStore((s) => s.dequeue); const removeKey = usePlayerStore((s) => s.removeQueueKey)
+  if (queue.length === 0) return null
+  return <section className="catalog-queue" aria-label="Now playing queue"><div className="catalog-section-head"><div><strong>Up next</strong><span>{queue.length} {queue.length === 1 ? 'item' : 'items'} · this session</span></div><button type="button" className="catalog-text-btn" onClick={clearQueue}>Clear queue</button></div>
+    <div className="catalog-queue-list">{queue.map((entry, index) => { const remote = typeof entry !== 'number'; const track = remote ? null : tracks.find((t) => t.id === entry); const key = remote ? entry.key : `track:${entry}`; return <div className="catalog-queue-row" key={key}><span className="catalog-queue-index">{String(index + 1).padStart(2, '0')}</span><div><strong>{remote ? entry.title : track?.displayName ?? 'Unavailable track'}</strong><span>{remote ? (entry.live ? 'Live radio' : entry.creator || 'Archive recording') : track?.category}</span></div><div className="catalog-queue-actions"><button type="button" disabled={index === 0} aria-label="Move up" onClick={() => reorder(index,index-1)}><ArrowUp size={13}/></button><button type="button" disabled={index === queue.length-1} aria-label="Move down" onClick={() => reorder(index,index+1)}><ArrowDown size={13}/></button><button type="button" aria-label="Remove from queue" onClick={() => remote ? removeKey(entry.key) : dequeue(entry)}><Trash size={13}/></button></div></div> })}</div>
+  </section>
+}
+
+function RadioCard({ station }: { station: RadioStation }) {
+  const current = usePlayerStore((s) => s.currentItem); const playing = usePlayerStore((s) => s.playing); const playItem = usePlayerStore((s) => s.playItem); const enqueueItem = usePlayerStore((s) => s.enqueueItem); const toggle = usePlayerStore((s) => s.togglePlay)
+  const tracks = useLibraryStore((s) => s.tracks); const save = useLibraryStore((s) => s.saveRemote); const remove = useLibraryStore((s) => s.removeTrack)
+  const item = radioPlayable(station); const active = current?.key === item.key; const saved = tracks.find((t) => t.sourceKind === 'radio' && t.sourceId === station.stationUuid)
+  return <article className={active ? 'catalog-card catalog-card-active' : 'catalog-card'}><div className="catalog-card-art">{station.artworkUrl ? <img src={station.artworkUrl} alt="" onError={(e) => { e.currentTarget.hidden = true }} /> : null}<span>{station.name.slice(0,2).toUpperCase()}</span><em>LIVE</em></div><div className="catalog-card-copy"><div className="catalog-card-title-row"><div><h3>{station.name}</h3><p>{station.country || 'Online station'}</p></div><button type="button" className={saved ? 'catalog-icon-btn catalog-icon-btn-on' : 'catalog-icon-btn'} aria-label={saved ? 'Remove from favourites' : 'Add to favourites'} onClick={() => void (saved ? remove(saved.id) : save(item))}><Heart size={16} weight={saved ? 'fill' : 'regular'}/></button></div><div className="catalog-badges"><span>{station.codec}{station.bitrate ? ` · ${station.bitrate} kbps` : ''}</span>{station.isHttp && <span className="catalog-http">HTTP</span>}{station.tags.slice(0,3).map((tag) => <span key={tag}>{tag}</span>)}</div><div className="catalog-card-actions"><button type="button" className="catalog-primary-action" onClick={() => void (active && playing ? toggle() : playItem(item))}>{active && playing ? <Pause weight="fill"/> : <Play weight="fill"/>}{active && playing ? 'Pause' : 'Listen live'}</button><button type="button" className="catalog-secondary-action" onClick={() => void enqueueItem(item)}><ListPlus/>Queue</button></div></div></article>
+}
+
+function SavedTrack({track}:{track:Track}){const play=usePlayerStore((s)=>s.playTrack);const enqueue=usePlayerStore((s)=>s.enqueue);const remove=useLibraryStore((s)=>s.removeTrack);return <div className="catalog-saved-row"><div><strong>{track.displayName}</strong><span>{track.sourceKind==='radio'?[track.country,track.codec].filter(Boolean).join(' · '):track.creator||'Archive recording'}</span></div><button onClick={()=>void play(track)} aria-label={`Play ${track.displayName}`}><Play/></button><button onClick={()=>void enqueue(track)} aria-label={`Queue ${track.displayName}`}><ListPlus/></button><button onClick={()=>void remove(track.id)} aria-label={`Remove ${track.displayName}`}><Heart weight="fill"/></button></div>}
+function SavedStations(){const tracks=useLibraryStore((s)=>s.tracks).filter((t)=>t.sourceKind==='radio'); if(!tracks.length)return null; return <section className="catalog-saved"><div className="catalog-section-head"><div><strong>Saved stations</strong><span>Refreshed before playback</span></div></div><div className="catalog-saved-list">{tracks.map((t)=><SavedTrack track={t} key={t.id}/>)}</div></section>}
+
+function RadioTab() {
+  const [query,setQuery]=useState(''); const [sort,setSort]=useState<RadioSort>('popularity'); const [page,setPage]=useState(1); const [result,setResult]=useState<PagedResult<RadioStation>|null>(null); const [loading,setLoading]=useState(true); const [error,setError]=useState<string|null>(null); const request=useRef(0)
+  useEffect(() => { const id=++request.current; const timer=setTimeout(() => { setLoading(true); setError(null); void searchRadio(query,page,sort).then((r)=>{if(id===request.current)setResult(r)}).catch((e)=>{if(id===request.current)setError(String(e))}).finally(()=>{if(id===request.current)setLoading(false)}) },400); return()=>clearTimeout(timer) },[query,page,sort])
+  const searchNow=()=>{const id=++request.current;setLoading(true);setError(null);void searchRadio(query,page,sort).then((r)=>{if(id===request.current)setResult(r)}).catch((e)=>{if(id===request.current)setError(String(e))}).finally(()=>{if(id===request.current)setLoading(false)})}
+  return <div className="catalog-tab-panel"><div className="catalog-toolbar"><label className="catalog-search"><MagnifyingGlass/><input value={query} onChange={(e)=>{setQuery(e.target.value);setPage(1)}} onKeyDown={(e)=>{if(e.key==='Enter')searchNow()}} placeholder="Search any station, genre, or city" aria-label="Search live radio"/></label><label className="catalog-sort">Sort<select value={sort} onChange={(e)=>{setSort(e.target.value as RadioSort);setPage(1)}}><option value="popularity">Popularity</option><option value="name">Name</option><option value="bitrate">Bitrate</option></select></label></div><div className="catalog-chips" aria-label="Suggested searches">{FOCUS_TAGS.map((tag)=><button type="button" className={query===tag?'catalog-chip catalog-chip-on':'catalog-chip'} key={tag} onClick={()=>{setQuery(tag);setPage(1)}}>{tag}</button>)}</div>{result?.partial && <div className="catalog-partial" role="status">Some Radio Browser mirrors did not respond. Showing the results that arrived.</div>}{loading ? <CatalogState kind="loading" message="Loading live stations"/> : error ? <CatalogState kind="error" message={`${error} Check your connection and try again.`}/> : !result?.items.length ? <CatalogState kind="empty" message="Try a broader station name, place, or genre."/> : <div className="catalog-grid">{result.items.map((s)=><RadioCard station={s} key={s.stationUuid}/>)}</div>}<Pager page={page} hasMore={result?.hasMore??false} setPage={setPage}/><SavedStations/><QueuePanel/></div>
+}
+
+function ArchiveTrackRow({track}:{track:ArchiveTrack}){const item=archivePlayable(track);const play=usePlayerStore((s)=>s.playItem);const enqueue=usePlayerStore((s)=>s.enqueueItem);const saved=useLibraryStore((s)=>s.tracks).find((t)=>t.sourceKind==='archive'&&t.sourceId===track.sourceId);const save=useLibraryStore((s)=>s.saveRemote);const remove=useLibraryStore((s)=>s.removeTrack);return <div className="archive-track-row"><div><strong>{track.title}</strong><span>{track.codec}{track.durationSec?` · ${Math.round(track.durationSec/60)} min`:''}</span></div><button onClick={()=>void play(item)} aria-label={`Play ${track.title}`}><Play/></button><button onClick={()=>void enqueue(item)} aria-label={`Queue ${track.title}`}><ListPlus/></button><button className={saved?'catalog-icon-btn-on':''} onClick={()=>void(saved?remove(saved.id):save(item))} aria-label={saved?'Remove saved recording':'Save recording'}><Heart weight={saved?'fill':'regular'}/></button></div>}
+function ArchiveCard({item}:{item:ArchiveItemSummary}){const [expanded,setExpanded]=useState(false);const [tracks,setTracks]=useState<ArchiveTrack[]|null>(null);const [error,setError]=useState<string|null>(null);const toggle=()=>{setExpanded(!expanded);if(!tracks&&!expanded){setError(null);void getArchiveItemTracks(item.identifier).then(setTracks).catch((e)=>setError(String(e)))}};return <article className="archive-item"><button type="button" className="archive-item-head" onClick={toggle} aria-expanded={expanded}><div><h3>{item.title||item.identifier}</h3><p>{[item.creator,item.date.slice(0,10)].filter(Boolean).join(' · ')||'Creator not listed'}</p></div><CaretDown className={expanded?'archive-caret-open':''}/></button><div className="archive-item-meta"><span>Marked {item.licenseUrl.toLowerCase().includes('/zero/')?'CC0 1.0':'Public Domain'}</span><button type="button" onClick={()=>void openUrl(item.sourcePageUrl)}>View source ↗</button></div>{expanded&&<div className="archive-tracks">{error?<div className="catalog-inline-error" role="alert">{error}</div>:!tracks?<span className="archive-loading">Checking rights and audio files…</span>:tracks.map((track)=><ArchiveTrackRow track={track} key={track.sourceId}/>)}</div>}</article>}
+function ArchiveTab(){const [query,setQuery]=useState('focus');const [draft,setDraft]=useState('focus');const [sort,setSort]=useState<ArchiveSort>('relevance');const [page,setPage]=useState(1);const [result,setResult]=useState<PagedResult<ArchiveItemSummary>|null>(null);const [loading,setLoading]=useState(true);const [error,setError]=useState<string|null>(null);useEffect(()=>{let live=true;setLoading(true);setError(null);void searchArchive(query,page,sort).then((r)=>{if(live)setResult(r)}).catch((e)=>{if(live)setError(String(e))}).finally(()=>{if(live)setLoading(false)});return()=>{live=false}},[query,page,sort]);const submit=()=>{setQuery(draft.trim()||'focus');setPage(1)};const saved=useLibraryStore((s)=>s.tracks).filter((t)=>t.sourceKind==='archive');return <div className="catalog-tab-panel"><div className="catalog-toolbar"><label className="catalog-search"><MagnifyingGlass/><input value={draft} onChange={(e)=>setDraft(e.target.value)} onKeyDown={(e)=>{if(e.key==='Enter')submit()}} placeholder="Search public-domain audio" aria-label="Search Archive audio"/></label><button type="button" className="catalog-search-btn" onClick={submit}>Search</button><label className="catalog-sort">Sort<select value={sort} onChange={(e)=>{setSort(e.target.value as ArchiveSort);setPage(1)}}><option value="relevance">Relevance</option><option value="downloads">Downloads</option><option value="date">Date</option></select></label></div><p className="catalog-rights-note">Results are uploader-marked Public Domain or CC0. Rights are checked again when you open an item.</p>{loading?<CatalogState kind="loading" message="Searching Internet Archive"/>:error?<CatalogState kind="error" message={`${error} Your local library and radio remain available.`}/>:!result?.items.length?<CatalogState kind="empty" message="Try fewer words or a broader subject."/>:<div className="archive-list">{result.items.map((item)=><ArchiveCard item={item} key={item.identifier}/>)}</div>}<Pager page={page} hasMore={result?.hasMore??false} setPage={setPage}/>{saved.length>0&&<section className="catalog-saved"><div className="catalog-section-head"><div><strong>Saved recordings</strong><span>Metadata only · streaming required</span></div></div><div className="catalog-saved-list">{saved.map((t)=><SavedTrack track={t} key={t.id}/>)}</div></section>}<QueuePanel/></div>}
+function Pager({page,hasMore,setPage}:{page:number;hasMore:boolean;setPage:(p:number)=>void}){if(page===1&&!hasMore)return null;return <nav className="catalog-pager" aria-label="Search pages"><button disabled={page===1} onClick={()=>setPage(page-1)}><CaretLeft/>Previous</button><span>Page {page}</span><button disabled={!hasMore} onClick={()=>setPage(page+1)}>Next<CaretRight/></button></nav>}
+
+export function LibraryView(){const tracks=useLibraryStore((s)=>s.tracks);const loading=useLibraryStore((s)=>s.loading);const error=useLibraryStore((s)=>s.error);const fadeInSec=useLibraryStore((s)=>s.fadeInSec);const silence=useLibraryStore((s)=>s.silenceDuringRest);const register=useLibraryStore((s)=>s.registerTrack);const setFade=useLibraryStore((s)=>s.setFadeIn);const setSilence=useLibraryStore((s)=>s.setSilenceDuringRest);const [tab,setTab]=useState<Tab>('local');const [notice,setNotice]=useState<string|null>(null);const [last,setLast]=useState<string|null>(null);const [drag,setDrag]=useState(false)
+  const handlePaths=useCallback(async(paths:string[])=>{const audio=audioFilePaths(paths);if(!audio.length){setNotice(`Only audio files (${AUDIO_EXTENSIONS_LABEL}) can be loaded.`);return}for(const path of audio){const id=await register(path,await readAudioDurationSec(path));if(id!==null){setLast(fileNameFromPath(path));setNotice(null)}}},[register]);const pick=async()=>{if(!isTauri()){setNotice('Loading audio files needs the Deep Work desktop app.');return}try{const selected=await open({multiple:false,filters:[{name:'Audio',extensions:[...AUDIO_EXTENSIONS]}]});if(typeof selected==='string'&&selected)await handlePaths([selected])}catch{setNotice('Could not load that file.')}}
+  useEffect(()=>{if(!isTauri())return;let unlisten:(()=>void)|undefined;let cancelled=false;void getCurrentWindow().onDragDropEvent((event)=>{const p=event.payload;if(p.type==='enter'||p.type==='over')setDrag(true);else if(p.type==='leave')setDrag(false);else if(p.type==='drop'){setDrag(false);void handlePaths(p.paths)}}).then((fn)=>cancelled?fn():unlisten=fn);return()=>{cancelled=true;unlisten?.()}},[handlePaths])
+  const local=tracks.filter((t)=>t.sourceKind!=='radio'&&t.sourceKind!=='archive');const builtins=local.filter((t)=>t.sourceKind==='builtin'||isBuiltinPath(t.path));const user=local.filter((t)=>!builtins.includes(t))
+  return <div className="lib-view"><header className="lib-header"><div><div className="lib-title">Sound library</div><div className="lib-subtitle">Local focus tracks, live stations, and openly marked Archive recordings.</div></div><button type="button" className="lib-load-btn" onClick={()=>void pick()}><UploadSimple/>Add local files</button></header><nav className="library-tabs" aria-label="Sound sources">{([['local','Built-in & local'],['radio','Live radio'],['archive','Archive search']] as const).map(([id,label])=><button type="button" role="tab" aria-selected={tab===id} className={tab===id?'library-tab library-tab-on':'library-tab'} onClick={()=>setTab(id)} key={id}>{label}{id==='radio'&&<span>LIVE</span>}</button>)}</nav><div className="lib-body">{tab==='radio'?<RadioTab/>:tab==='archive'?<ArchiveTab/>:<>{notice&&<div className="lib-notice" role="status">{notice}</div>}{!notice&&error&&<div className="lib-notice" role="alert">{error}</div>}{loading?<CatalogState kind="loading" message="Loading sound library"/>:<><button type="button" className={drag?'lib-dropzone lib-dropzone-hover':'lib-dropzone'} onClick={()=>void pick()}><span className="lib-dropzone-title">Drop audio here, or choose a file</span><span className="lib-dropzone-sub">{last??`Your files stay on this machine · ${AUDIO_EXTENSIONS_LABEL}`}</span></button>{!local.length?<CatalogState kind="empty" message="Add a file from disk to begin."/>:<>{builtins.length>0&&<><div className="lib-section-label">Built in</div><div className="lib-grid">{builtins.map((t)=><TrackCard track={t} key={t.id}/>)}</div></>}<div className="lib-section-label">On this machine</div><div className="lib-grid">{user.map((t)=><TrackCard track={t} key={t.id}/>) }<button type="button" className="lib-card-add" onClick={()=>void pick()}>+ Add from disk</button></div></>}</>}<div className="lib-section-label">Session defaults</div><div className="lib-defaults"><div className="lib-default-row"><span className={fadeInSec>0?'lib-default-label':'lib-default-label lib-default-label-off'}>Fade in over 8 s when a block starts</span><ToggleSwitch checked={fadeInSec>0} onChange={(on)=>void setFade(on)} label="Fade in over 8 s when a block starts"/></div><div className="lib-default-row"><span className={silence?'lib-default-label':'lib-default-label lib-default-label-off'}>Silence during rest</span><ToggleSwitch checked={silence} onChange={(on)=>void setSilence(on)} label="Silence during rest"/></div></div><QueuePanel/></>}</div></div>}

@@ -31,6 +31,7 @@ describe('migrations', () => {
       'idx_subtask_task_id_sort',
       'idx_day_block_subtask_id',
       'idx_subtask_due_at',
+      'track_remote_source_unique',
     ].sort()
     expect(indexNames).toEqual(expected)
   })

@@ -1,13 +1,14 @@
 import { create } from 'zustand'
 import { convertFileSrc } from '@tauri-apps/api/core'
 import type { SqlDriver } from '../db/driver'
-import type { RepeatMode, Track } from '../db/types'
+import type { PlayableItem, RepeatMode, Track } from '../db/types'
 import * as settingsRepo from '../db/repos/settings'
 import { isTauri } from '../lib/platform'
 import { isSrcFailure, nextTrackId, trackMeta as describeTrack } from '../lib/library'
 import { builtinSrc, isBuiltinPath } from '../lib/builtinTracks'
 import { useLibraryStore } from './library'
 import { nextRepeatMode, resolveEndedAction } from '../lib/player'
+import { refreshRadioStation, radioPlayable, reportRadioClick } from '../lib/catalog'
 
 /**
  * Playback store driving the music bar. Plays against ONE lazily-created
@@ -33,6 +34,8 @@ interface PlayerState {
   trackId: number | null
   trackName: string | null
   trackMeta: string | null
+  currentItem: PlayableItem | null
+  sourceError: string | null
   playing: boolean
   volume: number // 0–100
   positionSec: number
@@ -42,7 +45,7 @@ interface PlayerState {
   /** True when WE paused playback for a rest phase (so only we resume it). */
   restPaused: boolean
   /** Track ids queued up, in play order. No duplicates. */
-  queue: number[]
+  queue: Array<number | PlayableItem>
   /** Index into `queue` of the playing track, or -1 when playing off-queue. */
   queueIndex: number
   /**
@@ -60,6 +63,7 @@ interface PlayerState {
   // `queueIndex` is supplied by the queue walker; callers outside it let the
   // track's own position in the queue (if any) decide.
   playTrack: (track: Track, queueIndex?: number) => Promise<void>
+  playItem: (item: PlayableItem, queueIndex?: number) => Promise<void>
 
   togglePlay: () => Promise<void>
   seek: (sec: number) => void
@@ -70,6 +74,9 @@ interface PlayerState {
   // Appends a track to the queue (no-op if already queued). With nothing
   // loaded, the appended track starts playing immediately.
   enqueue: (track: Track) => Promise<void>
+  enqueueItem: (item: PlayableItem) => Promise<void>
+  removeQueueKey: (key: string) => void
+  reorderQueue: (from: number, to: number) => void
 
   // Drops a track from the queue, keeping queueIndex pointing at the same
   // entry it did before.
@@ -209,7 +216,9 @@ async function playQueueFrom(from: number, wrap: boolean): Promise<boolean> {
   const limit = wrap ? queue.length : queue.length - from
   for (let step = 0; step < limit; step += 1) {
     const index = wrap ? (from + step) % queue.length : from + step
-    const track = tracks.find((t) => t.id === queue[index])
+    const entry = queue[index]
+    if (typeof entry !== 'number') { await usePlayerStore.getState().playItem(entry, index); return true }
+    const track = tracks.find((t) => t.id === entry)
     if (!track) continue
     await usePlayerStore.getState().playTrack(track, index)
     return true
@@ -232,6 +241,7 @@ function handleEnded() {
     const track = useLibraryStore.getState().tracks.find((item) => item.id === action.id)
     if (track) void state.playTrack(track)
   } else if (action.type === 'replay') {
+    if (state.currentItem) { void state.playItem(state.currentItem, state.queueIndex); return }
     const current = useLibraryStore.getState().tracks.find((item) => item.id === state.trackId)
     if (current) void state.playTrack(current)
     else haltPlayback()
@@ -244,6 +254,8 @@ export const usePlayerStore = create<PlayerState>()((set, get) => ({
   trackId: null,
   trackName: null,
   trackMeta: null,
+  currentItem: null,
+  sourceError: null,
   playing: false,
   volume: 70,
   positionSec: 0,
@@ -272,6 +284,11 @@ export const usePlayerStore = create<PlayerState>()((set, get) => ({
   },
 
   playTrack: async (track, queueIndex) => {
+    const sourceKind = track.sourceKind ?? (isBuiltinPath(track.path) ? 'builtin' : 'local')
+    if ((sourceKind === 'radio' || sourceKind === 'archive') && track.playbackUrl) {
+      await get().playItem({ key:`${sourceKind}:${track.sourceId ?? track.id}`, trackId:track.id, sourceKind, sourceId:track.sourceId ?? null, title:track.displayName, creator:track.creator ?? null, category:track.category, playbackUrl:track.playbackUrl, artworkUrl:track.artworkUrl ?? null, sourcePageUrl:track.sourcePageUrl ?? null, country:track.country ?? null, codec:track.codec ?? null, bitrate:track.bitrate ?? null, licenseUrl:track.licenseUrl ?? null, tags:track.tags ?? [], durationSec:track.durationSec, live:sourceKind === 'radio', isHttp:track.playbackUrl.startsWith('http://') }, queueIndex)
+      return
+    }
     const el = ensureAudio()
     clearFade()
     const { fadeInSec } = useLibraryStore.getState()
@@ -283,6 +300,8 @@ export const usePlayerStore = create<PlayerState>()((set, get) => ({
       queueIndex: queueIndex ?? get().queue.indexOf(track.id),
       trackName: track.displayName,
       trackMeta: describeTrack(track),
+      currentItem: null,
+      sourceError: null,
       playing: false,
       positionSec: 0,
       durationSec: track.durationSec ?? 0,
@@ -324,9 +343,22 @@ export const usePlayerStore = create<PlayerState>()((set, get) => ({
     }
   },
 
+  playItem: async (initial, queueIndex) => {
+    const el = ensureAudio(); clearFade(); let item = initial; let fallback = false
+    if (item.sourceKind === 'radio' && item.sourceId) {
+      try { item = radioPlayable(await refreshRadioStation(item.sourceId), item.trackId); if (item.trackId !== null) void useLibraryStore.getState().saveRemote(item) }
+      catch { fallback = true }
+    }
+    set({ trackId:item.trackId, trackName:item.title, trackMeta:[item.creator || item.country, item.codec && `${item.codec}${item.bitrate ? ` · ${item.bitrate} kbps` : ''}`].filter(Boolean).join(' · '), currentItem:item, sourceError:fallback ? 'Station refresh failed — using its last known stream.' : null, playing:false, positionSec:0, durationSec:item.durationSec ?? 0, missing:false, restPaused:false, queueIndex:queueIndex ?? get().queue.findIndex((q) => typeof q !== 'number' && q.key === item.key) })
+    if (!el) return
+    applyLoopFlag(); el.loop = !item.live && get().repeatMode === 'one'; el.src = item.playbackUrl; el.volume = get().volume / 100
+    try { await el.play(); set({ playing:true }); if (item.sourceKind === 'radio' && item.sourceId) void reportRadioClick(item.sourceId).catch(() => undefined) }
+    catch (err) { handlePlayRejection(el, err); set({ sourceError:item.live ? 'This station is offline or its stream is unsupported.' : 'This recording could not be played.' }) }
+  },
+
   togglePlay: async () => {
     const { trackId, playing } = get()
-    if (trackId === null) return
+    if (trackId === null && !get().currentItem) return
     const el = ensureAudio()
     if (!el) return
     clearFade()
@@ -350,7 +382,8 @@ export const usePlayerStore = create<PlayerState>()((set, get) => ({
   },
 
   seek: (sec) => {
-    if (get().trackId === null) return
+    if (get().trackId === null && !get().currentItem) return
+    if (get().currentItem?.live) return
     const { durationSec } = get()
     const clamped = Math.max(0, durationSec > 0 ? Math.min(sec, durationSec) : sec)
     set({ positionSec: clamped })
@@ -414,6 +447,21 @@ export const usePlayerStore = create<PlayerState>()((set, get) => ({
     }
   },
 
+  enqueueItem: async (item) => {
+    const { queue, trackId } = get(); if (queue.some((q) => typeof q !== 'number' && q.key === item.key)) return
+    const nextQueue = [...queue, item]; set({ queue:nextQueue }); if (trackId === null && !get().currentItem) await get().playItem(item, nextQueue.length - 1)
+  },
+
+  removeQueueKey: (key) => {
+    const { queue, queueIndex } = get(); const index = queue.findIndex((q) => typeof q !== 'number' && q.key === key); if (index < 0) return
+    const next = queue.filter((_, i) => i !== index); set({ queue:next, queueIndex:next.length === 0 ? -1 : index > queueIndex ? queueIndex : queueIndex - 1 })
+  },
+
+  reorderQueue: (from, to) => {
+    const queue = [...get().queue]; if (from < 0 || to < 0 || from >= queue.length || to >= queue.length || from === to) return
+    const [entry] = queue.splice(from, 1); queue.splice(to, 0, entry); const current = get().currentItem; set({ queue, queueIndex:current ? queue.findIndex((q) => typeof q !== 'number' && q.key === current.key) : get().trackId === null ? -1 : queue.indexOf(get().trackId as number) })
+  },
+
   dequeue: (trackId) => {
     const { queue, queueIndex } = get()
     const index = queue.indexOf(trackId)
@@ -450,6 +498,8 @@ export const usePlayerStore = create<PlayerState>()((set, get) => ({
       trackId: null,
       trackName: null,
       trackMeta: null,
+      currentItem: null,
+      sourceError: null,
       playing: false,
       positionSec: 0,
       durationSec: 0,
@@ -462,7 +512,7 @@ export const usePlayerStore = create<PlayerState>()((set, get) => ({
   },
 
   markMissing: () => {
-    if (get().trackId === null) return
+    if (get().trackId === null && !get().currentItem) return
     clearFade()
     if (audio) audio.pause()
     set({ missing: true, playing: false, restPaused: false })
@@ -480,7 +530,7 @@ export const usePlayerStore = create<PlayerState>()((set, get) => ({
   resumeFromRest: async () => {
     if (!get().restPaused) return
     set({ restPaused: false })
-    if (get().trackId === null) return
+    if (get().trackId === null && !get().currentItem) return
     const el = ensureAudio()
     if (!el) return
     try {

@@ -13,6 +13,7 @@ export type SessionPhase = 'focus' | 'rest'
 export type DayStatus = 'full' | 'part' | 'miss' | 'note'
 export type BlockRepeat = 'once' | 'daily' | 'weekdays'
 export type RepeatMode = 'off' | 'queue' | 'one'
+export type TrackSourceKind = 'builtin' | 'local' | 'radio' | 'archive'
 // Backfilled once from the important/urgent quadrant by migration 0006, then
 // edited independently — moving a task between quadrants must not rewrite it.
 export type TaskPriority = 'high' | 'medium' | 'low'
@@ -126,6 +127,38 @@ export interface Track {
   displayName: string
   category: string
   durationSec: number | null
+  sourceKind?: TrackSourceKind
+  sourceId?: string | null
+  playbackUrl?: string | null
+  creator?: string | null
+  artworkUrl?: string | null
+  sourcePageUrl?: string | null
+  country?: string | null
+  codec?: string | null
+  bitrate?: number | null
+  licenseUrl?: string | null
+  tags?: string[]
+}
+
+export interface PlayableItem {
+  key: string
+  trackId: number | null
+  sourceKind: TrackSourceKind
+  sourceId: string | null
+  title: string
+  creator: string | null
+  category: string
+  playbackUrl: string
+  artworkUrl: string | null
+  sourcePageUrl: string | null
+  country: string | null
+  codec: string | null
+  bitrate: number | null
+  licenseUrl: string | null
+  tags: string[]
+  durationSec: number | null
+  live: boolean
+  isHttp: boolean
 }
 
 export interface Setting {
