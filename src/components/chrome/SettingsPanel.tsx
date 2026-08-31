@@ -179,7 +179,7 @@ export function SettingsPanel() {
           <div className="settings-label">Software update</div>
           <div className="settings-update-row">
             <div className="settings-update-copy" role="status">
-              <strong>Deep Work v{update.currentVersion}</strong>
+              <strong>DeepDive v{update.currentVersion}</strong>
               <span>
                 {update.phase === 'checking' && 'Checking for updates…'}
                 {update.phase === 'available' && `Version ${update.availableVersion} is available.`}

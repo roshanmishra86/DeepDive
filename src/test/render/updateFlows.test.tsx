@@ -42,7 +42,7 @@ describe('update interface', () => {
     existing.focus()
     act(() => mock.set({ phase: 'available', currentVersion: '1.0.0', availableVersion: '1.1.0' }))
     render(<UpdateExperience />)
-    expect(screen.getByRole('status', { name: 'Software update' })).toHaveTextContent('Deep Work v1.1.0 is available')
+    expect(screen.getByRole('status', { name: 'Software update' })).toHaveTextContent('DeepDive v1.1.0 is available')
     expect(screen.getByRole('button', { name: 'Download update' })).toBeVisible()
     expect(existing).toHaveFocus()
     existing.remove()
@@ -51,7 +51,7 @@ describe('update interface', () => {
   it('focuses the safer Later action and treats Escape as deferral', () => {
     act(() => mock.set({ phase: 'ready', currentVersion: '1.0.0', availableVersion: '1.1.0', deferred: false }))
     render(<UpdateExperience />)
-    expect(screen.getByRole('dialog')).toHaveAccessibleName('Deep Work v1.1.0 is ready to install')
+    expect(screen.getByRole('dialog')).toHaveAccessibleName('DeepDive v1.1.0 is ready to install')
     expect(screen.getByRole('button', { name: 'Later' })).toHaveFocus()
     fireEvent.keyDown(window, { key: 'Escape' })
     expect(mock.controller.defer).toHaveBeenCalledOnce()
@@ -60,7 +60,7 @@ describe('update interface', () => {
   it('shows installed version and the applicable Settings action', () => {
     act(() => mock.set({ phase: 'available', currentVersion: '1.0.0', availableVersion: '1.1.0' }))
     render(<SettingsPanel />)
-    expect(screen.getByRole('status')).toHaveTextContent('Deep Work v1.0.0')
+    expect(screen.getByRole('status')).toHaveTextContent('DeepDive v1.0.0')
     fireEvent.click(screen.getByRole('button', { name: 'Download update' }))
     expect(mock.controller.download).toHaveBeenCalledOnce()
   })

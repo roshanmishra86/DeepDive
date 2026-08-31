@@ -33,58 +33,25 @@ import {
 import type { DayBlock, BlockKind } from '../db/types'
 
 describe('blockHeight', () => {
-  describe('break/ritual (unchanged proportional scale)', () => {
-    it('returns 34px minimum for short blocks', () => {
-      expect(blockHeight(5, 'break')).toBe(34)
-      expect(blockHeight(5, 'ritual')).toBe(34)
-      expect(blockHeight(10, 'break')).toBe(34)
-      expect(blockHeight(10, 'ritual')).toBe(34)
-    })
+  const kinds: BlockKind[] = ['deep', 'shallow', 'break', 'ritual']
 
-    it('scales with duration: 30→48', () => {
-      expect(blockHeight(30, 'break')).toBe(48)
-      expect(blockHeight(30, 'ritual')).toBe(48)
-    })
-
-    it('scales with duration: 60→96', () => {
-      expect(blockHeight(60, 'break')).toBe(96)
-      expect(blockHeight(60, 'ritual')).toBe(96)
-    })
-
-    it('scales with duration: 90→144', () => {
-      expect(blockHeight(90, 'break')).toBe(144)
-      expect(blockHeight(90, 'ritual')).toBe(144)
-    })
-
-    it('handles zero duration', () => {
-      expect(blockHeight(0, 'break')).toBe(34)
-      expect(blockHeight(0, 'ritual')).toBe(34)
-    })
+  it('uses the 58px base height at 30 minutes and below', () => {
+    for (const kind of kinds) {
+      expect(blockHeight(0, kind)).toBe(58)
+      expect(blockHeight(15, kind)).toBe(58)
+      expect(blockHeight(30, kind)).toBe(58)
+    }
   })
 
-  describe('deep/shallow (compressed legibility scale)', () => {
-    it('scales with duration: 30→126.72', () => {
-      expect(blockHeight(30, 'deep')).toBeCloseTo(126.72)
-      expect(blockHeight(30, 'shallow')).toBeCloseTo(126.72)
-    })
+  it('interpolates linearly between 30 and 90 minutes', () => {
+    for (const kind of kinds) expect(blockHeight(60, kind)).toBe(87)
+  })
 
-    it('scales with duration: 60→142.56', () => {
-      expect(blockHeight(60, 'deep')).toBeCloseTo(142.56)
-      expect(blockHeight(60, 'shallow')).toBeCloseTo(142.56)
-    })
-
-    it('scales with duration: 90→158.4', () => {
-      expect(blockHeight(90, 'deep')).toBeCloseTo(158.4)
-      expect(blockHeight(90, 'shallow')).toBeCloseTo(158.4)
-    })
-
-    it('pins the user-specified ratios: 30-min and 60-min heights are 80% and 90% of the 90-min height', () => {
-      const h30 = blockHeight(30, 'deep')
-      const h60 = blockHeight(60, 'deep')
-      const h90 = blockHeight(90, 'deep')
-      expect(h30).toBeCloseTo(h90 * 0.8)
-      expect(h60).toBeCloseTo(h90 * 0.9)
-    })
+  it('caps at twice the base height from 90 minutes onward', () => {
+    for (const kind of kinds) {
+      expect(blockHeight(90, kind)).toBe(116)
+      expect(blockHeight(180, kind)).toBe(116)
+    }
   })
 })
 
@@ -165,12 +132,8 @@ describe('layout', () => {
       type: 'block',
       block: blocks[0],
     })
-    // Block is kind 'deep' (see makeBlock default), so it uses the
-    // compressed deep/shallow scale: 110.88 + 0.528 * 60 = 142.56, not the
-    // old proportional 60 * 1.6 = 96 (that formula now applies only to
-    // break/ritual blocks).
     if (rows[0]?.type === 'block') {
-      expect(rows[0].height).toBeCloseTo(142.56)
+      expect(rows[0].height).toBe(87)
     }
   })
 

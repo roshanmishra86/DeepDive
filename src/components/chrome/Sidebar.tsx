@@ -24,7 +24,7 @@ const NAV_ITEMS: { view: View; label: string; icon: ReactElement }[] = [
   },
   {
     view: 'week',
-    label: 'This Week',
+    label: 'Week',
     icon: <CalendarBlank size={14} />,
   },
   {
@@ -34,7 +34,7 @@ const NAV_ITEMS: { view: View; label: string; icon: ReactElement }[] = [
   },
   {
     view: 'templates',
-    label: 'Day Templates',
+    label: 'Templates',
     icon: <Cards size={14} />,
   },
   {
@@ -44,7 +44,7 @@ const NAV_ITEMS: { view: View; label: string; icon: ReactElement }[] = [
   },
   {
     view: 'library',
-    label: 'Sound Library',
+    label: 'Sound',
     icon: <MusicNotes size={14} />,
   },
 ]
@@ -66,7 +66,7 @@ function RitualChecklist() {
 
   return (
     <div className="sidebar-section">
-      <div className="sidebar-label">Today's ritual</div>
+      <div className="sidebar-label">Daily ritual</div>
       <div className="ritual-list">
         {rituals.map((r) => (
           <div key={r.id} className="ritual-row">

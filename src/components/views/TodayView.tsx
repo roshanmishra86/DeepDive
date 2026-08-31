@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { useBlocksStore } from '../../stores/blocks'
 import { useDayStore } from '../../stores/day'
 import { useTodayBlocks } from '../../stores/useTodayBlocks'
@@ -12,6 +13,11 @@ import { BlockComposer } from '../today/BlockComposer'
 import { ApplyTemplateMenu } from '../today/ApplyTemplateMenu'
 import { SaveTemplateModal } from '../templates/SaveTemplateModal'
 import type { DayBlock } from '../../db/types'
+import { Clock } from '@phosphor-icons/react/dist/csr/Clock'
+import { Leaf } from '@phosphor-icons/react/dist/csr/Leaf'
+import { Target } from '@phosphor-icons/react/dist/csr/Target'
+import { TrendUp } from '@phosphor-icons/react/dist/csr/TrendUp'
+import { useAppStore } from '../../stores/app'
 
 type ComposerState =
   | { mode: 'closed' }
@@ -37,6 +43,8 @@ export function TodayView() {
   const [saveTemplateOpen, setSaveTemplateOpen] = useState(false)
   const [shutdownEditing, setShutdownEditing] = useState(false)
   const [shutdownText, setShutdownText] = useState('')
+  const railCollapsed = useAppStore((s) => s.railCollapsed)
+  const [notesRailTarget, setNotesRailTarget] = useState<HTMLElement | null>(null)
   const isEmptyAndClosed = blocks.length === 0 && composerState.mode === 'closed'
 
   // --- Notes panel selection lifecycle -------------------------------------
@@ -127,6 +135,46 @@ export function TodayView() {
 
   const selectedBlock = blocks.find((b) => b.id === selectedBlockId) ?? null
   const notesNow = new Date(fromDayKey(day).getTime() + nowMin * 60000)
+  const dragRef = useRef(drag)
+  dragRef.current = drag
+
+  // Pointer-driven reorder works consistently in the Tauri WebView, where
+  // native HTML drag events can be swallowed. Moving across a card updates
+  // the live preview; releasing persists the same ripple-aware reorder used
+  // by the existing move controls.
+  useEffect(() => {
+    if (drag.sourceId === null) return
+    const sourceId = drag.sourceId
+    const handlePointerMove = (event: PointerEvent) => {
+      const target = document.elementFromPoint(event.clientX, event.clientY)?.closest<HTMLElement>('[data-block-id]')
+      if (!target) return
+      const targetId = Number(target.dataset.blockId)
+      // The preview moves the source card into the hovered position. Ignore
+      // the source when it is now under the pointer or the target would
+      // oscillate between the old and preview order on every move event.
+      if (targetId === sourceId) return
+      const targetIndex = blocks.findIndex((block) => block.id === targetId)
+      if (targetIndex !== -1) over(targetIndex)
+    }
+    const handlePointerUp = () => {
+      const targetIndex = dragRef.current.targetIndex
+      const fromIndex = blocks.findIndex((block) => block.id === sourceId)
+      if (targetIndex !== null && fromIndex !== -1 && targetIndex !== fromIndex) {
+        void moveWithinDay(day, sourceId, targetIndex)
+      }
+      clear()
+    }
+    window.addEventListener('pointermove', handlePointerMove)
+    window.addEventListener('pointerup', handlePointerUp, { once: true })
+    return () => {
+      window.removeEventListener('pointermove', handlePointerMove)
+      window.removeEventListener('pointerup', handlePointerUp)
+    }
+  }, [drag.sourceId, blocks, day, moveWithinDay, over, clear])
+
+  useEffect(() => {
+    setNotesRailTarget(document.getElementById('today-notes-rail-slot'))
+  }, [railCollapsed])
 
   // Hydrate on mount
   useEffect(() => {
@@ -202,17 +250,42 @@ export function TodayView() {
   }
 
   const rows = layout(previewBlocks)
+  const blockRows = rows.filter((row) => row.type === 'block')
+  const deepBlocks = previewBlocks.filter((block) => block.kind === 'deep').length
+  const completedBlocks = previewBlocks.filter((block) => block.completed).length
+  const plannedGoalMin = 8 * 60
+  const plannedPct = Math.min(100, Math.round((summary.plannedMin / plannedGoalMin) * 100))
+  const completionPct = previewBlocks.length === 0 ? 0 : Math.round((completedBlocks / previewBlocks.length) * 100)
 
   return (
     <div className="today-view">
+      <section className="today-metrics" aria-label="Today summary">
+        <article className="today-metric">
+          <div><span className="today-metric-label">Planned focus</span><strong>{formatDuration(summary.plannedMin)}</strong><small>of 8 h goal</small></div>
+          <svg className="today-metric-ring" viewBox="0 0 44 44" aria-label={`${plannedPct}% of daily goal`}>
+            <circle cx="22" cy="22" r="18" />
+            <circle cx="22" cy="22" r="18" className="today-metric-ring-value" pathLength="100" strokeDasharray={`${plannedPct} 100`} />
+          </svg>
+        </article>
+        <article className="today-metric">
+          <div><span className="today-metric-label">Deep work blocks</span><strong>{deepBlocks}</strong><small>scheduled today</small></div>
+          <span className="today-metric-art today-metric-art-sage"><Leaf size={25} weight="duotone" /></span>
+        </article>
+        <article className="today-metric">
+          <div><span className="today-metric-label">Shutdown time</span><strong>{shutdownMin === null ? 'Not set' : minutesToClock(shutdownMin)}</strong><small>{shutdownMin === null ? 'Set a daily boundary' : 'Daily boundary'}</small></div>
+          <span className="today-metric-art today-metric-art-peach"><Clock size={25} weight="duotone" /></span>
+        </article>
+        <article className="today-metric">
+          <div><span className="today-metric-label">Day progress</span><strong>{completionPct}%</strong><small>{completedBlocks} of {previewBlocks.length} blocks complete</small></div>
+          <span className="today-metric-art today-metric-art-green">{completionPct > 0 ? <TrendUp size={25} weight="duotone" /> : <Target size={25} weight="duotone" />}</span>
+        </article>
+      </section>
       {/* Header */}
       <div className="today-header">
         <div>
           <div className="today-title">Today's blocks</div>
           <div className="today-summary">
-            {formatDuration(summary.plannedMin)} planned ·{' '}
-            {formatDuration(summary.deepMin)} deep · ends{' '}
-            {minutesToClock(summary.endMin)}
+            {formatDuration(summary.plannedMin)} planned · Ends {minutesToClock(summary.endMin)}
           </div>
           {conflictList.length > 0 && (
             <div className="today-conflict-notice" role="alert">
@@ -332,9 +405,9 @@ export function TodayView() {
           <div className="timeline-gutter">
             <div className="gutter-rail" />
             <div className="gutter-times">
-              {rows.map((row, i) => (
+              {blockRows.map((row) => (
                 <div
-                  key={i}
+                  key={row.block.id}
                   style={{
                     height: `${row.height}px`,
                     display: 'flex',
@@ -346,9 +419,7 @@ export function TodayView() {
                     color: 'var(--text-muted)',
                   }}
                 >
-                  {row.type === 'block'
-                    ? minutesToClock(row.block.startMin)
-                    : ''}
+                  {minutesToClock(row.block.startMin)}
                 </div>
               ))}
             </div>
@@ -356,20 +427,7 @@ export function TodayView() {
 
           {/* Blocks column */}
           <div className="timeline-blocks">
-            {rows.map((row, i) => {
-              if (row.type !== 'block') {
-                return (
-                  <div
-                    key={`gap-${i}`}
-                    style={{
-                      height: `${row.height}px`,
-                      background: 'transparent',
-                    }}
-                  />
-                )
-              }
-
-              return (
+            {blockRows.map((row) => (
                 <TimelineBlock
                   key={row.block.id}
                   block={row.block}
@@ -378,36 +436,27 @@ export function TodayView() {
                   nowMin={nowMin}
                   onEdit={() => openEditComposer(row.block.id)}
                   overlapMin={overlapByBlockId.get(row.block.id)}
-                  onDragStart={() => start(row.block.id)}
-                  onDragOver={() => over(blocks.findIndex((block) => block.id === row.block.id))}
-                  onDrop={() => {
-                    const targetIndex = blocks.findIndex((block) => block.id === row.block.id)
-                    if (drag.sourceId !== null && targetIndex !== -1 && targetIndex !== sourceIndex) void moveWithinDay(day, drag.sourceId, targetIndex)
-                    clear()
-                  }}
-                  onDragEnd={clear}
+                  onPointerDragStart={() => start(row.block.id)}
                   dragTarget={drag.targetIndex === blocks.findIndex((block) => block.id === row.block.id) && drag.sourceId !== row.block.id}
                   onSelectNotes={selectBlockNotes}
                   selected={row.block.id === selectedBlockId}
                 />
-              )
-            })}
+            ))}
           </div>
         </div>
       )}
       </div>
 
-      {rows.length > 0 && (
-        <div className="today-notes-panel">
-          <BlockNotesPanel
-            block={selectedBlock}
-            now={notesNow}
-            flushRef={flushNotesRef}
-            onFocusChange={(focused) => {
-              notesFocusedRef.current = focused
-            }}
-          />
-        </div>
+      {blockRows.length > 0 && notesRailTarget && createPortal(
+        <BlockNotesPanel
+          block={selectedBlock}
+          now={notesNow}
+          flushRef={flushNotesRef}
+          onFocusChange={(focused) => {
+            notesFocusedRef.current = focused
+          }}
+        />,
+        notesRailTarget,
       )}
       </div>
 

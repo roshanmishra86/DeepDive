@@ -127,7 +127,7 @@ export function BlockNotesPanel({ block, now, flushRef, onFocusChange }: BlockNo
   if (!block) {
     return (
       <div className="block-notes-panel block-notes-panel-empty">
-        <div className="block-notes-header">Notes</div>
+        <div className="block-notes-header">Quick notes</div>
         <div className="block-notes-empty-text">Select a block to see its notes.</div>
       </div>
     )
@@ -172,7 +172,7 @@ export function BlockNotesPanel({ block, now, flushRef, onFocusChange }: BlockNo
       }}
     >
       <div className="block-notes-header">
-        Notes
+        Quick notes
         {block.taskId !== null && (
           <button
             type="button"

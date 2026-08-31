@@ -55,6 +55,16 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
+      - name: Load release notes
+        id: release-notes
+        shell: bash
+        run: |
+          {
+            echo 'body<<DEEPDIVE_RELEASE_NOTES'
+            cat RELEASE_NOTES.md
+            echo 'DEEPDIVE_RELEASE_NOTES'
+          } >> "$GITHUB_OUTPUT"
+
       - uses: tauri-apps/tauri-action@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -62,7 +72,8 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           tagName: ${{ github.ref_name }}
-          releaseName: "Deep Work ${{ github.ref_name }}"
+          releaseName: "DeepDive ${{ github.ref_name }}"
+          releaseBody: ${{ steps.release-notes.outputs.body }}
           releaseDraft: true
           prerelease: false
           updaterJsonPreferNsis: true

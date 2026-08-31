@@ -9,6 +9,10 @@ import type { DayBlock } from '../../db/types'
 import type { BlockState } from '../../lib/today'
 import { useAppStore } from '../../stores/app'
 import { NotePencil } from '@phosphor-icons/react/dist/csr/NotePencil'
+import { Target } from '@phosphor-icons/react/dist/csr/Target'
+import { Briefcase } from '@phosphor-icons/react/dist/csr/Briefcase'
+import { Coffee } from '@phosphor-icons/react/dist/csr/Coffee'
+import { ListChecks } from '@phosphor-icons/react/dist/csr/ListChecks'
 
 interface TimelineBlockProps {
   block: DayBlock
@@ -18,10 +22,7 @@ interface TimelineBlockProps {
   onEdit: () => void
   /** Minutes this block overlaps its predecessor, if any (see `conflicts()`). */
   overlapMin?: number
-  onDragStart?: () => void
-  onDragOver?: () => void
-  onDrop?: () => void
-  onDragEnd?: () => void
+  onPointerDragStart?: () => void
   dragTarget?: boolean
   /**
    * When provided (Today does), the NotePencil button selects this block in
@@ -43,10 +44,7 @@ export function TimelineBlock({
   nowMin,
   onEdit,
   overlapMin,
-  onDragStart,
-  onDragOver,
-  onDrop,
-  onDragEnd,
+  onPointerDragStart,
   dragTarget = false,
   onSelectNotes,
   selected = false,
@@ -68,7 +66,7 @@ export function TimelineBlock({
   const isFirst = index === 0
   const isLast = index === blocks.length - 1
 
-  const isCompact = height < 48
+  const isCompact = height <= 58
   let progress: ReturnType<typeof blockProgress> | null = null
   if (state === 'active') {
     progress = blockProgress(block, nowMin)
@@ -77,6 +75,7 @@ export function TimelineBlock({
   const classNames = [
     'timeline-block',
     `timeline-block-${state}`,
+    `timeline-block-kind-${block.kind}`,
     isCompact && 'timeline-block-compact',
     overlapMin !== undefined && 'timeline-block-conflict',
     dragTarget && 'timeline-block-drag-target',
@@ -91,13 +90,32 @@ export function TimelineBlock({
   const handleDelete = () => removeBlock(day, block.id)
   const handleNudgeEarlier = () => nudgeBlock(day, block.id, -NUDGE_MIN, ripple)
   const handleNudgeLater = () => nudgeBlock(day, block.id, NUDGE_MIN, ripple)
-
+  const kindIcon = block.kind === 'deep'
+    ? <Target size={18} weight="duotone" />
+    : block.kind === 'break'
+      ? <Coffee size={18} weight="duotone" />
+      : block.kind === 'ritual'
+        ? <ListChecks size={18} weight="duotone" />
+        : <Briefcase size={18} weight="duotone" />
+  const kindLabel = block.kind === 'deep' ? 'Deep work' : block.kind === 'shallow' ? 'Shallow work' : block.kind === 'break' ? 'Break' : 'Routine'
+  const kindIconClass = block.kind === 'deep' ? 'timeline-kind-icon-deep' : block.kind === 'shallow' ? 'timeline-kind-icon-shallow' : block.kind === 'break' ? 'timeline-kind-icon-break' : 'timeline-kind-icon-ritual'
+  const kindBadgeClass = block.kind === 'deep' ? 'timeline-kind-badge-deep' : block.kind === 'shallow' ? 'timeline-kind-badge-shallow' : block.kind === 'break' ? 'timeline-kind-badge-break' : 'timeline-kind-badge-ritual'
   return (
-    <div className={classNames} style={{ height: `${height}px` }} onDragOver={(event) => { event.preventDefault(); onDragOver?.() }} onDrop={(event) => { event.preventDefault(); onDrop?.() }}>
+    <div
+      className={classNames}
+      style={{ height: `${height}px` }}
+      data-block-id={block.id}
+      onPointerDown={(event) => {
+        if (event.button !== 0) return
+        if ((event.target as HTMLElement).closest('button, input, textarea, select, a')) return
+        onPointerDragStart?.()
+      }}
+    >
       {isCompact ? (
         // Compact layout: single row
         <div className="timeline-block-compact-inner">
           <div className="timeline-block-left">
+            <span className={`timeline-kind-icon ${kindIconClass}`} aria-hidden>{kindIcon}</span>
             <button
               className="timeline-checkbox"
               onClick={handleToggle}
@@ -118,6 +136,7 @@ export function TimelineBlock({
               )}
             </button>
             <span className="timeline-block-title">{block.title}</span>
+            <span className={`timeline-kind-badge ${kindBadgeClass}`}>{kindLabel}</span>
             {overlapMin !== undefined && (
               <span className="timeline-conflict-badge" role="alert">
                 Overlaps by {overlapMin} min
@@ -130,7 +149,9 @@ export function TimelineBlock({
         // Tall layout: stacked
         <div className="timeline-block-tall-inner">
           <div className="timeline-block-header">
-            <div>
+            <div className="timeline-block-identity">
+              <span className={`timeline-kind-icon ${kindIconClass}`} aria-hidden>{kindIcon}</span>
+              <div className="timeline-block-copy">
               {state === 'active' && (
                 <div className="timeline-block-status">
                   <span className="status-dot" />
@@ -138,12 +159,13 @@ export function TimelineBlock({
                 </div>
               )}
               <div className="timeline-block-title">{block.title}</div>
-              <div className="timeline-block-meta">{block.kind} · {block.pomodoros} pomodoros</div>
+              <div className="timeline-block-meta"><span className={`timeline-kind-badge ${kindBadgeClass}`}>{kindLabel}</span>{block.pomodoros > 0 && ` · ${block.pomodoros} pomodoros`}</div>
               {overlapMin !== undefined && (
                 <div className="timeline-conflict-badge" role="alert">
                   Overlaps previous block by {overlapMin} min
                 </div>
               )}
+              </div>
             </div>
             <span className="timeline-block-duration">{formatDuration(block.durationMin)}</span>
           </div>
@@ -167,7 +189,7 @@ export function TimelineBlock({
 
       {/* Controls overlay */}
       <div className="timeline-block-controls">
-        <button type="button" className="timeline-drag-handle" draggable onDragStart={(event) => { event.stopPropagation(); onDragStart?.() }} onDragEnd={onDragEnd} aria-label={`Drag ${block.title}`} title="Drag to reorder">⠿</button>
+        <span className="timeline-drag-handle" aria-hidden title="Drag block to reorder">⠿</span>
         <button
           className={`btn-icon${ripple ? ' btn-icon-active' : ''}`}
           onClick={() => setRipple((r) => !r)}

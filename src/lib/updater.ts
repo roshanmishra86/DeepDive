@@ -92,7 +92,7 @@ export class UpdaterController {
 
   check(manual = false): Promise<void> {
     if (!this.dependencies.supported()) {
-      if (manual) this.publish({ manualMessage: 'Updates are available in the Deep Work desktop app.' })
+      if (manual) this.publish({ manualMessage: 'Updates are available in the DeepDive desktop app.' })
       return Promise.resolve()
     }
     if (this.checkPromise) return this.checkPromise
@@ -101,7 +101,7 @@ export class UpdaterController {
       this.update = update
       if (!update) {
         this.publish({ phase: 'idle', availableVersion: undefined, notes: undefined,
-          manualMessage: manual ? 'Deep Work is up to date.' : undefined })
+          manualMessage: manual ? 'DeepDive is up to date.' : undefined })
         return
       }
       this.publish({

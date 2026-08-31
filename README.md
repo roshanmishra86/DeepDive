@@ -1,4 +1,4 @@
-# Deep Work
+# DeepDive
 
 A desktop application for managing deep work sessions, built with Tauri v2 and React.
 
@@ -10,14 +10,14 @@ Installers for every tagged release are published on the
 
 | Platform | File |
 | --- | --- |
-| Windows | `Deep.Work_<version>_x64-setup.exe` (NSIS, installs per-user) |
-| Linux | `Deep.Work_<version>_amd64.AppImage` or `Deep.Work_<version>_amd64.deb` |
+| Windows | `DeepDive_<version>_x64-setup.exe` (NSIS, installs per-user) |
+| Linux | `DeepDive_<version>_amd64.AppImage` or `DeepDive_<version>_amd64.deb` |
 
 The installers are not Authenticode-signed, so Windows SmartScreen shows a "Windows protected
 your PC" warning on first run — choose **More info → Run anyway**. To build
 from source instead, see [Development](#development).
 
-Deep Work verifies in-app updates with Tauri's updater signature. This protects
+DeepDive verifies in-app updates with Tauri's updater signature. This protects
 artifact integrity but does not replace Windows Authenticode signing. Versions
 installed before the updater bootstrap release must install that release manually
 over the existing installation once; uninstalling first is not required.
@@ -80,7 +80,7 @@ believing a local gate. If things are already wedged: `pkill -f "bin/pnpm instal
 Two workflows. Everyday checks run on `main`; installers are built only at tag time.
 
 - **CI** (`.github/workflows/ci.yml`) — push to `main` or `release`, PRs targeting either, plus manual dispatch. Runs `pnpm lint`, `pnpm typecheck`, `pnpm test`, `pnpm check:css`, `pnpm build`, then `cargo fmt --check` and `cargo clippy -D warnings`. Ubuntu only; does not bundle the app.
-- **Release** (`.github/workflows/release.yml`) — push of a tag matching `v*`. It first requires the tag, Tauri config, and Cargo versions to match, then builds signed updater artifacts on `windows-latest` and `ubuntu-22.04` into a **draft** GitHub Release. Builds are serialized so concurrent jobs cannot overwrite `latest.json`. A final job resolves that draft through GitHub's authenticated Releases API and rejects a manifest without signed `windows-x86_64-nsis`, `linux-x86_64-appimage`, and `linux-x86_64-deb` entries. That validator requires `contents: write` because GitHub does not expose draft releases to the workflow token with read-only contents permission.
+- **Release** (`.github/workflows/release.yml`) — push of a tag matching `v*`. It first requires the tag, Tauri config, and Cargo versions to match, loads the curated draft description from `RELEASE_NOTES.md`, then builds signed updater artifacts on `windows-latest` and `ubuntu-22.04` into a **draft** GitHub Release. Builds are serialized so concurrent jobs cannot overwrite `latest.json`. A final job resolves that draft through GitHub's authenticated Releases API and rejects a manifest without signed `windows-x86_64-nsis`, `linux-x86_64-appimage`, and `linux-x86_64-deb` entries. That validator requires `contents: write` because GitHub does not expose draft releases to the workflow token with read-only contents permission.
 
 Because bundling only happens on a tag, a cross-platform packaging break will not
 surface until you tag. To rehearse without publishing anything, push a throwaway
@@ -103,7 +103,7 @@ will ship binaries named `0.1.0`.
    the public key in `src-tauri/tauri.conf.json`. Store the private key and password
    as GitHub secrets `TAURI_SIGNING_PRIVATE_KEY` and
    `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`, plus a separate secure backup.
-2. Bump `version` in `src-tauri/tauri.conf.json` and `src-tauri/Cargo.toml`.
+2. Bump `version` in `src-tauri/tauri.conf.json` and `src-tauri/Cargo.toml`, then update `RELEASE_NOTES.md` for that version.
 3. Commit, then tag with the matching `v<version>` and push the tag.
 4. Download and rehearse every installer from the draft. Test Windows NSIS,
    AppImage, and deb updating from a real previous-version database.

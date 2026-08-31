@@ -20,7 +20,6 @@ const RING_R = 86
 const RING_C = 540.35 // 2π · 86
 
 function PomodoroWidget() {
-  const timerStyle = useAppStore((s) => s.timerStyle)
   const enterSession = useAppStore((s) => s.enterSession)
   const blocks = useTodayBlocks()
   const {
@@ -56,14 +55,13 @@ function PomodoroWidget() {
   return (
     <div className="pomodoro">
       <div className="pomodoro-head">
-        <span className="rail-label">{phaseLabel}</span>
+        <span className="rail-label">Focus timer · {phaseLabel}</span>
         <span className="pomodoro-count" data-testid="pomodoro-count">
           {pomodoroCounterLabel(pomodorosDone, counterTarget)}
         </span>
       </div>
 
-      {timerStyle === 'ring' && (
-        <div className="pomodoro-ring" data-testid="timer-ring">
+      <div className="pomodoro-ring" data-testid="timer-ring">
           <svg width="198" height="198" viewBox="0 0 198 198" style={{ transform: 'rotate(-90deg)' }}>
             <circle cx="99" cy="99" r={RING_R} fill="none" stroke="var(--timer-track)" strokeWidth="7" />
             <circle
@@ -83,27 +81,7 @@ function PomodoroWidget() {
             <div className="pomodoro-clock" data-testid="timer-clock">{clock}</div>
             <div className="pomodoro-block">{blockLabel}</div>
           </div>
-        </div>
-      )}
-
-      {timerStyle === 'numeric' && (
-        <div className="pomodoro-numeric" data-testid="timer-numeric">
-          <div className="pomodoro-clock-numeric" data-testid="timer-clock">{clock}</div>
-          <div className="pomodoro-block">{blockLabel}</div>
-        </div>
-      )}
-
-      {timerStyle === 'bar' && (
-        <div className="pomodoro-bar" data-testid="timer-bar">
-          <div className="pomodoro-bar-row">
-            <span className="pomodoro-clock-bar" data-testid="timer-clock">{clock}</span>
-            <span className="pomodoro-block">{blockLabel}</span>
-          </div>
-          <div className="pomodoro-bar-track">
-            <div className="pomodoro-bar-fill" style={{ width: `${(progress * 100).toFixed(1)}%` }} />
-          </div>
-        </div>
-      )}
+      </div>
 
       <div className="pomodoro-actions">
         <button
@@ -221,6 +199,7 @@ export function RailToggleStrip({ onExpand }: { onExpand: () => void }) {
 }
 
 export function RightRail({ onCollapse }: { onCollapse?: () => void }) {
+  const view = useAppStore((s) => s.view)
   const setView = useAppStore((s) => s.setView)
   const tasks = useTasksStore((s) => s.tasks)
   const subtasksByTask = useTasksStore((s) => s.subtasksByTask)
@@ -252,11 +231,12 @@ export function RightRail({ onCollapse }: { onCollapse?: () => void }) {
           </button>
         </div>
       )}
+      {view === 'today' && <div id="today-notes-rail-slot" className="rail-notes-slot" />}
       <PomodoroWidget />
 
       <div className="rail-scroll">
         <div className="rail-upcoming-head">
-          <span className="rail-label">Upcoming this week</span>
+          <span className="rail-label">Up next</span>
           <button type="button" className="rail-all" onClick={() => setView('todo')}>
             All
           </button>

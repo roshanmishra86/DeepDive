@@ -1,22 +1,22 @@
 :root {
-  --accent: #2f5d50;
-  --accent-hover: #264a40;
-  --accent-surface: #eef2f0;
+  --accent: #174d3a;
+  --accent-hover: #205c47;
+  --accent-surface: #e8eee6;
   --accent-ink: #fbfaf7;
   --bg-app: #e2ded6;
-  --bg-window: #f7f5f1;
-  --bg-chrome: #efece5;
-  --bg-panel: #f2efe8;
-  --bg-card: #fbfaf7;
+  --bg-window: #f7f5ef;
+  --bg-chrome: #fbfaf6;
+  --bg-panel: #f3f1ea;
+  --bg-card: #fbfaf6;
   --on-accent: #fbfaf7;
   --surface-hover: #f1eee6;
   --surface-strong: #e2dbcd;
   --surface-quiet: #e6e0d3;
   --surface-accent-muted: #b9c7bf;
-  --border: #e0d9ca;
-  --border-strong: #d8d1c2;
-  --border-subtle: #ece6da;
-  --border-chrome: #e4ded1;
+  --border: #e4e1d8;
+  --border-strong: #d8d5ca;
+  --border-subtle: #ece9e1;
+  --border-chrome: #e4e1d8;
   --border-window: #ddd6c9;
   --text: #221f19;
   /* Phase 10 (WCAG AA): the mockup's #8b8375 / #a09889 fail the 4.5:1 body-text

@@ -9,7 +9,7 @@ export interface RadioStation { stationUuid: string; name: string; country: stri
 export interface ArchiveItemSummary { identifier: string; title: string; creator: string; date: string; downloads: number; licenseUrl: string; sourcePageUrl: string }
 export interface ArchiveTrack { sourceId: string; identifier: string; fileName: string; title: string; creator: string; durationSec: number | null; playbackUrl: string; sourcePageUrl: string; licenseUrl: string; codec: string }
 
-function desktopOnly(): never { throw new Error('Online catalogs are available in the Deep Work desktop app.') }
+function desktopOnly(): never { throw new Error('Online catalogs are available in the DeepDive desktop app.') }
 export async function searchRadio(query: string, page: number, sort: RadioSort) { if (!isTauri()) desktopOnly(); return invoke<PagedResult<RadioStation>>('search_radio', { query, page, sort }) }
 export async function refreshRadioStation(stationUuid: string) { if (!isTauri()) desktopOnly(); return invoke<RadioStation>('refresh_radio_station', { stationUuid }) }
 export async function reportRadioClick(stationUuid: string) { if (!isTauri()) return; await invoke('report_radio_click', { stationUuid }) }

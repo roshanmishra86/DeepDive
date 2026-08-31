@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
-  "productName": "Deep Work",
-  "version": "0.2.5",
+  "productName": "DeepDive",
+  "version": "0.2.6",
   "identifier": "com.roshanmishra.deepwork",
   "build": {
     "frontendDist": "../dist",
@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "Deep Work",
+        "title": "DeepDive",
         "width": 1440,
         "height": 900,
         "minWidth": 1100,
@@ -38,7 +38,7 @@
     "publisher": "roshanmishra86",
     "category": "Productivity",
     "shortDescription": "A desktop app for managing deep work sessions",
-    "longDescription": "Deep Work is a desktop app for planning distraction-free work days: a proportional block timeline, pomodoro timer with a full-session focus mode, day templates, an archive of what actually landed, and a local sound library.",
+    "longDescription": "DeepDive is a desktop app for planning distraction-free work days: a proportional block timeline, pomodoro timer with a full-session focus mode, day templates, an archive of what actually landed, and a local sound library.",
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",

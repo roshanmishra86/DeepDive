@@ -43,14 +43,14 @@ export function TitleBar() {
         onDoubleClick={toggleMaximize}
       >
         <span className="titlebar-dot" aria-hidden />
-        <span className="titlebar-name">Deep Work</span>
+        <span className="titlebar-name">DeepDive</span>
         <span className="titlebar-dash">—</span>
         <span className="titlebar-date" data-testid="titlebar-date">
           {today}
         </span>
       </div>
       {update.phase === 'ready' && update.deferred && (
-        <button type="button" className="titlebar-update" onClick={() => updaterController.getSnapshot().deferred && updaterController.defer()} aria-label={`Deep Work v${update.availableVersion} is ready to install`}>
+        <button type="button" className="titlebar-update" onClick={() => updaterController.getSnapshot().deferred && updaterController.defer()} aria-label={`DeepDive v${update.availableVersion} is ready to install`}>
           <ArrowClockwise size={12} /> Update ready
         </button>
       )}

@@ -40,7 +40,7 @@ export function UpdateExperience() {
       {(showAvailable || update.phase === 'downloading') && (
         <section className="update-toast" aria-label="Software update" role="status">
           <div className="update-toast-copy">
-            <strong>{update.phase === 'downloading' ? `Downloading Deep Work v${update.availableVersion}` : `Deep Work v${update.availableVersion} is available`}</strong>
+            <strong>{update.phase === 'downloading' ? `Downloading DeepDive v${update.availableVersion}` : `DeepDive v${update.availableVersion} is available`}</strong>
             {update.phase === 'downloading' && <Progress downloaded={update.downloadedBytes} total={update.totalBytes} />}
           </div>
           {showAvailable && (
@@ -63,7 +63,7 @@ export function UpdateExperience() {
         <div className="update-dialog-backdrop">
           <div className="update-dialog" role="dialog" aria-modal="true" aria-labelledby="update-ready-title">
             <div className="update-dialog-mark" aria-hidden><ArrowClockwise size={18} /></div>
-            <h2 id="update-ready-title">Deep Work v{update.availableVersion} is ready to install</h2>
+            <h2 id="update-ready-title">DeepDive v{update.availableVersion} is ready to install</h2>
             <p>Restart now to finish. Your pending changes will be saved first.</p>
             <div className="update-dialog-actions">
               <button ref={laterRef} type="button" className="btn-secondary" onClick={() => updaterController.defer()}>Later</button>
@@ -77,7 +77,7 @@ export function UpdateExperience() {
         <div className="exit-barrier" role="alert" aria-live="assertive">
           <span className="exit-barrier-spinner" aria-hidden />
           <strong>{update.phase === 'installing' ? 'Installing update…' : 'Saving your work…'}</strong>
-          <span>Please keep Deep Work open.</span>
+          <span>Please keep DeepDive open.</span>
         </div>
       )}
     </>

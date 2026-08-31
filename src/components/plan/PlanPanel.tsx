@@ -129,7 +129,7 @@ export function PlanPanel() {
 
   const handleImport = async () => {
     if (!isTauri()) {
-      setNotice('Markdown import is available in the Deep Work desktop app.')
+      setNotice('Markdown import is available in the DeepDive desktop app.')
       return
     }
     try {
@@ -144,7 +144,7 @@ export function PlanPanel() {
 
   const handleExport = async () => {
     if (!isTauri()) {
-      setNotice('Markdown export is available in the Deep Work desktop app.')
+      setNotice('Markdown export is available in the DeepDive desktop app.')
       return
     }
     if (!noteOwner) {
@@ -196,7 +196,7 @@ export function PlanPanel() {
         <NotesEditor value={draft} onChange={onChange} ariaLabel={`Plan notes for ${title}`} placeholder="Plan this work…" />
       </div>
       <div className="plan-panel-counts">{words} words · {characters} characters</div>
-      {!isTauri() && <div className="plan-panel-notice">Markdown import/export needs the Deep Work desktop app.</div>}
+      {!isTauri() && <div className="plan-panel-notice">Markdown import/export needs the DeepDive desktop app.</div>}
       {notice && <div className="plan-panel-notice" role="status">{notice}</div>}
       <div className="plan-panel-foot">
         <button type="button" className="btn-secondary" onClick={() => void handleImport()} disabled={!isTauri()} title={isTauri() ? 'Import Markdown' : 'Desktop app required'}>

@@ -30,7 +30,7 @@ describe('updater controller', () => {
     expect(check).toHaveBeenCalledOnce()
     resolve(null)
     await Promise.all([first, second])
-    expect(controller.getSnapshot().manualMessage).toBe('Deep Work is up to date.')
+    expect(controller.getSnapshot().manualMessage).toBe('DeepDive is up to date.')
   })
 
   it('tracks known and unknown download sizes and supports deferral', async () => {

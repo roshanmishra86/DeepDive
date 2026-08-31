@@ -24,40 +24,18 @@ export interface Schedulable {
   sort: number
 }
 
-/**
- * Slope and intercept for the deep/shallow block height formula (see
- * `blockHeight`). Anchored on the user's spec: the 90-minute card grows 10%
- * over the old proportional height (144 → 158.4), and the 30/60-minute
- * cards become 80% / 90% of that new 90-minute height (126.72, 142.56).
- * `DEEP_SHALLOW_HEIGHT_SLOPE` and `DEEP_SHALLOW_HEIGHT_INTERCEPT` are the
- * unique linear coefficients solving height(30)=126.72 and height(90)=158.4.
- */
-const DEEP_SHALLOW_HEIGHT_SLOPE = 0.528
-const DEEP_SHALLOW_HEIGHT_INTERCEPT = 110.88
+const BASE_BLOCK_HEIGHT = 58
+const MAX_BLOCK_HEIGHT = BASE_BLOCK_HEIGHT * 2
 
 /**
- * Block height in pixels, kind-dependent.
- *
- * - break | ritual: `max(34, duration_minutes * 1.6)`, unchanged from
- *   Phase 4. These can be as short as 5 minutes (the seeded "Maker Day"
- *   template has a 5-minute Shut Down Ritual) and must stay thin strips, so
- *   they keep the original proportional scale.
- * - deep | shallow: `110.88 + 0.528 * duration_minutes`, a compressed
- *   linear scale used only for work blocks. Anchors: 30→126.72, 60→142.56,
- *   90→158.4. Work blocks are floored at 30 minutes by `minDurationFor`, so
- *   this compressed scale never has to apply to a very short block the way
- *   break/ritual heights do.
- *
- *   This scale is deliberately NOT proportional to duration — it trades the
- *   Phase 4 proportional-timeline property for legibility. Under the old
- *   `duration * 1.6` formula a 30-minute card rendered at 48px, too short to
- *   fit the card content.
+ * Block height is capped proportional scale shared by every category:
+ * 30 minutes or less is one base unit (58px), 30–90 minutes interpolates
+ * linearly, and 90 minutes or more is capped at two units (116px).
  */
-export function blockHeight(durationMin: number, kind: BlockKind): number {
-  if (kind === 'deep' || kind === 'shallow') {
-    return DEEP_SHALLOW_HEIGHT_INTERCEPT + DEEP_SHALLOW_HEIGHT_SLOPE * durationMin
-  }
-  return Math.max(34, durationMin * 1.6)
+export function blockHeight(durationMin: number, _kind: BlockKind): number {
+  const boundedMinutes = Math.min(90, Math.max(30, durationMin))
+  const progress = (boundedMinutes - 30) / 60
+  return BASE_BLOCK_HEIGHT + progress * (MAX_BLOCK_HEIGHT - BASE_BLOCK_HEIGHT)
 }
 
 /**

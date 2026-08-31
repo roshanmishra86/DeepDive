@@ -62,14 +62,14 @@ export function prepareForExit(): Promise<ExitPreparation> {
         (result) => result.status === 'rejected' || result.value !== true
       )
       if (flushFailed || writeFailed) {
-        const error = 'Deep Work could not save every pending change. Try again before closing.'
+        const error = 'DeepDive could not save every pending change. Try again before closing.'
         publish({ preparing: false, error })
         return { safe: false, error }
       }
       publish({ preparing: false })
       return { safe: true }
     } catch {
-      const error = 'Deep Work could not finish saving your work. Try again before closing.'
+      const error = 'DeepDive could not finish saving your work. Try again before closing.'
       publish({ preparing: false, error })
       return { safe: false, error }
     } finally {
