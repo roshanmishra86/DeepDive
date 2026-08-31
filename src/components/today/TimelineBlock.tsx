@@ -23,6 +23,9 @@ interface TimelineBlockProps {
   /** Minutes this block overlaps its predecessor, if any (see `conflicts()`). */
   overlapMin?: number
   onPointerDragStart?: () => void
+  onDragStart?: () => void
+  onDragOver?: () => void
+  onDragEnd?: () => void
   dragTarget?: boolean
   /**
    * When provided (Today does), the NotePencil button selects this block in
@@ -45,6 +48,9 @@ export function TimelineBlock({
   onEdit,
   overlapMin,
   onPointerDragStart,
+  onDragStart,
+  onDragOver,
+  onDragEnd,
   dragTarget = false,
   onSelectNotes,
   selected = false,
@@ -110,6 +116,7 @@ export function TimelineBlock({
         if ((event.target as HTMLElement).closest('button, input, textarea, select, a')) return
         onPointerDragStart?.()
       }}
+      onDragOver={(event) => { event.preventDefault(); onDragOver?.() }}
     >
       {isCompact ? (
         // Compact layout: single row
@@ -189,7 +196,21 @@ export function TimelineBlock({
 
       {/* Controls overlay */}
       <div className="timeline-block-controls">
-        <span className="timeline-drag-handle" aria-hidden title="Drag block to reorder">⠿</span>
+        <button
+          type="button"
+          className="timeline-drag-handle"
+          draggable
+          onDragStart={(event) => {
+            event.stopPropagation()
+            event.dataTransfer?.setData('text/plain', String(block.id))
+            onDragStart?.()
+          }}
+          onDragEnd={onDragEnd}
+          aria-label={`Drag ${block.title}`}
+          title="Drag to reorder"
+        >
+          ⠿
+        </button>
         <button
           className={`btn-icon${ripple ? ' btn-icon-active' : ''}`}
           onClick={() => setRipple((r) => !r)}

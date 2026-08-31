@@ -5512,6 +5512,7 @@ button:focus-visible {
 .timeline-block-meta { font-size: 11.5px; }
 .timeline-block-duration { border: 0; background: transparent; }
 .today-notes-panel { display: none; }
+.today-notes-fallback { position: fixed; left: -10000px; top: 0; width: 1px; height: 1px; overflow: hidden; }
 .block-notes-panel { min-height: 0; padding: 16px; }
 .block-notes-header { color: var(--text); font-family: var(--font-ui); font-size: 14px; font-weight: 600; text-transform: none; letter-spacing: 0; }
 .block-notes-title { font-family: var(--font-ui); font-size: 13px; }

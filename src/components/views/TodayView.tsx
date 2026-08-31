@@ -437,6 +437,9 @@ export function TodayView() {
                   onEdit={() => openEditComposer(row.block.id)}
                   overlapMin={overlapByBlockId.get(row.block.id)}
                   onPointerDragStart={() => start(row.block.id)}
+                  onDragStart={() => start(row.block.id)}
+                  onDragOver={() => over(blocks.findIndex((block) => block.id === row.block.id))}
+                  onDragEnd={clear}
                   dragTarget={drag.targetIndex === blocks.findIndex((block) => block.id === row.block.id) && drag.sourceId !== row.block.id}
                   onSelectNotes={selectBlockNotes}
                   selected={row.block.id === selectedBlockId}
@@ -447,16 +450,27 @@ export function TodayView() {
       )}
       </div>
 
-      {blockRows.length > 0 && notesRailTarget && createPortal(
-        <BlockNotesPanel
-          block={selectedBlock}
-          now={notesNow}
-          flushRef={flushNotesRef}
-          onFocusChange={(focused) => {
-            notesFocusedRef.current = focused
-          }}
-        />,
-        notesRailTarget,
+      {blockRows.length > 0 && (
+        notesRailTarget
+          ? createPortal(
+              <BlockNotesPanel
+                block={selectedBlock}
+                now={notesNow}
+                flushRef={flushNotesRef}
+                onFocusChange={(focused) => { notesFocusedRef.current = focused }}
+              />,
+              notesRailTarget,
+            )
+          : (
+              <div className="today-notes-fallback">
+                <BlockNotesPanel
+                  block={selectedBlock}
+                  now={notesNow}
+                  flushRef={flushNotesRef}
+                  onFocusChange={(focused) => { notesFocusedRef.current = focused }}
+                />
+              </div>
+            )
       )}
       </div>
 
