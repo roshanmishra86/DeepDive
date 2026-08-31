@@ -127,7 +127,17 @@ fn safe_remote_url(raw: &str, allow_http: bool) -> Option<String> {
         }
         match ip {
             IpAddr::V4(v) if v.is_private() || v.is_link_local() => return None,
-            IpAddr::V6(v) if v.is_unique_local() || v.is_unicast_link_local() => return None,
+            IpAddr::V6(v) => {
+                // Keep the declared Rust 1.77.2 MSRV. The equivalent std
+                // helpers were not stabilized until 1.84: unique-local is
+                // fc00::/7 and unicast link-local is fe80::/10.
+                let octets = v.octets();
+                let unique_local = octets[0] & 0xfe == 0xfc;
+                let link_local = octets[0] == 0xfe && octets[1] & 0xc0 == 0x80;
+                if unique_local || link_local {
+                    return None;
+                }
+            }
             _ => {}
         }
     }
@@ -512,6 +522,8 @@ mod tests {
             "http://localhost/a",
             "http://127.0.0.1/a",
             "http://10.0.0.2/a",
+            "http://[fc00::1]/a",
+            "http://[fe80::1]/a",
             "https://u:p@example.com/a",
         ] {
             assert!(safe_remote_url(url, true).is_none(), "{url}");
