@@ -9,7 +9,6 @@ import {
   QUADRANTS,
   DEADLINE_BUCKETS,
   applyFilters,
-  filtersActive,
   sortGroup,
   dragDisabledReason,
   priorityFromQuadrant,
@@ -27,8 +26,10 @@ import { AddTaskRow } from '../todo/AddTaskRow'
 import { Plus } from '@phosphor-icons/react/dist/csr/Plus'
 import { Funnel } from '@phosphor-icons/react/dist/csr/Funnel'
 import { ArrowsDownUp } from '@phosphor-icons/react/dist/csr/ArrowsDownUp'
+import { CheckCircle } from '@phosphor-icons/react/dist/csr/CheckCircle'
 
 type GroupKey = Quadrant | DeadlineBucket
+type TaskView = 'active' | 'completed'
 
 // Cross-view focus highlight fade duration (see effect below).
 export const TODO_FOCUS_FADE_MS = 2000
@@ -56,7 +57,6 @@ const SORT_OPTIONS: Array<{ value: GroupSort; label: string }> = [
 
 function activeFilterCount(filters: TodoFilters): number {
   let count = 0
-  if (filters.showCompleted !== DEFAULT_TODO_FILTERS.showCompleted) count++
   if (filters.deadline !== DEFAULT_TODO_FILTERS.deadline) count++
   if (filters.overdueOnly !== DEFAULT_TODO_FILTERS.overdueOnly) count++
   return count
@@ -82,6 +82,7 @@ export function TodoView() {
 
   const [editorOpen, setEditorOpen] = useState(false)
   const [editorTaskId, setEditorTaskId] = useState<number | null>(null)
+  const [taskView, setTaskView] = useState<TaskView>('active')
   const nowMin = useDayStore((s) => s.nowMin)
   const currentDay = useDayStore((s) => s.currentDay)
   const [draggingId, setDraggingId] = useState<number | null>(null)
@@ -158,11 +159,12 @@ export function TodoView() {
       clearTodoFocus()
       return
     }
-    const visible = applyFilters([task], filters, now).length > 0
+    const visible = applyFilters([task], { ...filters, showCompleted: true }, now).length > 0
     if (!visible) {
       resetFilters()
       return
     }
+    setTaskView(task.done ? 'completed' : 'active')
     setFocusedTaskId(task.id)
     clearTodoFocus()
   }, [pendingTodoFocus, tasks, filters, now, clearTodoFocus, resetFilters])
@@ -191,25 +193,35 @@ export function TodoView() {
   }
 
   const hasAnyTasks = tasks.length > 0
-  const filteredTasks = useMemo(() => applyFilters(tasks, filters, now), [tasks, filters, now])
-  const filtersOn = filtersActive(filters)
+  const filteredTasks = useMemo(
+    () => applyFilters(tasks, { ...filters, showCompleted: true }, now),
+    [tasks, filters, now],
+  )
+  const activeTasks = useMemo(() => filteredTasks.filter((task) => !task.done), [filteredTasks])
+  const completedTasks = useMemo(
+    () => filteredTasks
+      .filter((task) => task.done)
+      .sort((a, b) => (b.completedAt ?? '').localeCompare(a.completedAt ?? '')),
+    [filteredTasks],
+  )
   const filterBadgeCount = activeFilterCount(filters)
+  const filtersOn = filterBadgeCount > 0
 
   const matrixGroups = useMemo(
-    () => groupByMatrix(filteredTasks).map((group) => ({
+    () => groupByMatrix(activeTasks).map((group) => ({
       key: group.quadrant as GroupKey,
       quadrant: group.quadrant,
       tasks: sortGroup(group.tasks, sortByGroup[group.quadrant] ?? 'manual'),
     })),
-    [filteredTasks, sortByGroup]
+    [activeTasks, sortByGroup]
   )
   const deadlineGroups = useMemo(
-    () => groupByDeadline(filteredTasks, now).map((group) => ({
+    () => groupByDeadline(activeTasks, now).map((group) => ({
       key: group.bucket as GroupKey,
       bucket: group.bucket,
       tasks: sortGroup(group.tasks, sortByGroup[group.bucket] ?? 'manual'),
     })),
-    [filteredTasks, sortByGroup, now]
+    [activeTasks, sortByGroup, now]
   )
 
   const beginDrag = (id: number) => { dropCompleted.current = false; setDraggingId(id); setDropTargetId(null); setDropHint(null) }
@@ -295,7 +307,7 @@ export function TodoView() {
             Capture everything. Organize by importance, add a tentative deadline, and break it down.
           </p>
         </div>
-        <div className="todo-controls">
+        {taskView === 'active' && <div className="todo-controls">
           <div className="todo-group-by">
             <span className="todo-group-by-label">Group by</span>
             <select
@@ -323,15 +335,6 @@ export function TodoView() {
             </button>
             {filtersOpen && (
               <div className="todo-filters-popover" role="group" aria-label="Filters">
-                <button
-                  type="button"
-                  className={`todo-filter-toggle${filters.showCompleted ? ' todo-filter-toggle-active' : ''}`}
-                  aria-pressed={filters.showCompleted}
-                  onClick={() => setFilters({ showCompleted: !filters.showCompleted })}
-                >
-                  Show completed
-                </button>
-
                 <div className="todo-filter-group">
                   <span className="todo-filter-label">Deadline</span>
                   <div className="todo-filter-options">
@@ -378,7 +381,28 @@ export function TodoView() {
             <Plus size={16} />
             Add task
           </button>
-        </div>
+        </div>}
+      </div>
+
+      <div className="todo-view-tabs" role="tablist" aria-label="Task status">
+        <button
+          type="button"
+          role="tab"
+          aria-selected={taskView === 'active'}
+          className={`todo-view-tab${taskView === 'active' ? ' todo-view-tab-active' : ''}`}
+          onClick={() => setTaskView('active')}
+        >
+          To do <span>{tasks.filter((task) => !task.done).length}</span>
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={taskView === 'completed'}
+          className={`todo-view-tab${taskView === 'completed' ? ' todo-view-tab-active' : ''}`}
+          onClick={() => setTaskView('completed')}
+        >
+          Completed <span>{tasks.filter((task) => task.done).length}</span>
+        </button>
       </div>
 
       <div className="todo-body" ref={bodyRef}>
@@ -393,6 +417,26 @@ export function TodoView() {
               Create your first task
             </button>
           </div>
+        ) : taskView === 'completed' ? (
+          <section className="todo-group todo-completed-group" role="tabpanel">
+            <div className="todo-group-head">
+              <div className="todo-group-heading">
+                <CheckCircle size={15} className="todo-completed-icon" />
+                <h2 className="todo-group-label">Completed tasks</h2>
+                <span className="todo-group-count">{completedTasks.length} {completedTasks.length === 1 ? 'task' : 'tasks'}</span>
+              </div>
+              <p className="todo-group-hint">Finished work stays here. Uncheck a task to return it to To do.</p>
+            </div>
+            {completedTasks.length === 0 ? (
+              <div className="todo-completed-empty">No completed tasks yet.</div>
+            ) : (
+              <div className="todo-group-rows">
+                {completedTasks.map((task) => (
+                  <TaskRow key={task.id} task={task} onEdit={openEditor} now={now} focused={focusedTaskId === task.id} />
+                ))}
+              </div>
+            )}
+          </section>
         ) : (
           <div className="todo-groups">
             {groupBy === 'matrix'

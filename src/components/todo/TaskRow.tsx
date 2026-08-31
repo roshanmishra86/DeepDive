@@ -174,7 +174,7 @@ export function TaskRow({
             className="task-check"
             checked={task.done}
             onChange={() => void toggleDone(task.id, new Date().toISOString())}
-            aria-label={`Complete: ${task.title}`}
+            aria-label={task.done ? `Mark incomplete: ${task.title}` : `Complete: ${task.title}`}
           />
           <div className="task-content">
             <div className={`task-title${task.done ? ' task-done' : ''}`}>{task.title}</div>

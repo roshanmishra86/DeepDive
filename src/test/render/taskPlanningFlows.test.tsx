@@ -249,22 +249,22 @@ describe('task planning release flows', () => {
   })
 
   describe('TodoView', () => {
-    it('hides a task when a filter excludes it and updates the group count', () => {
+    it('separates completed tasks from the active task groups', () => {
       const shown = makeTask(1, { title: 'Active task', important: true, urgent: true, done: false })
-      const hidden = makeTask(2, { title: 'Done task', important: true, urgent: true, done: true })
+      const hidden = makeTask(2, { title: 'Done task', important: true, urgent: true, done: true, completedAt: '2026-08-10T09:00:00.000Z' })
       useTasksStore.setState({ tasks: [shown, hidden] })
       render(<TodoView />)
 
       expect(screen.getByText('Active task')).toBeDefined()
-      expect(screen.getByText('Done task')).toBeDefined()
-      const doGroup = screen.getByText('Active task').closest('.todo-group')!
-      expect(doGroup.querySelector('.todo-group-count')?.textContent).toBe('2 tasks')
-
-      fireEvent.click(screen.getByRole('button', { name: /Filters/ }))
-      fireEvent.click(screen.getByRole('button', { name: 'Show completed' }))
-
       expect(screen.queryByText('Done task')).toBeNull()
+      const doGroup = screen.getByText('Active task').closest('.todo-group')!
       expect(doGroup.querySelector('.todo-group-count')?.textContent).toBe('1 task')
+
+      fireEvent.click(screen.getByRole('tab', { name: /Completed/ }))
+
+      expect(screen.getByText('Done task')).toBeDefined()
+      expect(screen.queryByText('Active task')).toBeNull()
+      expect(screen.getByRole('checkbox', { name: 'Mark incomplete: Done task' })).toBeDefined()
     })
 
     it('reorders only the group whose sort control changed', () => {
