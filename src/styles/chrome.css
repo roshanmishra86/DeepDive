@@ -59,6 +59,24 @@
   align-items: stretch;
 }
 
+.titlebar-update {
+  align-self: center;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-inline: 8px;
+  border: 1px solid var(--border-strong);
+  border-radius: 4px;
+  background: var(--bg-card);
+  color: var(--text-secondary);
+  padding: 4px 9px;
+  font: 500 11px/1 var(--font-ui);
+  cursor: pointer;
+}
+
+.titlebar-update:hover { background: var(--surface-hover); }
+.titlebar-update:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+
 .titlebar-btn {
   width: 46px;
   display: grid;
@@ -1218,6 +1236,108 @@
 .settings-goal-suffix {
   font-size: 12px;
   color: var(--text-muted);
+}
+
+.settings-update {
+  padding-top: 20px;
+  border-top: 1px solid var(--border);
+}
+
+.settings-update-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+}
+
+.settings-update-copy {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+  overflow-wrap: anywhere;
+}
+
+.settings-update-copy strong { font-size: 12px; color: var(--text); }
+.settings-update-copy span { font-size: 11px; line-height: 1.45; color: var(--text-muted); }
+
+.update-toast {
+  position: fixed;
+  z-index: 8;
+  inset-block-start: 52px;
+  inset-inline: 50%;
+  transform: translateX(-50%);
+  width: min(620px, calc(100vw - 40px));
+  min-height: 54px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 10px 12px 10px 16px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  box-shadow: 0 10px 28px rgb(34 31 25 / 16%);
+  animation: update-enter 240ms var(--ease-out);
+}
+
+@keyframes update-enter { from { transform: translate(-50%, -8px); opacity: 0; } }
+
+.update-toast-copy { min-width: 0; flex: 1; display: grid; gap: 7px; }
+.update-toast-copy strong { font-size: 12px; font-weight: 500; overflow-wrap: anywhere; }
+.update-toast-actions { display: flex; gap: 7px; flex: none; }
+.update-toast-actions button { white-space: nowrap; }
+
+.update-progress { height: 3px; overflow: hidden; border-radius: 2px; background: var(--surface-strong); }
+.update-progress-fill { display: block; height: 100%; background: var(--accent); }
+.update-toast-copy span { color: var(--text-muted); font-size: 11px; line-height: 1.4; overflow-wrap: anywhere; }
+.update-toast-error { border-color: color-mix(in srgb, var(--danger) 38%, var(--border-strong)); }
+.update-progress-indeterminate { width: 38%; animation: update-progress 1.2s ease-in-out infinite; }
+@keyframes update-progress { from { transform: translateX(-110%); } to { transform: translateX(270%); } }
+
+.update-dialog-backdrop {
+  position: fixed;
+  z-index: 30;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: var(--overlay);
+}
+
+.update-dialog {
+  width: min(430px, 100%);
+  background: var(--bg-card);
+  border-radius: 12px;
+  padding: 28px;
+  box-shadow: var(--shadow-modal);
+}
+
+.update-dialog-mark { width: 34px; height: 34px; display: grid; place-items: center; border-radius: 8px; background: var(--accent-surface); color: var(--accent); }
+.update-dialog h2 { margin: 18px 0 8px; font: 600 20px/1.25 var(--font-ui); letter-spacing: -0.02em; }
+.update-dialog p { margin: 0; max-width: 48ch; color: var(--text-muted); font-size: 13px; line-height: 1.55; }
+.update-dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 24px; }
+
+.exit-barrier {
+  position: fixed;
+  z-index: 50;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  background: rgb(34 31 25 / 88%);
+  color: var(--bg-card);
+  user-select: none;
+}
+
+.exit-barrier strong { font-size: 15px; }
+.exit-barrier span:last-child { color: #d9d3c8; font-size: 12px; }
+.exit-barrier-spinner { width: 22px; height: 22px; margin-bottom: 5px; border: 2px solid rgb(255 255 255 / 28%); border-top-color: var(--bg-card); border-radius: 50%; animation: barrier-spin .8s linear infinite; }
+@keyframes barrier-spin { to { transform: rotate(360deg); } }
+
+@media (prefers-reduced-motion: reduce) {
+  .update-toast, .update-progress-indeterminate, .exit-barrier-spinner { animation: none; }
 }
 
 /* ─── Session Overlay (Full-screen focus mode) ─── */

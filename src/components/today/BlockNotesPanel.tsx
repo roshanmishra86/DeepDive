@@ -1,11 +1,9 @@
 import { useCallback, useEffect, useRef, useState, type MutableRefObject } from 'react'
-import { getCurrentWindow } from '@tauri-apps/api/window'
 import { useAppStore } from '../../stores/app'
 import { useBlocksStore } from '../../stores/blocks'
 import { formatDuration } from '../../lib/time'
 import { formatRelativeLabel } from '../../lib/relativeTime'
-import { isTauri } from '../../lib/platform'
-import { flushAndDestroyWindow } from '../../lib/windowClose'
+import { registerSaveParticipant } from '../../lib/saveCoordinator'
 import { NotesEditor } from '../common/NotesEditor'
 import type { DayBlock } from '../../db/types'
 import { ArrowSquareOut } from '@phosphor-icons/react/dist/csr/ArrowSquareOut'
@@ -20,7 +18,7 @@ interface BlockNotesPanelProps {
   /**
    * Populated with this panel's flush function so the caller (TodayView) can
    * flush a pending debounce before changing the selection — mirrors
-   * PlanPanel's `registerPlanFlush`, but scoped locally since this panel's
+   * PlanPanel's coordinator registration, but scoped locally since this panel's
    * selection lifecycle is owned by TodayView, not global chrome state.
    */
   flushRef?: MutableRefObject<(() => Promise<boolean>) | null>
@@ -124,25 +122,7 @@ export function BlockNotesPanel({ block, now, flushRef, onFocusChange }: BlockNo
     }
   }, [flush, flushRef])
 
-  // Mirrors PlanPanel's window-close handling: closing the app must not
-  // lose an in-flight or debounced edit to the selected block's note.
-  useEffect(() => {
-    if (!isTauri()) return
-    let unlisten: (() => void) | undefined
-    let cancelled = false
-    void getCurrentWindow().onCloseRequested(async (event) => {
-      if (revision.current <= savedRevision.current && saveState !== 'Saving…') return
-      event.preventDefault()
-      await flushAndDestroyWindow(flush)
-    }).then((fn) => {
-      if (cancelled) fn()
-      else unlisten = fn
-    })
-    return () => {
-      cancelled = true
-      unlisten?.()
-    }
-  }, [flush, saveState])
+  useEffect(() => registerSaveParticipant('today-block-notes', flush), [flush])
 
   if (!block) {
     return (

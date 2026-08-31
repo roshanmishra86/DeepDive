@@ -5,6 +5,9 @@ import { formatTitleDate } from '../../lib/time'
 import { Minus } from '@phosphor-icons/react/dist/csr/Minus'
 import { Square } from '@phosphor-icons/react/dist/csr/Square'
 import { X } from '@phosphor-icons/react/dist/csr/X'
+import { ArrowClockwise } from '@phosphor-icons/react/dist/csr/ArrowClockwise'
+import { useUpdateSnapshot } from './useUpdateSnapshot'
+import { updaterController } from '../../lib/updater'
 
 /**
  * Custom Windows-style title bar (the window runs with `decorations: false`).
@@ -13,6 +16,7 @@ import { X } from '@phosphor-icons/react/dist/csr/X'
  * maximise, matching native behaviour.
  */
 export function TitleBar() {
+  const update = useUpdateSnapshot()
   // Re-render once a minute so the date stays honest across midnight.
   const [, forceRefresh] = useState(0)
   useEffect(() => {
@@ -45,6 +49,11 @@ export function TitleBar() {
           {today}
         </span>
       </div>
+      {update.phase === 'ready' && update.deferred && (
+        <button type="button" className="titlebar-update" onClick={() => updaterController.getSnapshot().deferred && updaterController.defer()} aria-label={`Deep Work v${update.availableVersion} is ready to install`}>
+          <ArrowClockwise size={12} /> Update ready
+        </button>
+      )}
       <div className="titlebar-controls">
         <button
           type="button"

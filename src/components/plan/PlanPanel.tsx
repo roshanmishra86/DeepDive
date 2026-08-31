@@ -1,11 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { open, save } from '@tauri-apps/plugin-dialog'
 import { readTextFile, writeTextFile } from '@tauri-apps/plugin-fs'
-import { getCurrentWindow } from '@tauri-apps/api/window'
 import { DownloadSimple } from '@phosphor-icons/react/dist/csr/DownloadSimple'
 import { UploadSimple } from '@phosphor-icons/react/dist/csr/UploadSimple'
 import { X } from '@phosphor-icons/react/dist/csr/X'
-import { useAppStore, registerPlanFlush } from '../../stores/app'
+import { useAppStore } from '../../stores/app'
 import { useTasksStore } from '../../stores/tasks'
 import { useBlocksStore } from '../../stores/blocks'
 import { useDayStore } from '../../stores/day'
@@ -14,7 +13,7 @@ import { exportTaskMarkdown, importMarkdownNotes, markdownFilename } from '../..
 import { notePlainText } from '../../lib/richText'
 import { NotesEditor } from '../common/NotesEditor'
 import { isTauri } from '../../lib/platform'
-import { flushAndDestroyWindow } from '../../lib/windowClose'
+import { registerSaveParticipant } from '../../lib/saveCoordinator'
 import type { Subtask } from '../../db/types'
 
 type SaveState = 'Saved' | 'Saving…' | 'Save failed'
@@ -102,25 +101,7 @@ export function PlanPanel() {
     return saveRevision()
   }, [saveRevision])
 
-  useEffect(() => registerPlanFlush(flush), [flush])
-
-  useEffect(() => {
-    if (!isTauri()) return
-    let unlisten: (() => void) | undefined
-    let cancelled = false
-    void getCurrentWindow().onCloseRequested(async (event) => {
-      if (revision.current <= savedRevision.current && saveState !== 'Saving…') return
-      event.preventDefault()
-      await flushAndDestroyWindow(flush)
-    }).then((fn) => {
-      if (cancelled) fn()
-      else unlisten = fn
-    })
-    return () => {
-      cancelled = true
-      unlisten?.()
-    }
-  }, [flush, saveState])
+  useEffect(() => registerSaveParticipant('plan-editor', flush), [flush])
 
   if (!target || (!noteOwner && !block)) return null
 

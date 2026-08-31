@@ -27,6 +27,10 @@ import { WeekPlanView } from './components/views/WeekPlanView'
 import { TemplatesView } from './components/views/TemplatesView'
 import { ArchiveView } from './components/views/ArchiveView'
 import { LibraryView } from './components/views/LibraryView'
+import { UpdateExperience } from './components/chrome/UpdateExperience'
+import { isTauri } from './lib/platform'
+import { prepareForExit } from './lib/saveCoordinator'
+import { getCurrentWindow } from '@tauri-apps/api/window'
 
 const VIEWS = {
   today: TodayView,
@@ -182,6 +186,36 @@ function App() {
 
   useGlobalShortcuts()
 
+  // One app-owned close path. Every editor and database write participates
+  // in the same barrier used by update installation.
+  useEffect(() => {
+    if (!isTauri()) return
+    let unlisten: (() => void) | undefined
+    let approved = false
+    let closing = false
+    let cancelled = false
+    void getCurrentWindow().onCloseRequested(async (event) => {
+      if (approved) return
+      event.preventDefault()
+      if (closing) return
+      closing = true
+      const result = await prepareForExit()
+      if (!result.safe) {
+        closing = false
+        return
+      }
+      approved = true
+      await getCurrentWindow().destroy()
+    }).then((fn) => {
+      if (cancelled) fn()
+      else unlisten = fn
+    })
+    return () => {
+      cancelled = true
+      unlisten?.()
+    }
+  }, [])
+
   // Single shell-owned resize listener for the right rail's collapse
   // breakpoint (1320px). Uses matchMedia so it only fires on an actual
   // crossing, not on every resize pixel. `nextRailCollapsed` is the pure,
@@ -209,6 +243,7 @@ function App() {
   return (
     <div className="app-shell">
       <TitleBar />
+      <UpdateExperience />
       {initError && (
         <div className="app-init-error" role="alert">
           <strong>Database unavailable.</strong> Your tasks, sounds and timer history are not

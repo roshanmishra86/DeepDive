@@ -1,6 +1,6 @@
 [package]
 name = "deep-work"
-version = "0.2.2"
+version = "0.2.3"
 description = "A desktop app for managing deep work sessions"
 authors = ["roshanmishra86"]
 license = ""
@@ -31,6 +31,8 @@ tauri-plugin-sql = { version = "2", features = ["sqlite"] }
 tauri-plugin-dialog = "2"
 tauri-plugin-fs = "2"
 tauri-plugin-opener = "2"
+tauri-plugin-process = "2"
+tauri-plugin-updater = "2.10"
 
 [dev-dependencies]
 tokio = { version = "1", features = ["macros", "rt", "rt-multi-thread"] }

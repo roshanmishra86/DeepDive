@@ -3,6 +3,8 @@ import { useAppStore, type RepeatStyle, type TimerStyle } from '../../stores/app
 import { ACCENTS, type AccentKey } from '../../lib/accents'
 import { X } from '@phosphor-icons/react/dist/csr/X'
 import { Check } from '@phosphor-icons/react/dist/csr/Check'
+import { useUpdateSnapshot } from './useUpdateSnapshot'
+import { updaterController } from '../../lib/updater'
 
 const TIMER_STYLES: { key: TimerStyle; label: string }[] = [
   { key: 'ring', label: 'Ring' },
@@ -79,6 +81,7 @@ function WeeklyGoalControl() {
  * them to the `setting` table.
  */
 export function SettingsPanel() {
+  const update = useUpdateSnapshot()
   const { accent, timerStyle, repeatStyle, setAccent, setTimerStyle, setRepeatStyle, closeSettings } =
     useAppStore()
 
@@ -171,6 +174,34 @@ export function SettingsPanel() {
         </div>
 
         <WeeklyGoalControl />
+
+        <div className="settings-section settings-update">
+          <div className="settings-label">Software update</div>
+          <div className="settings-update-row">
+            <div className="settings-update-copy" role="status">
+              <strong>Deep Work v{update.currentVersion}</strong>
+              <span>
+                {update.phase === 'checking' && 'Checking for updates…'}
+                {update.phase === 'available' && `Version ${update.availableVersion} is available.`}
+                {update.phase === 'downloading' && `Downloading version ${update.availableVersion}…`}
+                {update.phase === 'ready' && `Version ${update.availableVersion} is ready to install.`}
+                {update.phase === 'preparing' && 'Saving your work…'}
+                {update.phase === 'installing' && 'Installing update…'}
+                {update.phase === 'error' && update.error}
+                {update.phase === 'idle' && (update.manualMessage ?? 'Updates are checked every six hours.')}
+              </span>
+            </div>
+            {update.phase === 'available' ? (
+              <button type="button" className="btn-secondary" onClick={() => void updaterController.download()}>Download update</button>
+            ) : update.phase === 'ready' ? (
+              <button type="button" className="btn-secondary" onClick={() => void updaterController.installAndRelaunch()}>Restart now</button>
+            ) : update.phase === 'error' ? (
+              <button type="button" className="btn-secondary" onClick={() => void updaterController.retry()}>Retry</button>
+            ) : (
+              <button type="button" className="btn-secondary" disabled={update.phase !== 'idle'} onClick={() => void updaterController.check(true)}>Check now</button>
+            )}
+          </div>
+        </div>
       </div>
     </div>
   )

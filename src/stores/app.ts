@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import type { SqlDriver } from '../db/driver'
 import { ACCENTS, DEFAULT_ACCENT, type AccentKey } from '../lib/accents'
 import * as settingsRepo from '../db/repos/settings'
+import { flushSaveParticipant, hasSaveParticipant } from '../lib/saveCoordinator'
 
 // 'todo' is the Eisenhower backlog (formerly the 'week' view); 'week' is the
 // Mon–Sun calendar of real time blocks.
@@ -18,15 +19,7 @@ export const DEFAULT_WEEKLY_GOAL_MIN = 1200
 
 // Module-level driver reference for persistence callbacks
 let persistenceDriver: SqlDriver | null = null
-let planFlush: (() => Promise<boolean>) | null = null
 let planSwitchRevision = 0
-
-export function registerPlanFlush(flush: (() => Promise<boolean>) | null): () => void {
-  planFlush = flush
-  return () => {
-    if (planFlush === flush) planFlush = null
-  }
-}
 
 /**
  * Cross-view chrome state: which view is showing, the three user settings
@@ -138,22 +131,22 @@ export const useAppStore = create<AppState>()((set) => ({
   },
   openSettings: () => {
     const switchRevision = ++planSwitchRevision
-    if (!planFlush) {
+    if (!hasSaveParticipant('plan-editor')) {
       set({ settingsOpen: true, planTarget: null })
       return
     }
-    void planFlush().then((ok) => {
+    void flushSaveParticipant('plan-editor').then((ok) => {
       if (ok && switchRevision === planSwitchRevision) set({ settingsOpen: true, planTarget: null })
     })
   },
   closeSettings: () => set({ settingsOpen: false }),
   openPlan: (planTarget) => {
     const switchRevision = ++planSwitchRevision
-    if (!planFlush) {
+    if (!hasSaveParticipant('plan-editor')) {
       set({ planTarget, settingsOpen: false })
       return
     }
-    void planFlush().then((ok) => {
+    void flushSaveParticipant('plan-editor').then((ok) => {
       if (ok && switchRevision === planSwitchRevision) set({ planTarget, settingsOpen: false })
     })
   },

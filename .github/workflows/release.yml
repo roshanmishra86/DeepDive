@@ -6,13 +6,26 @@ on:
       - "v*"
 
 jobs:
+  validate:
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: node scripts/validate-release-version.mjs
+
   release:
+    needs: validate
     runs-on: ${{ matrix.platform }}
     permissions:
       contents: write
 
     strategy:
       fail-fast: false
+      max-parallel: 1
       matrix:
         include:
           - platform: windows-latest
@@ -42,12 +55,30 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
-      - uses: tauri-apps/tauri-action@v0
+      - uses: tauri-apps/tauri-action@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           tagName: ${{ github.ref_name }}
           releaseName: "Deep Work ${{ github.ref_name }}"
           releaseDraft: true
           prerelease: false
+          updaterJsonPreferNsis: true
+          uploadUpdaterJson: true
+          uploadUpdaterSignatures: true
           args: ${{ matrix.args }}
+
+  validate-manifest:
+    needs: release
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download updater manifest from draft release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release download "${{ github.ref_name }}" --pattern latest.json --dir .
+      - run: node scripts/validate-update-manifest.mjs latest.json

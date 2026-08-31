@@ -13,9 +13,14 @@ Installers for every tagged release are published on the
 | Windows | `Deep.Work_<version>_x64-setup.exe` (NSIS, installs per-user) |
 | Linux | `Deep.Work_<version>_amd64.AppImage` or `Deep.Work_<version>_amd64.deb` |
 
-The installers are unsigned, so Windows SmartScreen shows a "Windows protected
+The installers are not Authenticode-signed, so Windows SmartScreen shows a "Windows protected
 your PC" warning on first run — choose **More info → Run anyway**. To build
 from source instead, see [Development](#development).
+
+Deep Work verifies in-app updates with Tauri's updater signature. This protects
+artifact integrity but does not replace Windows Authenticode signing. Versions
+installed before the updater bootstrap release must install that release manually
+over the existing installation once; uninstalling first is not required.
 
 ## Prerequisites
 
@@ -75,7 +80,7 @@ believing a local gate. If things are already wedged: `pkill -f "bin/pnpm instal
 Two workflows. Everyday checks run on `main`; installers are built only at tag time.
 
 - **CI** (`.github/workflows/ci.yml`) — push to `main` or `release`, PRs targeting either, plus manual dispatch. Runs `pnpm lint`, `pnpm typecheck`, `pnpm test`, `pnpm check:css`, `pnpm build`, then `cargo fmt --check` and `cargo clippy -D warnings`. Ubuntu only; does not bundle the app.
-- **Release** (`.github/workflows/release.yml`) — push of a tag matching `v*`. Builds on `windows-latest` and `ubuntu-22.04`, then publishes a **draft** GitHub Release with the installers attached. The matrix sets `fail-fast: false` so one platform failing cannot cancel the other and leave a half-populated release.
+- **Release** (`.github/workflows/release.yml`) — push of a tag matching `v*`. It first requires the tag, Tauri config, and Cargo versions to match, then builds signed updater artifacts on `windows-latest` and `ubuntu-22.04` into a **draft** GitHub Release. Builds are serialized so concurrent jobs cannot overwrite `latest.json`. A final job rejects a manifest without signed `windows-x86_64-nsis`, `linux-x86_64-appimage`, and `linux-x86_64-deb` entries.
 
 Because bundling only happens on a tag, a cross-platform packaging break will not
 surface until you tag. To rehearse without publishing anything, push a throwaway
@@ -94,11 +99,24 @@ The version in the artifact filenames comes from `src-tauri/tauri.conf.json`
 `package.json`. Bump it to match the tag before pushing, or a `v1.2.0` release
 will ship binaries named `0.1.0`.
 
-1. Bump `version` in `src-tauri/tauri.conf.json` and `src-tauri/Cargo.toml`.
-2. Commit, then tag with the matching `v<version>` and push the tag.
-3. Download the draft's installers and confirm the app launches — CI proves the
-   binaries build and upload, not that they run.
-4. Publish the draft.
+1. Generate an updater keypair once with `pnpm tauri signer generate`. Commit only
+   the public key in `src-tauri/tauri.conf.json`. Store the private key and password
+   as GitHub secrets `TAURI_SIGNING_PRIVATE_KEY` and
+   `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`, plus a separate secure backup.
+2. Bump `version` in `src-tauri/tauri.conf.json` and `src-tauri/Cargo.toml`.
+3. Commit, then tag with the matching `v<version>` and push the tag.
+4. Download and rehearse every installer from the draft. Test Windows NSIS,
+   AppImage, and deb updating from a real previous-version database.
+5. Confirm the draft contains each installer, its nonempty `.sig`, and a
+   `latest.json` accepted by `node scripts/validate-update-manifest.mjs latest.json`.
+   Publishing is prohibited if any required entry or asset is missing.
+6. Publish the draft only after those checks. Drafts and prereleases are not
+   offered to installed applications.
+
+The first release after enabling this system is the manual bootstrap release.
+Publish a small higher-patch follow-up afterward as the first production proof
+of in-app updating. A broken update is replaced with a higher patch version;
+downgrades are not enabled.
 
 ## App icon
 

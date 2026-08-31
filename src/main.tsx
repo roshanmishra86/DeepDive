@@ -10,6 +10,11 @@ import './styles/tokens.css'
 import './index.css'
 import './styles/chrome.css'
 import App from './App.tsx'
+import { updaterController } from './lib/updater.ts'
+
+// Outside React so Strict Mode cannot create duplicate timers or checks.
+void updaterController.initialize()
+updaterController.startSchedule()
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

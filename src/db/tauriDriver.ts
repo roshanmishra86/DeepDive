@@ -6,6 +6,7 @@
 import Database from '@tauri-apps/plugin-sql'
 import { invoke } from '@tauri-apps/api/core'
 import type { SqlDriver, SqlResult, TxStatement } from './driver'
+import { trackDatabaseWrite } from '../lib/saveCoordinator'
 
 export class TauriDriver implements SqlDriver {
   private db: Database | null = null
@@ -16,7 +17,7 @@ export class TauriDriver implements SqlDriver {
 
   async execute(sql: string, params?: unknown[]): Promise<SqlResult> {
     if (!this.db) throw new Error('Database not connected')
-    const result = await this.db.execute(sql, params)
+    const result = await trackDatabaseWrite(this.db.execute(sql, params))
     return {
       rowsAffected: result.rowsAffected,
       lastInsertId: result.lastInsertId ?? 0,
@@ -41,6 +42,6 @@ export class TauriDriver implements SqlDriver {
   async transaction(statements: TxStatement[]): Promise<SqlResult[]> {
     if (statements.length === 0) return []
     if (!this.db) throw new Error('Database not connected')
-    return invoke<SqlResult[]>('execute_transaction', { statements })
+    return trackDatabaseWrite(invoke<SqlResult[]>('execute_transaction', { statements }))
   }
 }
