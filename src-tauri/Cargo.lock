@@ -841,7 +841,7 @@ dependencies = [
 
 [[package]]
 name = "deep-work"
-version = "0.2.4"
+version = "0.2.5"
 dependencies = [
  "log",
  "reqwest 0.12.28",

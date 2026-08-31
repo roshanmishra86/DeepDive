@@ -74,7 +74,9 @@ jobs:
     needs: release
     runs-on: ubuntu-22.04
     permissions:
-      contents: read
+      # GitHub hides draft releases from tokens without release write access,
+      # even though this job only downloads and validates an existing asset.
+      contents: write
     steps:
       - uses: actions/checkout@v4
       # `gh release download <tag>` uses GitHub's release-by-tag endpoint,
