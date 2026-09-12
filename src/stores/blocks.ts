@@ -1,9 +1,11 @@
 import { create } from 'zustand'
 import type { SqlDriver } from '../db/driver'
-import type { DayBlock, BlockRepeat } from '../db/types'
+import type { DayBlock, BlockRepeat, InboxGroup, EnergyLevel } from '../db/types'
 import * as blocksRepo from '../db/repos/blocks'
+import * as tasksRepo from '../db/repos/tasks'
 import { nudge, moveBlockTo as moveBlockToPure, sortBlocks, nextFreeStart, shiftFrom } from '../lib/today'
 import { addDays, fromDayKey, toDayKey } from '../lib/time'
+import { useTimerStore, onTimerFocusTick } from './timer'
 
 /**
  * Canonical multi-day block store, keyed by day. Hydrates from the database
@@ -40,13 +42,6 @@ interface BlocksState {
       kind: 'deep' | 'shallow' | 'ritual' | 'break'
       durationMin: number
       startMin?: number
-      /**
-       * Current minute-of-day, supplied by the caller, used to compute a
-       * default startMin when none is given. The store must never call
-       * `new Date()` itself — a store reading the clock directly is what
-       * produced this project's past UTC-day-key defect, and it makes this
-       * action untestable. Defaults to 0 for back-compat.
-       */
       fromMin?: number
       pomodoros?: number
       taskId?: number | null
@@ -66,26 +61,32 @@ interface BlocksState {
   removeBlock: (day: string, id: number) => Promise<void>
   move: (day: string, id: number, direction: -1 | 1) => Promise<void>
   moveWithinDay: (day: string, id: number, targetIndex: number) => Promise<void>
-  /**
-   * `updatedAt` is the "last edited" instant, supplied by the caller for the
-   * same reason as `addBlock`'s `fromMin` — the store must never read the
-   * clock itself. Persisted in the same UPDATE as `note`.
-   */
   saveBlockNote: (day: string, id: number, note: string, updatedAt: string) => Promise<boolean>
   toggleCompleted: (day: string, id: number) => Promise<void>
-  // P2-A (PR review, stores/templates.ts): returns `true`/`false` rather
-  // than throwing — never rejects, same as every other action in this
-  // store — so TemplateDetailPane can gate its "navigate to Today" on
-  // whether the apply actually landed instead of assuming it always does.
   applyTemplate: (day: string, templateId: number) => Promise<boolean>
   nudgeBlock: (day: string, id: number, deltaMin: number, ripple?: boolean) => Promise<void>
-  /**
-   * Moves one block to another day, keeping its startMin. Both resulting
-   * orderings are resolved from store state here so the repo never
-   * re-derives them. Returns false (and reverts both days) when the
-   * source-day guard misses or the write throws.
-   */
   moveToDay: (input: { blockId: number; fromDay: string; toDay: string }) => Promise<boolean>
+  addInboxTask: (
+    day: string,
+    input: {
+      title: string
+      energy?: EnergyLevel | null
+      estimateMin?: number
+      tags?: string[]
+      dueAt?: string | null
+      group?: InboxGroup
+    }
+  ) => Promise<number | null>
+  setInboxGroup: (day: string, id: number, group: InboxGroup) => Promise<void>
+  startFocusOnBlock: (day: string, id: number) => Promise<void>
+  stopFocusOnBlock: (day: string, id: number) => Promise<void>
+  importTasksFromTodo: (
+    day: string,
+    tasksToImport: Array<{ id: number; title: string; estimateMin?: number | null; tags?: string[]; energy?: EnergyLevel | null }>
+  ) => Promise<void>
+  rolloverUnfinishedToTodo: (day: string) => Promise<void>
+  incrementLoggedSec: (day: string, blockId: number, addedSec: number) => void
+  moveBlockBetweenGroups: (day: string, id: number, targetGroup: InboxGroup, targetIndex: number) => Promise<void>
 }
 
 // Optimistic local ids for rows not yet persisted. Negative and
@@ -117,6 +118,12 @@ const PERSISTABLE_BLOCK_FIELDS: Record<keyof Omit<DayBlock, 'id' | 'day' | 'sort
   repeat: true,
   trackId: true,
   quiet: true,
+  inboxGroup: true,
+  energy: true,
+  tags: true,
+  loggedSec: true,
+  carriedOver: true,
+  importedFromTodo: true,
 }
 
 /** Sorted, de-duplicated day keys. */
@@ -604,5 +611,265 @@ export const useBlocksStore = create<BlocksState>()((set, get) => {
         return false
       }
     },
+
+    addInboxTask: async (day, input) => {
+      const createdAt = new Date().toISOString()
+      const estimateMin = input.estimateMin && input.estimateMin > 0 ? input.estimateMin : 30
+      const group: InboxGroup = input.group ?? 'capture'
+      const previous = get().blocksByDay[day] ?? []
+
+      const localId = nextLocalId--
+      const localTaskId = nextLocalId--
+      const optimisticBlock: DayBlock = {
+        id: localId,
+        day,
+        taskId: localTaskId,
+        subtaskId: null,
+        title: input.title,
+        kind: 'deep',
+        startMin: 0,
+        durationMin: estimateMin,
+        pomodoros: 1,
+        completed: false,
+        sort: previous.length,
+        note: '',
+        noteUpdatedAt: null,
+        repeat: 'once',
+        trackId: null,
+        quiet: false,
+        inboxGroup: group,
+        energy: input.energy ?? null,
+        tags: input.tags ?? [],
+        loggedSec: 0,
+        carriedOver: false,
+        importedFromTodo: false,
+      }
+
+      setDay(day, [...previous, optimisticBlock])
+
+      if (!persistenceDriver) return localId
+
+      try {
+        const taskId = await tasksRepo.createTask(persistenceDriver, {
+          title: input.title,
+          estimateMin,
+          dueAt: input.dueAt ?? null,
+          createdAt,
+          tags: input.tags ?? [],
+          energy: input.energy ?? null,
+        })
+
+        const realBlockId = await blocksRepo.createBlock(persistenceDriver, {
+          day,
+          taskId,
+          title: input.title,
+          kind: 'deep',
+          startMin: 0,
+          durationMin: estimateMin,
+          pomodoros: 1,
+          sort: previous.length,
+          inboxGroup: group,
+          energy: input.energy ?? null,
+          tags: input.tags ?? [],
+          loggedSec: 0,
+          carriedOver: false,
+          importedFromTodo: false,
+        })
+
+        setDay(
+          day,
+          (get().blocksByDay[day] ?? []).map((b) =>
+            b.id === localId ? { ...b, id: realBlockId, taskId } : b
+          )
+        )
+        return realBlockId
+      } catch (err) {
+        console.error('Failed to persist inbox task:', err)
+        setDay(day, previous)
+        return null
+      }
+    },
+
+    setInboxGroup: async (day, id, group) => {
+      const previous = get().blocksByDay[day] ?? []
+      const next = previous.map((b) => (b.id === id ? { ...b, inboxGroup: group } : b))
+      setDay(day, next)
+      if (persistenceDriver && id > 0) {
+        try {
+          await blocksRepo.updateBlockInboxGroup(persistenceDriver, id, group)
+        } catch (err) {
+          console.error('Failed to update inbox group:', err)
+        }
+      }
+    },
+
+    startFocusOnBlock: async (day, id) => {
+      const previous = get().blocksByDay[day] ?? []
+      const target = previous.find((b) => b.id === id)
+      if (!target) return
+
+      const next = previous.map((b) => {
+        if (b.id === id) {
+          return { ...b, inboxGroup: 'working' as InboxGroup }
+        }
+        if (b.inboxGroup === 'working') {
+          return { ...b, inboxGroup: 'next' as InboxGroup }
+        }
+        return b
+      })
+      setDay(day, next)
+
+      void useTimerStore.getState().start({ ...target, inboxGroup: 'working' })
+
+      if (persistenceDriver) {
+        try {
+          await blocksRepo.updateBlockInboxGroup(persistenceDriver, id, 'working')
+          for (const b of previous) {
+            if (b.inboxGroup === 'working' && b.id !== id && b.id > 0) {
+              await blocksRepo.updateBlockInboxGroup(persistenceDriver, b.id, 'next')
+            }
+          }
+        } catch (err) {
+          console.error('Failed to persist focus start:', err)
+        }
+      }
+    },
+
+    stopFocusOnBlock: async (_day, _id) => {
+      void useTimerStore.getState().pause()
+    },
+
+    importTasksFromTodo: async (day, tasksToImport) => {
+      const previous = get().blocksByDay[day] ?? []
+      const newBlocks: DayBlock[] = []
+
+      for (let i = 0; i < tasksToImport.length; i++) {
+        const t = tasksToImport[i]
+        const localId = nextLocalId--
+        const block: DayBlock = {
+          id: localId,
+          day,
+          taskId: t.id,
+          subtaskId: null,
+          title: t.title,
+          kind: 'deep',
+          startMin: 0,
+          durationMin: t.estimateMin ?? 30,
+          pomodoros: 1,
+          completed: false,
+          sort: previous.length + i,
+          note: '',
+          noteUpdatedAt: null,
+          repeat: 'once',
+          trackId: null,
+          quiet: false,
+          inboxGroup: 'next',
+          energy: t.energy ?? null,
+          tags: t.tags ?? [],
+          loggedSec: 0,
+          carriedOver: false,
+          importedFromTodo: true,
+        }
+        newBlocks.push(block)
+      }
+
+      setDay(day, [...previous, ...newBlocks])
+
+      if (!persistenceDriver) return
+
+      try {
+        for (const block of newBlocks) {
+          const realId = await blocksRepo.createBlock(persistenceDriver, {
+            day,
+            taskId: block.taskId,
+            title: block.title,
+            kind: 'deep',
+            startMin: 0,
+            durationMin: block.durationMin,
+            sort: block.sort,
+            inboxGroup: 'next',
+            energy: block.energy,
+            tags: block.tags,
+            loggedSec: 0,
+            carriedOver: false,
+            importedFromTodo: true,
+          })
+          setDay(
+            day,
+            (get().blocksByDay[day] ?? []).map((b) => (b.id === block.id ? { ...b, id: realId } : b))
+          )
+        }
+      } catch (err) {
+        console.error('Failed to persist imported tasks:', err)
+      }
+    },
+
+    rolloverUnfinishedToTodo: async (day) => {
+      const previous = get().blocksByDay[day] ?? []
+      const next = previous.map((b) => (b.completed ? b : { ...b, carriedOver: true }))
+      setDay(day, next)
+      if (persistenceDriver) {
+        try {
+          await blocksRepo.markUnfinishedAsCarriedOver(persistenceDriver, day)
+        } catch (err) {
+          console.error('Failed to rollover unfinished tasks:', err)
+        }
+      }
+    },
+
+    incrementLoggedSec: (day, blockId, addedSec) => {
+      const previous = get().blocksByDay[day] ?? []
+      const next = previous.map((b) =>
+        b.id === blockId ? { ...b, loggedSec: (b.loggedSec ?? 0) + addedSec } : b
+      )
+      setDay(day, next)
+      if (persistenceDriver && blockId > 0) {
+        blocksRepo.incrementBlockLoggedTime(persistenceDriver, blockId, addedSec).catch((err) => {
+          console.error('Failed to increment logged focus time:', err)
+        })
+      }
+    },
+
+    moveBlockBetweenGroups: async (day, id, targetGroup, targetIndex) => {
+      const previous = get().blocksByDay[day] ?? []
+      const targetBlock = previous.find((b) => b.id === id)
+      if (!targetBlock) return
+
+      const updated = previous.map((b) => (b.id === id ? { ...b, inboxGroup: targetGroup } : b))
+      const inTargetGroup = updated.filter((b) => (b.inboxGroup ?? 'capture') === targetGroup)
+      const others = updated.filter((b) => (b.inboxGroup ?? 'capture') !== targetGroup)
+
+      const withoutMoved = inTargetGroup.filter((b) => b.id !== id)
+      const clampedIndex = Math.max(0, Math.min(targetIndex, withoutMoved.length))
+      withoutMoved.splice(clampedIndex, 0, { ...targetBlock, inboxGroup: targetGroup })
+
+      const reordered = [...others, ...withoutMoved]
+      setDay(day, reordered)
+
+      if (persistenceDriver && id > 0) {
+        try {
+          await blocksRepo.updateBlockInboxGroup(persistenceDriver, id, targetGroup)
+          await blocksRepo.reorderBlocks(
+            persistenceDriver,
+            day,
+            reordered.map((b) => b.id)
+          )
+        } catch (err) {
+          console.error('Failed to persist group move:', err)
+        }
+      }
+    },
   }
 })
+
+onTimerFocusTick((blockId, elapsedSec) => {
+  const store = useBlocksStore.getState()
+  for (const day of Object.keys(store.blocksByDay)) {
+    const blocks = store.blocksByDay[day] ?? []
+    if (blocks.some((b) => b.id === blockId)) {
+      store.incrementLoggedSec(day, blockId, elapsedSec)
+      break
+    }
+  }
+})
+

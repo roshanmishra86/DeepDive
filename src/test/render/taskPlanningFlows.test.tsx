@@ -267,25 +267,19 @@ describe('task planning release flows', () => {
       expect(screen.getByRole('checkbox', { name: 'Mark incomplete: Done task' })).toBeDefined()
     })
 
-    it('reorders only the group whose sort control changed', () => {
-      const zebra = makeTask(1, { title: 'Zebra', important: true, urgent: true, sort: 0 })
-      const apple = makeTask(2, { title: 'Apple', important: true, urgent: true, sort: 1 })
-      const otherFirst = makeTask(3, { title: 'Other B', important: true, urgent: false, sort: 0 })
-      const otherSecond = makeTask(4, { title: 'Other A', important: true, urgent: false, sort: 1 })
-      useTasksStore.setState({ tasks: [zebra, apple, otherFirst, otherSecond] })
+    it('sorts tasks when sort control changed', () => {
+      const zebra = makeTask(1, { title: 'Zebra', priority: 'high', sort: 0 })
+      const apple = makeTask(2, { title: 'Apple', priority: 'high', sort: 1 })
+      useTasksStore.setState({ tasks: [zebra, apple] })
       render(<TodoView />)
 
       const doTitlesBefore = Array.from(document.querySelectorAll('.todo-group')).find((section) => section.textContent?.includes('Zebra'))!
       expect(Array.from(doTitlesBefore.querySelectorAll('.task-title')).map((el) => el.textContent)).toEqual(['Zebra', 'Apple'])
-      const planSection = Array.from(document.querySelectorAll('.todo-group')).find((section) => section.textContent?.includes('Other B'))!
-      expect(Array.from(planSection.querySelectorAll('.task-title')).map((el) => el.textContent)).toEqual(['Other B', 'Other A'])
 
-      fireEvent.change(screen.getByRole('combobox', { name: 'Sort Urgent & important' }), { target: { value: 'title' } })
+      fireEvent.change(screen.getByRole('combobox', { name: 'Sort by' }), { target: { value: 'title' } })
 
       const doSection = Array.from(document.querySelectorAll('.todo-group')).find((section) => section.textContent?.includes('Zebra'))!
       expect(Array.from(doSection.querySelectorAll('.task-title')).map((el) => el.textContent)).toEqual(['Apple', 'Zebra'])
-      const planSectionAfter = Array.from(document.querySelectorAll('.todo-group')).find((section) => section.textContent?.includes('Other B'))!
-      expect(Array.from(planSectionAfter.querySelectorAll('.task-title')).map((el) => el.textContent)).toEqual(['Other B', 'Other A'])
     })
 
     it('disables the drag handle with a reason once a group\'s sort is not manual', () => {

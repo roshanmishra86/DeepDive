@@ -1151,4 +1151,62 @@ describe('blocks store', () => {
     await useBlocksStore.getState().removeBlock(day, id!)
     expect(blocksOf(other)).toBe(otherBefore)
   })
+
+  describe('inbox actions', () => {
+    it('adds an inbox task, updates its group, and focuses it', async () => {
+      const day = '2026-09-11'
+      await useBlocksStore.getState().hydrate(driver, [day])
+
+      const blockId = await useBlocksStore.getState().addInboxTask(day, {
+        title: 'New GTD Task',
+        energy: 'high',
+        estimateMin: 45,
+        tags: ['Deep Work'],
+        group: 'capture',
+      })
+
+      expect(blockId).not.toBeNull()
+      const dayBlocks = useBlocksStore.getState().blocksByDay[day] ?? []
+      const created = dayBlocks.find((b) => b.id === blockId)
+      expect(created).toBeDefined()
+      expect(created?.title).toBe('New GTD Task')
+      expect(created?.inboxGroup).toBe('capture')
+      expect(created?.energy).toBe('high')
+      expect(created?.tags).toEqual(['Deep Work'])
+
+      await useBlocksStore.getState().setInboxGroup(day, blockId!, 'next')
+      expect(useBlocksStore.getState().blocksByDay[day].find((b) => b.id === blockId)?.inboxGroup).toBe('next')
+
+      await useBlocksStore.getState().startFocusOnBlock(day, blockId!)
+      expect(useBlocksStore.getState().blocksByDay[day].find((b) => b.id === blockId)?.inboxGroup).toBe('working')
+
+      await useBlocksStore.getState().stopFocusOnBlock(day, blockId!)
+    })
+
+    it('imports tasks from todo and rolls over unfinished tasks', async () => {
+      const day = '2026-09-11'
+      await useBlocksStore.getState().hydrate(driver, [day])
+
+      await useBlocksStore.getState().importTasksFromTodo(day, [
+        { id: 101, title: 'Todo Task 1', estimateMin: 30, tags: ['Admin'], energy: 'medium' },
+        { id: 102, title: 'Todo Task 2', estimateMin: 60, tags: ['Personal'], energy: 'low' },
+      ])
+
+      const blocks = useBlocksStore.getState().blocksByDay[day] ?? []
+      expect(blocks).toHaveLength(2)
+      expect(blocks[0].inboxGroup).toBe('next')
+      expect(blocks[0].importedFromTodo).toBe(true)
+      expect(blocks[1].inboxGroup).toBe('next')
+
+      // Complete one, leave one unfinished
+      await useBlocksStore.getState().toggleCompleted(day, blocks[0].id)
+      await useBlocksStore.getState().rolloverUnfinishedToTodo(day)
+
+      const rolled = useBlocksStore.getState().blocksByDay[day] ?? []
+      expect(rolled[0].completed).toBe(true)
+      expect(rolled[0].carriedOver).toBe(false)
+      expect(rolled[1].completed).toBe(false)
+      expect(rolled[1].carriedOver).toBe(true)
+    })
+  })
 })

@@ -20,6 +20,7 @@ describe('migrations', () => {
       'idx_day_block_day',
       'idx_day_block_day_sort',
       'idx_day_block_task_id',
+      'idx_day_block_inbox_group',
       'idx_template_block_template_id_sort',
       'idx_ritual_log_day',
       'idx_distraction_day',
@@ -234,4 +235,83 @@ describe('migrations', () => {
     )
     expect(block[0].task_id).toBeNull()
   })
+
+  it('migration 0008 adds inbox_group, energy, tags, logged_sec, carried_over, imported_from_todo', async () => {
+    const block = await driver.execute(
+      'INSERT INTO day_block (day, title, kind, start_min, duration_min) VALUES (?, ?, ?, ?, ?)',
+      ['2026-09-11', 'GTD task', 'deep', 540, 30]
+    )
+    const blockRows = await driver.select<{
+      inbox_group: string
+      energy: string | null
+      tags: string
+      logged_sec: number
+      carried_over: number
+      imported_from_todo: number
+    }>(
+      'SELECT inbox_group, energy, tags, logged_sec, carried_over, imported_from_todo FROM day_block WHERE id = ?',
+      [block.lastInsertId]
+    )
+    expect(blockRows[0]).toEqual({
+      inbox_group: 'capture',
+      energy: null,
+      tags: '',
+      logged_sec: 0,
+      carried_over: 0,
+      imported_from_todo: 0,
+    })
+
+    const task = await driver.execute(
+      'INSERT INTO task (title, created_at, tags, energy) VALUES (?, ?, ?, ?)',
+      ['Tagged task', '2026-09-11T10:00:00Z', 'Deep Work,Writing', 'high']
+    )
+    const taskRows = await driver.select<{ tags: string; energy: string | null }>(
+      'SELECT tags, energy FROM task WHERE id = ?',
+      [task.lastInsertId]
+    )
+    expect(taskRows[0]).toEqual({
+      tags: 'Deep Work,Writing',
+      energy: 'high',
+    })
+  })
+
+  it('migration 0009 adds category, tags, favourite, last_used_at, destination, icon to template, and tag to template_block', async () => {
+    // Check seeded Maker Day template has GTD fields
+    const templates = await driver.select<{
+      category: string
+      tags: string
+      favourite: number
+      destination: string
+      icon: string
+    }>(
+      'SELECT category, tags, favourite, destination, icon FROM template WHERE name = ?',
+      ['Maker Day']
+    )
+    expect(templates[0]).toEqual({
+      category: 'work',
+      tags: 'Deep Work,Work',
+      favourite: 1,
+      destination: 'inbox',
+      icon: 'target',
+    })
+
+    // Check template blocks have tag
+    const blocks = await driver.select<{ title: string; tag: string }>(
+      'SELECT title, tag FROM template_block WHERE title = ?',
+      ['Morning pages']
+    )
+    expect(blocks[0].tag).toBe('Setup')
+
+    // Updating destination on template works
+    await driver.execute('UPDATE template SET destination = ? WHERE name = ?', [
+      'todo',
+      'Maker Day',
+    ])
+    const updated = await driver.select<{ destination: string }>(
+      'SELECT destination FROM template WHERE name = ?',
+      ['Maker Day']
+    )
+    expect(updated[0].destination).toBe('todo')
+  })
 })
+

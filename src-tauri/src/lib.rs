@@ -61,6 +61,18 @@ pub fn run() {
                                 sql: include_str!("../migrations/0007_remote_audio.sql"),
                                 kind: MigrationKind::Up,
                             },
+                            Migration {
+                                version: 8,
+                                description: "Inbox groups, task tags, and carried over status",
+                                sql: include_str!("../migrations/0008_inbox_and_tags.sql"),
+                                kind: MigrationKind::Up,
+                            },
+                            Migration {
+                                version: 9,
+                                description: "GTD template metadata and template block tag",
+                                sql: include_str!("../migrations/0009_gtd_templates.sql"),
+                                kind: MigrationKind::Up,
+                            },
                         ],
                     )
                     .build(),

@@ -11,8 +11,16 @@ import {
 import { formatClock, fromDayKey } from '../../lib/time'
 import { activeWorkBlock, displayPomodoroTarget, isFreshCycle } from '../../lib/timer'
 import { upcomingTasks, taskMeta } from '../../lib/todo'
+import { getTagPillClass } from '../../lib/inbox'
+import { useBlocksStore } from '../../stores/blocks'
 import { ArrowCounterClockwise } from '@phosphor-icons/react/dist/csr/ArrowCounterClockwise'
 import { X } from '@phosphor-icons/react/dist/csr/X'
+import { Play } from '@phosphor-icons/react/dist/csr/Play'
+import { Square } from '@phosphor-icons/react/dist/csr/Square'
+import { TodoQuickAddCard } from '../todo/TodoQuickAddCard'
+import { TodoDetailCard } from '../todo/TodoDetailCard'
+import { TodoTipsShortcuts } from '../todo/TodoTipsShortcuts'
+import { QuickApplyRailCard } from '../templates/QuickApplyRailCard'
 
 const EMPTY: Subtask[] = []
 
@@ -198,11 +206,91 @@ export function RailToggleStrip({ onExpand }: { onExpand: () => void }) {
   )
 }
 
+function CurrentTaskCard() {
+  const blocks = useTodayBlocks()
+  const nowMin = useDayStore((s) => s.nowMin)
+  const currentDay = useDayStore((s) => s.currentDay)
+  const timerRunning = useTimerStore((s) => s.running)
+  const timerBlockTitle = useTimerStore((s) => s.blockTitle)
+  const timerElapsedSec = useTimerStore((s) => s.totalSec - s.remainingSec)
+  const pomodorosDone = useTimerStore((s) => s.pomodorosDone)
+  const pomodorosPerBlock = useTimerStore((s) => s.pomodorosPerBlock)
+  const stopFocusOnBlock = useBlocksStore((s) => s.stopFocusOnBlock)
+  const startFocusOnBlock = useBlocksStore((s) => s.startFocusOnBlock)
+
+  const workingBlock =
+    blocks.find((b) => b.inboxGroup === 'working' && !b.completed) ??
+    (timerBlockTitle ? blocks.find((b) => b.title === timerBlockTitle && !b.completed) : null) ??
+    activeWorkBlock(blocks, nowMin)
+
+  if (!workingBlock) return null
+
+  const targetPomodoros = Math.max(1, pomodorosPerBlock)
+  const currentPomodoroNum = Math.min(pomodorosDone + 1, targetPomodoros)
+  const totalSec = workingBlock.loggedSec ?? (timerRunning ? timerElapsedSec : 0)
+  const elapsedMin = Math.floor(totalSec / 60)
+  const elapsedSec = totalSec % 60
+  const elapsedStr = `${String(elapsedMin).padStart(2, '0')}:${String(elapsedSec).padStart(2, '0')}`
+
+  return (
+    <div className="rail-current-card">
+      <div className="rail-current-head">
+        <span className="rail-current-label">Current task</span>
+      </div>
+
+      <div className="rail-current-title-row">
+        <span className="rail-current-dot" />
+        <span className="rail-current-title">{workingBlock.title}</span>
+      </div>
+
+      {workingBlock.tags && workingBlock.tags.length > 0 && (
+        <div className="rail-current-tags">
+          {workingBlock.tags.map((tag) => (
+            <span key={tag} className={`tag-pill ${getTagPillClass(tag)}`}>
+              {tag}
+            </span>
+          ))}
+        </div>
+      )}
+
+      <div className="rail-current-meta-row">
+        <span className="rail-current-meta">
+          {elapsedStr} elapsed · Pomodoro {currentPomodoroNum} of {targetPomodoros}
+        </span>
+        {timerRunning && timerBlockTitle === workingBlock.title ? (
+          <button
+            type="button"
+            className="rail-current-stop-btn"
+            onClick={() => void stopFocusOnBlock(currentDay, workingBlock.id)}
+          >
+            <Square size={10} weight="fill" />
+            <span>Stop</span>
+          </button>
+        ) : (
+          <button
+            type="button"
+            className="rail-current-stop-btn"
+            onClick={() => void startFocusOnBlock(currentDay, workingBlock.id)}
+          >
+            <Play size={10} weight="fill" />
+            <span>Focus</span>
+          </button>
+        )}
+      </div>
+    </div>
+  )
+}
+
 export function RightRail({ onCollapse }: { onCollapse?: () => void }) {
   const view = useAppStore((s) => s.view)
   const setView = useAppStore((s) => s.setView)
   const tasks = useTasksStore((s) => s.tasks)
   const subtasksByTask = useTasksStore((s) => s.subtasksByTask)
+  const blocks = useTodayBlocks()
+
+  const doNextBlocks = useMemo(() => {
+    return blocks.filter((b) => b.inboxGroup === 'next' && !b.completed).slice(0, 5)
+  }, [blocks])
 
   // One clock, owned by the day store — rebuilt the same way TodoView and
   // WeekPlanView do, never read from `new Date()` directly. Otherwise "due
@@ -231,45 +319,81 @@ export function RightRail({ onCollapse }: { onCollapse?: () => void }) {
           </button>
         </div>
       )}
-      {view === 'today' && <div id="today-notes-rail-slot" className="rail-notes-slot" />}
-      <PomodoroWidget />
-
-      <div className="rail-scroll">
-        <div className="rail-upcoming-head">
-          <span className="rail-label">Up next</span>
-          <button type="button" className="rail-all" onClick={() => setView('todo')}>
-            All
-          </button>
+      {view === 'todo' ? (
+        <div className="rail-scroll">
+          <div className="todo-rail-stack">
+            <TodoQuickAddCard />
+            <TodoDetailCard />
+            <TodoTipsShortcuts />
+          </div>
         </div>
-        {upcoming.length === 0 ? (
-          <div className="rail-upcoming-empty">
-            <div className="rail-upcoming-empty-text">No incomplete tasks</div>
+      ) : view === 'templates' ? (
+        <>
+          <PomodoroWidget />
+          <div className="rail-scroll">
+            <QuickApplyRailCard />
+            <DistractionLog />
           </div>
-        ) : (
-          <div className="rail-upcoming">
-            {upcoming.map((item, i) => {
-              const meta = taskMeta(item.task, now, subtasksByTask[item.task.id] ?? EMPTY)
-              return (
-                <div key={item.task.id} className="rail-upcoming-item">
-                  <span className="rail-upcoming-n" style={{ color: item.rankColor }}>
-                    {i + 1}
-                  </span>
-                  <div>
-                    <div className="rail-upcoming-title">
-                      {item.task.title}
-                    </div>
-                    {meta && (
-                      <div className="rail-upcoming-meta">{meta}</div>
-                    )}
-                  </div>
-                </div>
-              )
-            })}
-          </div>
-        )}
+        </>
+      ) : (
+        <>
+          <PomodoroWidget />
+          <CurrentTaskCard />
 
-        <DistractionLog />
-      </div>
+          <div className="rail-scroll">
+            <div className="rail-upcoming-head">
+              <span className="rail-label">Up next</span>
+              <button type="button" className="rail-all" onClick={() => setView('todo')}>
+                All
+              </button>
+            </div>
+            {view === 'today' && doNextBlocks.length > 0 ? (
+              <div className="rail-upcoming">
+                {doNextBlocks.map((item, i) => (
+                  <div key={item.id} className="rail-upcoming-item">
+                    <span className="rail-upcoming-n" style={{ color: 'var(--accent)' }}>
+                      {i + 1}
+                    </span>
+                    <div style={{ minWidth: 0, flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <div className="rail-upcoming-title">
+                        {item.title}
+                      </div>
+                      <span className="rail-upcoming-dur">{item.durationMin} min</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : upcoming.length === 0 ? (
+              <div className="rail-upcoming-empty">
+                <div className="rail-upcoming-empty-text">No incomplete tasks</div>
+              </div>
+            ) : (
+              <div className="rail-upcoming">
+                {upcoming.map((item, i) => {
+                  const meta = taskMeta(item.task, now, subtasksByTask[item.task.id] ?? EMPTY)
+                  return (
+                    <div key={item.task.id} className="rail-upcoming-item">
+                      <span className="rail-upcoming-n" style={{ color: item.rankColor }}>
+                        {i + 1}
+                      </span>
+                      <div>
+                        <div className="rail-upcoming-title">
+                          {item.task.title}
+                        </div>
+                        {meta && (
+                          <div className="rail-upcoming-meta">{meta}</div>
+                        )}
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+
+            <DistractionLog />
+          </div>
+        </>
+      )}
     </aside>
   )
 }

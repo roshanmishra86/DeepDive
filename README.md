@@ -184,7 +184,7 @@ Built artifacts are located in:
 
 The source code is MIT — see [LICENSE](LICENSE).
 
-The bundled audio in `public/audio/` is **not** covered by that grant. Those ten
+The bundled audio in `public/audio/` is **not** covered by MIT  License. Those ten
 tracks come from [Pixabay](https://pixabay.com/music/) and are used under the
 [Pixabay Content License](https://pixabay.com/service/license-summary/), which
 permits commercial use and redistribution without attribution but forbids

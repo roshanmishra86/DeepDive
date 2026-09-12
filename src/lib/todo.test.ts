@@ -20,6 +20,14 @@ import {
   QUADRANTS,
   DEADLINE_BUCKETS,
   DEFAULT_TODO_FILTERS,
+  formatTaskEstimate,
+  formatTaskDueDate,
+  extractTaskProject,
+  filterTasksByGtdNav,
+  groupByPriorityGtd,
+  groupByProjectGtd,
+  groupByDeadlineGtd,
+  groupByBoardGtd,
 } from './todo'
 import { formatDuration } from './time'
 import type { Task } from '../db/types'
@@ -779,3 +787,231 @@ describe('DEADLINE_BUCKETS metadata', () => {
     }
   })
 })
+
+describe('formatTaskEstimate', () => {
+  it('returns empty string for null, 0 or negative', () => {
+    expect(formatTaskEstimate(null)).toBe('')
+    expect(formatTaskEstimate(undefined)).toBe('')
+    expect(formatTaskEstimate(0)).toBe('')
+    expect(formatTaskEstimate(-10)).toBe('')
+  })
+
+  it('formats minutes under 60 as m', () => {
+    expect(formatTaskEstimate(30)).toBe('30 m')
+    expect(formatTaskEstimate(45)).toBe('45 m')
+  })
+
+  it('formats whole hours as h', () => {
+    expect(formatTaskEstimate(60)).toBe('1 h')
+    expect(formatTaskEstimate(120)).toBe('2 h')
+  })
+
+  it('formats fractional hours', () => {
+    expect(formatTaskEstimate(90)).toBe('1.5 h')
+  })
+})
+
+describe('formatTaskDueDate', () => {
+  const baseNow = new Date('2026-09-11T10:00:00.000Z')
+
+  it('returns No date for missing dueAt', () => {
+    expect(formatTaskDueDate(null, baseNow)).toEqual({
+      text: 'No date',
+      isUrgent: false,
+      isOverdue: false,
+    })
+  })
+
+  it('returns Overdue for past date', () => {
+    expect(formatTaskDueDate('2026-09-10T10:00:00.000Z', baseNow)).toEqual({
+      text: 'Overdue',
+      isUrgent: true,
+      isOverdue: true,
+    })
+  })
+
+  it('returns Today for same-day due', () => {
+    const today = new Date(baseNow)
+    today.setHours(18, 0, 0, 0)
+    expect(formatTaskDueDate(today.toISOString(), baseNow)).toEqual({
+      text: 'Today',
+      isUrgent: true,
+      isOverdue: false,
+    })
+  })
+
+  it('returns Tomorrow for next-day due', () => {
+    const tomorrow = new Date(baseNow)
+    tomorrow.setDate(tomorrow.getDate() + 1)
+    tomorrow.setHours(14, 0, 0, 0)
+    expect(formatTaskDueDate(tomorrow.toISOString(), baseNow)).toEqual({
+      text: 'Tomorrow',
+      isUrgent: true,
+      isOverdue: false,
+    })
+  })
+
+  it('formats date beyond tomorrow with weekday and month', () => {
+    const future = new Date(baseNow)
+    future.setDate(future.getDate() + 4) // Sep 15
+    const res = formatTaskDueDate(future.toISOString(), baseNow)
+    expect(res.isUrgent).toBe(false)
+    expect(res.text).toContain('15 Sep')
+  })
+})
+
+describe('extractTaskProject', () => {
+  it('extracts non-context, non-someday, non-waiting tag', () => {
+    expect(extractTaskProject({ tags: ['@work', 'Website', 'someday'] })).toBe('Website')
+  })
+
+  it('returns null if no project tag present', () => {
+    expect(extractTaskProject({ tags: ['@errand', 'waiting', 'someday'] })).toBeNull()
+    expect(extractTaskProject({ tags: [] })).toBeNull()
+  })
+})
+
+describe('filterTasksByGtdNav', () => {
+  const baseNow = new Date('2026-09-11T10:00:00.000Z')
+
+  it('filters by all', () => {
+    const tasks = [makeTask(1), makeTask(2)]
+    expect(filterTasksByGtdNav(tasks, 'all', baseNow)).toHaveLength(2)
+  })
+
+  it('filters by starred', () => {
+    const tasks = [
+      makeTask(1, { priority: 'high' }),
+      makeTask(2, { important: true, priority: 'medium' }),
+      makeTask(3, { priority: 'low' }),
+    ]
+    const filtered = filterTasksByGtdNav(tasks, 'starred', baseNow)
+    expect(filtered.map((t) => t.id)).toEqual([1, 2])
+  })
+
+  it('filters by overdue', () => {
+    const tasks = [
+      makeTask(1, { dueAt: '2026-09-01T00:00:00.000Z' }),
+      makeTask(2, { dueAt: '2026-09-20T00:00:00.000Z' }),
+    ]
+    const filtered = filterTasksByGtdNav(tasks, 'overdue', baseNow)
+    expect(filtered.map((t) => t.id)).toEqual([1])
+  })
+
+  it('filters by no_date', () => {
+    const tasks = [
+      makeTask(1, { dueAt: null }),
+      makeTask(2, { dueAt: '2026-09-20T00:00:00.000Z' }),
+    ]
+    const filtered = filterTasksByGtdNav(tasks, 'no_date', baseNow)
+    expect(filtered.map((t) => t.id)).toEqual([1])
+  })
+
+  it('filters by someday', () => {
+    const tasks = [
+      makeTask(1, { tags: ['someday'] }),
+      makeTask(2, { priority: 'low', dueAt: null }),
+      makeTask(3, { priority: 'high' }),
+    ]
+    const filtered = filterTasksByGtdNav(tasks, 'someday', baseNow)
+    expect(filtered.map((t) => t.id)).toEqual([1, 2])
+  })
+
+  it('filters by waiting_for', () => {
+    const tasks = [
+      makeTask(1, { tags: ['waiting'] }),
+      makeTask(2, { tags: ['Website'] }),
+    ]
+    const filtered = filterTasksByGtdNav(tasks, 'waiting_for', baseNow)
+    expect(filtered.map((t) => t.id)).toEqual([1])
+  })
+
+  it('filters by projects', () => {
+    const tasks = [
+      makeTask(1, { tags: ['Website'] }),
+      makeTask(2, { tags: ['@errand'] }),
+    ]
+    const filtered = filterTasksByGtdNav(tasks, 'projects', baseNow)
+    expect(filtered.map((t) => t.id)).toEqual([1])
+  })
+})
+
+describe('groupByPriorityGtd', () => {
+  it('places tasks in High, Medium, Low, Someday groups', () => {
+    const tasks = [
+      makeTask(1, { priority: 'high' }),
+      makeTask(2, { priority: 'medium' }),
+      makeTask(3, { priority: 'low' }),
+      makeTask(4, { priority: 'low', tags: ['someday'] }),
+    ]
+    const groups = groupByPriorityGtd(tasks)
+    expect(groups).toHaveLength(4)
+    expect(groups[0].id).toBe('high')
+    expect(groups[0].tasks.map((t) => t.id)).toEqual([1])
+    expect(groups[1].id).toBe('medium')
+    expect(groups[1].tasks.map((t) => t.id)).toEqual([2])
+    expect(groups[2].id).toBe('low')
+    expect(groups[2].tasks.map((t) => t.id)).toEqual([3])
+    expect(groups[3].id).toBe('someday')
+    expect(groups[3].tasks.map((t) => t.id)).toEqual([4])
+  })
+})
+
+describe('groupByProjectGtd', () => {
+  it('groups tasks by their project tag and no project', () => {
+    const tasks = [
+      makeTask(1, { tags: ['Website'] }),
+      makeTask(2, { tags: ['Website'] }),
+      makeTask(3, { tags: ['Personal'] }),
+      makeTask(4, { tags: [] }),
+    ]
+    const groups = groupByProjectGtd(tasks)
+    expect(groups.some((g) => g.label === 'Website')).toBe(true)
+    expect(groups.some((g) => g.label === 'Personal')).toBe(true)
+    expect(groups.some((g) => g.label === 'No Project')).toBe(true)
+  })
+})
+
+describe('groupByBoardGtd', () => {
+  it('partitions active and completed tasks into columns', () => {
+    const tasks = [
+      makeTask(1, { priority: 'high', done: false }),
+      makeTask(2, { priority: 'medium', done: false }),
+      makeTask(3, { priority: 'low', done: false }),
+      makeTask(4, { tags: ['someday'], done: false }),
+      makeTask(5, { done: true }),
+    ]
+    const board = groupByBoardGtd(tasks)
+    expect(board).toHaveLength(5)
+    expect(board[0].tasks.map((t) => t.id)).toEqual([1])
+    expect(board[1].tasks.map((t) => t.id)).toEqual([2])
+    expect(board[2].tasks.map((t) => t.id)).toEqual([3])
+    expect(board[3].tasks.map((t) => t.id)).toEqual([4])
+    expect(board[4].tasks.map((t) => t.id)).toEqual([5])
+  })
+})
+
+describe('groupByDeadlineGtd', () => {
+  it('categorizes tasks into deadline buckets based on due date relative to now', () => {
+    // Wednesday Sept 16, 2026 12:00:00
+    const now = new Date('2026-09-16T12:00:00.000Z')
+    const tasks = [
+      makeTask(1, { dueAt: '2026-09-15T10:00:00.000Z' }), // overdue
+      makeTask(2, { dueAt: '2026-09-16T17:00:00.000Z' }), // today
+      makeTask(3, { dueAt: '2026-09-17T09:00:00.000Z' }), // tomorrow
+      makeTask(4, { dueAt: '2026-09-19T14:00:00.000Z' }), // this-week (Sat)
+      makeTask(5, { dueAt: '2026-09-25T10:00:00.000Z' }), // later (next week)
+      makeTask(6, { dueAt: null }),                       // no-date
+    ]
+
+    const buckets = groupByDeadlineGtd(tasks, now)
+    expect(buckets).toHaveLength(6)
+    expect(buckets.find((b) => b.id === 'overdue')?.tasks.map((t) => t.id)).toEqual([1])
+    expect(buckets.find((b) => b.id === 'today')?.tasks.map((t) => t.id)).toEqual([2])
+    expect(buckets.find((b) => b.id === 'tomorrow')?.tasks.map((t) => t.id)).toEqual([3])
+    expect(buckets.find((b) => b.id === 'this-week')?.tasks.map((t) => t.id)).toEqual([4])
+    expect(buckets.find((b) => b.id === 'later')?.tasks.map((t) => t.id)).toEqual([5])
+    expect(buckets.find((b) => b.id === 'no-date')?.tasks.map((t) => t.id)).toEqual([6])
+  })
+})
+

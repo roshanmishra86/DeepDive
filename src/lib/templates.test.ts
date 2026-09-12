@@ -8,6 +8,12 @@ import {
   templateSubtitle,
   templateTotals,
   nextTemplateBlockStart,
+  filterTemplates,
+  computeTemplateStats,
+  computeCategoryBreakdown,
+  formatLastUsed,
+  STARTER_TEMPLATES,
+  getTagClass,
 } from './templates'
 import type { TemplateBlock, Template } from '../db/types'
 
@@ -276,4 +282,180 @@ describe('templates library', () => {
     })
   })
 
+  describe('filterTemplates', () => {
+    const sample = [
+      { id: 1, name: 'Morning reset', description: 'Start clarity', category: 'ritual' as const, tags: ['Ritual', 'Personal'], favourite: false },
+      { id: 2, name: 'Deep work prep', description: 'Focus conditions', category: 'work' as const, tags: ['Deep Work', 'Work'], favourite: true },
+      { id: 3, name: 'Client follow-up', description: 'Emails', category: 'admin' as const, tags: ['Admin', 'Client'], favourite: false },
+      { id: 4, name: 'Errands run', description: 'Grocery', category: 'personal' as const, tags: ['Personal'], favourite: false },
+    ]
+
+    it('returns all when query and category are all', () => {
+      expect(filterTemplates(sample, '', 'all')).toHaveLength(4)
+      expect(filterTemplates(sample, '  ', '')).toHaveLength(4)
+    })
+
+    it('filters by category tab', () => {
+      const work = filterTemplates(sample, '', 'work')
+      expect(work).toHaveLength(1)
+      expect(work[0].name).toBe('Deep work prep')
+
+      const ritual = filterTemplates(sample, '', 'ritual')
+      expect(ritual).toHaveLength(1)
+      expect(ritual[0].name).toBe('Morning reset')
+    })
+
+    it('filters by favourites tab', () => {
+      const favs = filterTemplates(sample, '', 'favourites')
+      expect(favs).toHaveLength(1)
+      expect(favs[0].name).toBe('Deep work prep')
+    })
+
+    it('filters by text search in name, description, and tags', () => {
+      expect(filterTemplates(sample, 'reset', 'all')).toHaveLength(1)
+      expect(filterTemplates(sample, 'conditions', 'all')).toHaveLength(1)
+      expect(filterTemplates(sample, 'client', 'all')).toHaveLength(1)
+      expect(filterTemplates(sample, 'personal', 'all')).toHaveLength(2)
+    })
+
+    it('combines text search with category filter', () => {
+      expect(filterTemplates(sample, 'personal', 'ritual')).toHaveLength(1)
+      expect(filterTemplates(sample, 'personal', 'work')).toHaveLength(0)
+    })
+  })
+
+  describe('computeTemplateStats', () => {
+    const fixedNow = new Date('2026-09-11T12:00:00Z')
+
+    it('computes stats accurately from templates', () => {
+      const items = [
+        { weekdays: 31, favourite: true, lastUsedAt: '2026-09-11T09:00:00Z' }, // used today, recurring, fav
+        { weekdays: 127, favourite: false, lastUsedAt: '2026-09-09T09:00:00Z' }, // used 2 days ago, recurring
+        { weekdays: 0, favourite: true, lastUsedAt: '2026-08-01T09:00:00Z' }, // used > 1 month ago, not recurring, fav
+        { weekdays: 0, favourite: false, lastUsedAt: null }, // never used
+      ]
+      const stats = computeTemplateStats(items, fixedNow)
+      expect(stats.totalTemplates).toBe(4)
+      expect(stats.recurringCount).toBe(2)
+      expect(stats.favouritesCount).toBe(2)
+      expect(stats.usedThisWeek).toBe(2)
+    })
+
+    it('handles empty templates list gracefully', () => {
+      const stats = computeTemplateStats([], fixedNow)
+      expect(stats).toEqual({
+        totalTemplates: 0,
+        usedThisWeek: 0,
+        recurringCount: 0,
+        favouritesCount: 0,
+      })
+    })
+  })
+
+  describe('computeCategoryBreakdown', () => {
+    it('computes counts and percentages for categories', () => {
+      const items = [
+        { category: 'work' as const },
+        { category: 'work' as const },
+        { category: 'personal' as const },
+        { category: 'ritual' as const },
+      ]
+      const breakdown = computeCategoryBreakdown(items)
+      expect(breakdown).toHaveLength(4)
+      const work = breakdown.find((b) => b.category === 'work')!
+      expect(work.count).toBe(2)
+      expect(work.percentage).toBe(50)
+
+      const personal = breakdown.find((b) => b.category === 'personal')!
+      expect(personal.count).toBe(1)
+      expect(personal.percentage).toBe(25)
+    })
+
+    it('handles empty list with 0% breakdown', () => {
+      const breakdown = computeCategoryBreakdown([])
+      expect(breakdown.every((b) => b.count === 0 && b.percentage === 0)).toBe(true)
+    })
+  })
+
+  describe('formatLastUsed', () => {
+    const fixedNow = new Date('2026-09-11T12:00:00Z')
+
+    it('formats relative last used dates accurately', () => {
+      expect(formatLastUsed(null, fixedNow)).toBe('Never used')
+      expect(formatLastUsed(undefined, fixedNow)).toBe('Never used')
+      expect(formatLastUsed('invalid-date', fixedNow)).toBe('Never used')
+      expect(formatLastUsed('2026-09-11T09:00:00Z', fixedNow)).toBe('Used today')
+      expect(formatLastUsed('2026-09-10T12:00:00Z', fixedNow)).toBe('Used yesterday')
+      expect(formatLastUsed('2026-09-09T12:00:00Z', fixedNow)).toBe('Used 2 days ago')
+      expect(formatLastUsed('2026-09-06T12:00:00Z', fixedNow)).toBe('Used 5 days ago')
+      expect(formatLastUsed('2026-09-04T12:00:00Z', fixedNow)).toBe('Used 1 week ago')
+      expect(formatLastUsed('2026-08-28T12:00:00Z', fixedNow)).toBe('Used 2 weeks ago')
+    })
+  })
+
+  describe('STARTER_TEMPLATES', () => {
+    it('contains exactly 12 starter templates matching newScreen_Templates.png', () => {
+      expect(STARTER_TEMPLATES).toHaveLength(12)
+    })
+
+    it('has 5 Work, 3 Personal, 2 Ritual, and 2 Admin templates', () => {
+      const breakdown = computeCategoryBreakdown(STARTER_TEMPLATES)
+      const work = breakdown.find((b) => b.category === 'work')!
+      const personal = breakdown.find((b) => b.category === 'personal')!
+      const ritual = breakdown.find((b) => b.category === 'ritual')!
+      const admin = breakdown.find((b) => b.category === 'admin')!
+
+      expect(work.count).toBe(5)
+      expect(work.percentage).toBe(42)
+
+      expect(personal.count).toBe(3)
+      expect(personal.percentage).toBe(25)
+
+      expect(ritual.count).toBe(2)
+      expect(ritual.percentage).toBe(17)
+
+      expect(admin.count).toBe(2)
+      expect(admin.percentage).toBe(17)
+    })
+
+    it('has 2 favourites and 3 recurring templates', () => {
+      const stats = computeTemplateStats(STARTER_TEMPLATES)
+      expect(stats.favouritesCount).toBe(2)
+      expect(stats.recurringCount).toBe(3)
+    })
+  })
+
+  describe('getTagClass', () => {
+    it('returns tpl-tag-mint for work, deep, or plan keywords', () => {
+      expect(getTagClass('Deep Work')).toBe('tpl-tag-mint')
+      expect(getTagClass('Planning')).toBe('tpl-tag-mint')
+      expect(getTagClass('Sprint Work')).toBe('tpl-tag-mint')
+    })
+
+    it('returns tpl-tag-blue for client, comm, admin, or setup keywords', () => {
+      expect(getTagClass('Client')).toBe('tpl-tag-blue')
+      expect(getTagClass('Admin')).toBe('tpl-tag-blue')
+      expect(getTagClass('Setup')).toBe('tpl-tag-blue')
+    })
+
+    it('returns tpl-tag-purple for ritual, review, writing, or prod keywords', () => {
+      expect(getTagClass('Ritual')).toBe('tpl-tag-purple')
+      expect(getTagClass('Review')).toBe('tpl-tag-purple')
+      expect(getTagClass('Productivity')).toBe('tpl-tag-purple')
+      expect(getTagClass('Writing')).toBe('tpl-tag-purple')
+    })
+
+    it('returns tpl-tag-orange for errand, home, or env keywords', () => {
+      expect(getTagClass('Errand')).toBe('tpl-tag-orange')
+      expect(getTagClass('Environment')).toBe('tpl-tag-orange')
+      expect(getTagClass('Home')).toBe('tpl-tag-orange')
+    })
+
+    it('returns tpl-tag-slate for unmapped tags', () => {
+      expect(getTagClass('Unknown')).toBe('tpl-tag-slate')
+      expect(getTagClass('Random')).toBe('tpl-tag-slate')
+    })
+  })
 })
+
+

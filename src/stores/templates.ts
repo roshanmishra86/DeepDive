@@ -1,10 +1,13 @@
 import { create } from 'zustand'
 import type { SqlDriver } from '../db/driver'
-import type { Template, TemplateBlock } from '../db/types'
+import type { Template, TemplateBlock, TemplateCategory, TemplateDestination } from '../db/types'
 import * as templatesRepo from '../db/repos/templates'
 import type { TemplateWithStats, TemplateDetail } from '../db/repos/templates'
 import { moveBlockTo as moveBlockToPure, sortBlocks } from '../lib/today'
-import { nextTemplateBlockStart, toggleWeekday, templateTotals } from '../lib/templates'
+import { nextTemplateBlockStart, toggleWeekday, templateTotals, DEFAULT_TEMPLATE_START_MIN, STARTER_TEMPLATES } from '../lib/templates'
+import { useBlocksStore } from './blocks'
+import { useTasksStore } from './tasks'
+import { useDayStore } from './day'
 
 // TemplateWithStats and TemplateDetail are defined once, in
 // `db/repos/templates.ts` (they mirror the SQL shape returned by
@@ -18,21 +21,6 @@ export type { TemplateWithStats, TemplateDetail }
  * Templates store. Hydrates templates from the database and manages CRUD operations.
  * Blocks maintain their absolute startMin values. Changes persist to the database while
  * updating state immediately for responsive UI. In-memory fallback when driver is null.
- *
- * Error contract (P2-A, PR review): every mutator here catches its own
- * persistence errors, sets `error`, reverts the optimistic update, and
- * RETURNS rather than throwing — this matches every other store in the app
- * (`stores/blocks.ts`, `stores/tasks.ts`), none of which ever rejects from an
- * action. That existing convention, not "make it throw," is what this store
- * stays consistent with. What changed here: actions that need to report
- * success/failure to a caller that gates a UI transition on it (closing a
- * modal, navigating away) do so via their RETURN VALUE, generalizing the
- * pattern `createTemplate`/`saveDayAsTemplate` already used (`number | null`)
- * to the void-returning mutators (`updateTemplate`, `deleteTemplate` here;
- * `applyTemplate` in `stores/blocks.ts`), which now return `boolean`. Callers
- * that only need the immediate optimistic state (e.g. `setWeekday`,
- * `addBlock`'s callers that don't need to know if the DB write landed) can
- * still just await and ignore the return value.
  */
 interface TemplatesState {
   templates: TemplateWithStats[]
@@ -40,27 +28,35 @@ interface TemplatesState {
   detail: TemplateDetail | null
   loading: boolean
   error: string | null
+  activeCategoryFilter: string
+  searchQuery: string
+  setActiveCategoryFilter: (filter: string) => void
+  setSearchQuery: (query: string) => void
   hydrate: (driver: SqlDriver | null) => Promise<void>
   select: (id: number | null) => Promise<void>
   createTemplate: (input: {
     name: string
     description?: string
-    startMin: number
+    startMin?: number
     weekdays?: number
+    category?: TemplateCategory
+    tags?: string[]
+    favourite?: boolean
+    destination?: TemplateDestination
+    icon?: string
   }) => Promise<number | null>
-  // P2-A: neither of these throws (see the doc comment above the store for
-  // the chosen contract) — they return `true`/`false` so a caller that must
-  // gate a UI transition (closing a modal, navigating away) on success can
-  // do so without relying on a rejection that will never come.
   updateTemplate: (id: number, patch: Partial<Omit<Template, 'id'>>) => Promise<boolean>
   deleteTemplate: (id: number) => Promise<boolean>
   setWeekday: (id: number, bit: number) => Promise<void>
+  toggleFavourite: (id: number) => Promise<void>
+  setDestination: (id: number, destination: TemplateDestination) => Promise<void>
   addBlock: (input: {
     title: string
     kind: 'deep' | 'shallow' | 'ritual' | 'break'
     startMin?: number
     durationMin: number
     pomodoros?: number
+    tag?: string
   }) => Promise<number | null>
   editBlock: (id: number, patch: Partial<Omit<TemplateBlock, 'id' | 'templateId'>>) => Promise<void>
   removeBlock: (id: number) => Promise<void>
@@ -68,6 +64,7 @@ interface TemplatesState {
   moveBlockTo: (id: number, targetIndex: number) => Promise<void>
   saveDayAsTemplate: (day: string, name: string) => Promise<number | null>
   duplicateTemplate: (id: number) => Promise<number | null>
+  applyTemplateGtd: (id: number, targetDestination?: TemplateDestination, day?: string) => Promise<boolean>
 }
 
 // Optimistic local ids for rows not yet persisted. Negative and
@@ -85,6 +82,7 @@ const PERSISTABLE_BLOCK_FIELDS: Record<keyof Omit<TemplateBlock, 'id' | 'templat
   durationMin: true,
   pomodoros: true,
   sort: true,
+  tag: true,
 }
 
 /**
@@ -113,14 +111,72 @@ export const useTemplatesStore = create<TemplatesState>()((set, get) => ({
   detail: null,
   loading: false,
   error: null,
+  activeCategoryFilter: 'all',
+  searchQuery: '',
+
+  setActiveCategoryFilter: (filter) => set({ activeCategoryFilter: filter }),
+  setSearchQuery: (query) => set({ searchQuery: query }),
 
   hydrate: async (driver) => {
     persistenceDriver = driver
     set({ loading: true, error: null })
 
     if (!driver) {
-      // In-memory mode: keep empty state for vite dev
-      set({ loading: false })
+      // In-memory mode: populate with STARTER_TEMPLATES if store is empty
+      if (get().templates.length > 0) {
+        set({ loading: false })
+        return
+      }
+      const starterList: TemplateWithStats[] = STARTER_TEMPLATES.map((st, idx) => {
+        const blocks: TemplateBlock[] = st.tasks.map((task, bIdx) => ({
+          id: -(idx * 100 + bIdx + 1),
+          templateId: idx + 1,
+          title: task.title,
+          kind: 'deep' as const,
+          startMin: st.startMin + bIdx * (task.durationMin ?? 15),
+          durationMin: task.durationMin ?? 15,
+          pomodoros: 1,
+          sort: bIdx,
+          tag: task.tag,
+        }))
+        const totals = templateTotals(blocks)
+        const lastUsedAt =
+          st.lastUsedDaysAgo !== null
+            ? new Date(Date.now() - st.lastUsedDaysAgo * 24 * 60 * 60 * 1000).toISOString()
+            : null
+        return {
+          id: idx + 1,
+          name: st.name,
+          description: st.description,
+          startMin: st.startMin,
+          weekdays: st.weekdays,
+          category: st.category,
+          tags: [...st.tags],
+          favourite: st.favourite,
+          lastUsedAt,
+          destination: st.destination,
+          icon: st.icon,
+          totalMin: totals.totalMin,
+          blockCount: totals.blockCount,
+        }
+      })
+      set({ templates: starterList, loading: false })
+      if (starterList.length > 0) {
+        const initial = starterList.find((t) => t.name === 'Deep work session prep') ?? starterList[0]
+        const stDef = STARTER_TEMPLATES.find((s) => s.name === initial.name)
+        const initialBlocks: TemplateBlock[] = (stDef?.tasks ?? []).map((task, bIdx) => ({
+          id: -(initial.id * 100 + bIdx + 1),
+          templateId: initial.id,
+          title: task.title,
+          kind: 'deep' as const,
+          startMin: initial.startMin + bIdx * (task.durationMin ?? 15),
+          durationMin: task.durationMin ?? 15,
+          pomodoros: 1,
+          sort: bIdx,
+          tag: task.tag,
+        }))
+        set({ selectedId: initial.id, detail: { ...initial, blocks: initialBlocks } })
+      }
       return
     }
 
@@ -129,12 +185,8 @@ export const useTemplatesStore = create<TemplatesState>()((set, get) => ({
       set({ templates, loading: false })
       const currentSelectedId = get().selectedId
       if (currentSelectedId !== null) {
-        // Re-select the current id so `detail` is refreshed too — a
-        // re-hydrate (e.g. after `saveDayAsTemplate`) must not leave the
-        // detail pane showing pre-hydrate blocks while the list is fresh.
         await get().select(currentSelectedId)
       } else if (templates.length > 0) {
-        // Select the first template if none is currently selected
         await get().select(templates[0].id)
       }
     } catch (err) {
@@ -147,7 +199,27 @@ export const useTemplatesStore = create<TemplatesState>()((set, get) => ({
   select: async (id) => {
     set({ selectedId: id, detail: null })
 
-    if (!id || !persistenceDriver) return
+    if (!id) return
+
+    if (!persistenceDriver) {
+      const t = get().templates.find((tpl) => tpl.id === id)
+      if (t) {
+        const starter = STARTER_TEMPLATES.find((s) => s.name === t.name)
+        const blocks: TemplateBlock[] = (starter?.tasks ?? []).map((task, bIdx) => ({
+          id: -(id * 100 + bIdx + 1),
+          templateId: id,
+          title: task.title,
+          kind: 'deep' as const,
+          startMin: t.startMin + bIdx * (task.durationMin ?? 15),
+          durationMin: task.durationMin ?? 15,
+          pomodoros: 1,
+          sort: bIdx,
+          tag: task.tag,
+        }))
+        set({ detail: { ...t, blocks } })
+      }
+      return
+    }
 
     try {
       const detail = await templatesRepo.getTemplate(persistenceDriver, id)
@@ -183,12 +255,19 @@ export const useTemplatesStore = create<TemplatesState>()((set, get) => ({
     // that would silently drift if templateTotals' shape ever changed.
     const localId = nextLocalId--
     const { totalMin, blockCount } = templateTotals([])
+    const startMin = input.startMin ?? DEFAULT_TEMPLATE_START_MIN
     const newTemplate: TemplateWithStats = {
       id: localId,
       name: input.name,
       description: input.description ?? '',
-      startMin: input.startMin,
+      startMin,
       weekdays: input.weekdays ?? 0,
+      category: input.category ?? 'work',
+      tags: input.tags ?? [],
+      favourite: input.favourite ?? false,
+      lastUsedAt: null,
+      destination: input.destination ?? 'inbox',
+      icon: input.icon ?? 'target',
       totalMin,
       blockCount,
     }
@@ -199,7 +278,10 @@ export const useTemplatesStore = create<TemplatesState>()((set, get) => ({
     if (persistenceDriver) {
       try {
         const driver = persistenceDriver
-        const realId = await templatesRepo.createTemplate(driver, input)
+        const realId = await templatesRepo.createTemplate(driver, {
+          ...input,
+          startMin,
+        })
         // Update state with real id
         set((_s) => ({
           templates: get().templates.map((t) => (t.id === localId ? { ...t, id: realId } : t)),
@@ -219,6 +301,18 @@ export const useTemplatesStore = create<TemplatesState>()((set, get) => ({
     // Select the new template even without persistence
     await get().select(localId)
     return localId
+  },
+
+  toggleFavourite: async (id) => {
+    const state = get()
+    const t = state.templates.find((tpl) => tpl.id === id) ?? (state.detail?.id === id ? state.detail : null)
+    if (!t) return
+    const newFav = !t.favourite
+    await get().updateTemplate(id, { favourite: newFav })
+  },
+
+  setDestination: async (id, destination) => {
+    await get().updateTemplate(id, { destination })
   },
 
   updateTemplate: async (id, patch) => {
@@ -333,6 +427,7 @@ export const useTemplatesStore = create<TemplatesState>()((set, get) => ({
       durationMin: input.durationMin,
       pomodoros: input.pomodoros ?? 0,
       sort: state.detail.blocks.length,
+      tag: input.tag ?? '',
     }
     const withNew = sortBlocks([...state.detail.blocks, newBlock])
     set({
@@ -352,6 +447,7 @@ export const useTemplatesStore = create<TemplatesState>()((set, get) => ({
           durationMin: input.durationMin,
           pomodoros: input.pomodoros ?? 0,
           sort: withNew.length - 1,
+          tag: input.tag ?? '',
         })
         // Update state with real id
         const currentDetail = get().detail
@@ -595,4 +691,65 @@ export const useTemplatesStore = create<TemplatesState>()((set, get) => ({
       return null
     }
   },
+
+  applyTemplateGtd: async (id, targetDestination, day) => {
+    const state = get()
+    let detail = state.detail
+    if (!detail || detail.id !== id) {
+      if (persistenceDriver) {
+        detail = await templatesRepo.getTemplate(persistenceDriver, id)
+      } else {
+        const found = state.templates.find((t) => t.id === id)
+        if (found) {
+          const st = STARTER_TEMPLATES.find((s) => s.name === found.name)
+          detail = {
+            ...found,
+            blocks: (st?.tasks ?? []).map((task, bIdx) => ({
+              id: -(id * 100 + bIdx + 1),
+              templateId: id,
+              title: task.title,
+              kind: 'deep' as const,
+              startMin: found.startMin + bIdx * (task.durationMin ?? 15),
+              durationMin: task.durationMin ?? 15,
+              pomodoros: 1,
+              sort: bIdx,
+              tag: task.tag,
+            })),
+          }
+        }
+      }
+    }
+
+    if (!detail) return false
+
+    const dest = targetDestination ?? detail.destination ?? 'inbox'
+    const nowIso = new Date().toISOString()
+    await get().updateTemplate(id, { lastUsedAt: nowIso })
+
+    if (dest === 'inbox') {
+      const targetDay = day ?? useDayStore.getState().currentDay ?? new Date().toISOString().slice(0, 10)
+      const blocksStore = useBlocksStore.getState()
+      for (const block of detail.blocks) {
+        await blocksStore.addInboxTask(targetDay, {
+          title: block.title,
+          estimateMin: block.durationMin,
+          tags: block.tag ? [block.tag] : [],
+          group: 'next',
+        })
+      }
+    } else {
+      const tasksStore = useTasksStore.getState()
+      for (const block of detail.blocks) {
+        await tasksStore.addTask({
+          title: block.title,
+          tags: block.tag ? [block.tag] : [],
+          estimateMin: block.durationMin,
+          priority: 'medium',
+        })
+      }
+    }
+
+    return true
+  },
 }))
+

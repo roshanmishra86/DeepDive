@@ -643,4 +643,101 @@ describe('blocks repository', () => {
     expect(deepBlock?.kind).toBe('deep')
     expect(deepBlock?.durationMin).toBe(90)
   })
+
+  describe('inbox and GTD repository operations', () => {
+    it('creates, retrieves, and updates inbox-specific block properties', async () => {
+      const day = '2026-09-11'
+      const id = await blocks.createBlock(driver, {
+        day,
+        title: 'Inbox GTD Task',
+        kind: 'deep',
+        startMin: 0,
+        durationMin: 45,
+        inboxGroup: 'next',
+        energy: 'high',
+        tags: ['Deep Work', 'Writing'],
+        loggedSec: 120,
+        importedFromTodo: true,
+      })
+
+      let list = await blocks.listBlocksForDay(driver, day)
+      let item = list.find((b) => b.id === id)
+      expect(item).toBeDefined()
+      expect(item?.inboxGroup).toBe('next')
+      expect(item?.energy).toBe('high')
+      expect(item?.tags).toEqual(['Deep Work', 'Writing'])
+      expect(item?.loggedSec).toBe(120)
+      expect(item?.importedFromTodo).toBe(true)
+      expect(item?.carriedOver).toBe(false)
+
+      await blocks.updateBlockInboxGroup(driver, id, 'working')
+      await blocks.incrementBlockLoggedTime(driver, id, 60)
+
+      list = await blocks.listBlocksForDay(driver, day)
+      item = list.find((b) => b.id === id)
+      expect(item?.inboxGroup).toBe('working')
+      expect(item?.loggedSec).toBe(180)
+    })
+
+    it('computes inbox stats accurately', async () => {
+      const day = '2026-09-11'
+      const id1 = await blocks.createBlock(driver, {
+        day,
+        title: 'Task 1',
+        kind: 'deep',
+        startMin: 0,
+        durationMin: 30,
+        inboxGroup: 'working',
+        loggedSec: 600,
+        importedFromTodo: true,
+      })
+      await blocks.createBlock(driver, {
+        day,
+        title: 'Task 2',
+        kind: 'shallow',
+        startMin: 0,
+        durationMin: 15,
+        inboxGroup: 'capture',
+        loggedSec: 300,
+        importedFromTodo: false,
+      })
+      await blocks.setBlockCompleted(driver, id1, true)
+
+      const stats = await blocks.getInboxStats(driver, day)
+      expect(stats.capturedToday).toBe(2)
+      expect(stats.completedToday).toBe(1)
+      expect(stats.focusSecLogged).toBe(900)
+      expect(stats.importedFromTodo).toBe(1)
+    })
+
+    it('marks unfinished tasks as carried over and lists incomplete tasks', async () => {
+      const day = '2026-09-11'
+      const id1 = await blocks.createBlock(driver, {
+        day,
+        title: 'Done task',
+        kind: 'deep',
+        startMin: 0,
+        durationMin: 30,
+      })
+      const id2 = await blocks.createBlock(driver, {
+        day,
+        title: 'Unfinished task',
+        kind: 'deep',
+        startMin: 0,
+        durationMin: 45,
+      })
+      await blocks.setBlockCompleted(driver, id1, true)
+
+      let incomplete = await blocks.listIncompleteForDay(driver, day)
+      expect(incomplete.length).toBe(1)
+      expect(incomplete[0].id).toBe(id2)
+
+      await blocks.markUnfinishedAsCarriedOver(driver, day)
+      const list = await blocks.listBlocksForDay(driver, day)
+      const unfinished = list.find((b) => b.id === id2)
+      const finished = list.find((b) => b.id === id1)
+      expect(unfinished?.carriedOver).toBe(true)
+      expect(finished?.carriedOver).toBe(false)
+    })
+  })
 })

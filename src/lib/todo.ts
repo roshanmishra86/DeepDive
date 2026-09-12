@@ -568,3 +568,335 @@ export function upcomingTasks(
     rankColor: quadrantMeta.get(quadrantOf(task))!,
   }))
 }
+
+export type TodoNavFilter =
+  | 'all'
+  | 'starred'
+  | 'today'
+  | 'overdue'
+  | 'no_date'
+  | 'someday'
+  | 'waiting_for'
+  | 'projects'
+  | 'contexts'
+  | 'tags'
+
+export interface GtdPriorityGroup {
+  id: 'high' | 'medium' | 'low' | 'someday'
+  label: string
+  hint: string
+  color: 'danger' | 'warn' | 'info' | 'muted'
+  iconName: 'star' | 'amber-star' | 'clock' | 'archive'
+  tasks: Task[]
+}
+
+export interface GtdProjectGroup {
+  id: string
+  label: string
+  hint: string
+  color: string
+  tasks: Task[]
+}
+
+export interface GtdDeadlineGroup {
+  id: string
+  label: string
+  hint: string
+  color: 'danger' | 'warn' | 'info' | 'muted'
+  tasks: Task[]
+}
+
+export interface GtdBoardColumn {
+  id: string
+  label: string
+  tasks: Task[]
+}
+
+/**
+ * Formats estimate duration in minutes to concise string like "30 m", "45 m", "1 h", "2 h", "1.5 h".
+ */
+export function formatTaskEstimate(min: number | null | undefined): string {
+  if (!min || min <= 0) return ''
+  if (min >= 60) {
+    const h = min / 60
+    return h % 1 === 0 ? `${h} h` : `${h.toFixed(1).replace(/\.0$/, '')} h`
+  }
+  return `${min} m`
+}
+
+/**
+ * Returns user-facing formatted due date, e.g. "Today", "Tomorrow", "Mon, 15 Sep", "No date", "Overdue".
+ */
+export function formatTaskDueDate(
+  dueAt: string | null | undefined,
+  now: Date
+): {
+  text: string
+  isUrgent: boolean
+  isOverdue: boolean
+} {
+  if (!dueAt) {
+    return { text: 'No date', isUrgent: false, isOverdue: false }
+  }
+  const label = formatDueLabel(dueAt, now)
+  if (!label) {
+    return { text: 'No date', isUrgent: false, isOverdue: false }
+  }
+  if (label === 'overdue') {
+    return { text: 'Overdue', isUrgent: true, isOverdue: true }
+  }
+  if (label.startsWith('today')) {
+    return { text: 'Today', isUrgent: true, isOverdue: false }
+  }
+  if (label.startsWith('tomorrow')) {
+    return { text: 'Tomorrow', isUrgent: true, isOverdue: false }
+  }
+
+  const due = new Date(dueAt)
+  if (Number.isNaN(due.getTime())) {
+    return { text: 'No date', isUrgent: false, isOverdue: false }
+  }
+  const weekdays = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+  const monthNames = [
+    'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+    'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+  ]
+  return {
+    text: `${weekdays[due.getDay()]}, ${due.getDate()} ${monthNames[due.getMonth()]}`,
+    isUrgent: false,
+    isOverdue: false,
+  }
+}
+
+/**
+ * Extracts the primary project name from task tags (skipping context @tags, someday, and waiting).
+ */
+export function extractTaskProject(task: Pick<Task, 'tags'>): string | null {
+  if (!task.tags || task.tags.length === 0) return null
+  for (const tag of task.tags) {
+    const t = tag.trim()
+    if (!t) continue
+    if (t.startsWith('@')) continue
+    const lower = t.toLowerCase()
+    if (lower === 'someday' || lower === 'waiting' || lower === 'waiting_for') continue
+    return t
+  }
+  return null
+}
+
+/**
+ * Filter tasks according to selected GTD sidebar filter.
+ */
+export function filterTasksByGtdNav(tasks: Task[], filter: TodoNavFilter, now: Date): Task[] {
+  return tasks.filter((task) => {
+    switch (filter) {
+      case 'all':
+        return true
+      case 'starred':
+        return task.important || task.priority === 'high'
+      case 'today': {
+        if (!task.dueAt) return false
+        const dueInfo = formatTaskDueDate(task.dueAt, now)
+        return dueInfo.text === 'Today'
+      }
+      case 'overdue': {
+        if (!task.dueAt) return false
+        const dueInfo = formatTaskDueDate(task.dueAt, now)
+        return dueInfo.isOverdue
+      }
+      case 'no_date':
+        return !task.dueAt
+      case 'someday':
+        return (
+          (task.tags?.some((t) => t.toLowerCase() === 'someday') ?? false) ||
+          (task.priority === 'low' && !task.dueAt)
+        )
+      case 'waiting_for':
+        return task.tags?.some((t) => t.toLowerCase().includes('waiting')) ?? false
+      case 'projects':
+        return extractTaskProject(task) !== null
+      case 'contexts':
+        return task.tags?.some((t) => t.startsWith('@')) ?? false
+      case 'tags':
+        return (task.tags?.length ?? 0) > 0
+      default:
+        return true
+    }
+  })
+}
+
+/**
+ * Groups tasks by Priority (High, Medium, Low, Someday) matching newScreen_Todo.png.
+ */
+export function groupByPriorityGtd(tasks: Task[]): GtdPriorityGroup[] {
+  const high: Task[] = []
+  const medium: Task[] = []
+  const low: Task[] = []
+  const someday: Task[] = []
+
+  for (const task of tasks) {
+    const isSomeday = task.tags?.some((t) => t.toLowerCase() === 'someday')
+    if (isSomeday) {
+      someday.push(task)
+    } else if (task.priority === 'high') {
+      high.push(task)
+    } else if (task.priority === 'medium') {
+      medium.push(task)
+    } else {
+      low.push(task)
+    }
+  }
+
+  return [
+    {
+      id: 'high',
+      label: 'High Priority',
+      hint: 'Do these soon — high impact or time sensitive.',
+      color: 'danger',
+      iconName: 'star',
+      tasks: high,
+    },
+    {
+      id: 'medium',
+      label: 'Medium Priority',
+      hint: 'Important, but not urgent.',
+      color: 'warn',
+      iconName: 'amber-star',
+      tasks: medium,
+    },
+    {
+      id: 'low',
+      label: 'Low Priority',
+      hint: 'Nice to do, but not time sensitive.',
+      color: 'info',
+      iconName: 'clock',
+      tasks: low,
+    },
+    {
+      id: 'someday',
+      label: 'Someday',
+      hint: 'Keep these for later.',
+      color: 'muted',
+      iconName: 'archive',
+      tasks: someday,
+    },
+  ]
+}
+
+/**
+ * Groups tasks by project name.
+ */
+export function groupByProjectGtd(tasks: Task[]): GtdProjectGroup[] {
+  const map = new Map<string, Task[]>()
+  const noProject: Task[] = []
+
+  for (const task of tasks) {
+    const project = extractTaskProject(task)
+    if (project) {
+      const existing = map.get(project) ?? []
+      existing.push(task)
+      map.set(project, existing)
+    } else {
+      noProject.push(task)
+    }
+  }
+
+  const groups: GtdProjectGroup[] = []
+  for (const [project, groupTasks] of map.entries()) {
+    groups.push({
+      id: project.toLowerCase().replace(/\s+/g, '-'),
+      label: project,
+      hint: `${groupTasks.length} ${groupTasks.length === 1 ? 'task' : 'tasks'} in project`,
+      color: 'info',
+      tasks: groupTasks,
+    })
+  }
+
+  if (noProject.length > 0 || groups.length === 0) {
+    groups.push({
+      id: 'general',
+      label: 'No Project',
+      hint: 'Tasks not assigned to any specific project.',
+      color: 'muted',
+      tasks: noProject,
+    })
+  }
+
+  return groups
+}
+
+/**
+ * Groups tasks by deadline bucket (Overdue, Today, Tomorrow, Later this week, Next week & beyond, No deadline).
+ */
+export function groupByDeadlineGtd(tasks: Task[], now: Date): GtdDeadlineGroup[] {
+  const overdue: Task[] = []
+  const today: Task[] = []
+  const tomorrow: Task[] = []
+  const thisWeek: Task[] = []
+  const nextWeekOrLater: Task[] = []
+  const noDate: Task[] = []
+
+  const nowDate = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+  const tomorrowDate = new Date(nowDate)
+  tomorrowDate.setDate(tomorrowDate.getDate() + 1)
+  const monday = startOfWeek(now)
+  const endOfWeek = new Date(monday)
+  endOfWeek.setDate(endOfWeek.getDate() + 7)
+  endOfWeek.setMilliseconds(-1)
+
+  for (const task of tasks) {
+    if (!task.dueAt) {
+      noDate.push(task)
+      continue
+    }
+    const due = new Date(task.dueAt)
+    if (Number.isNaN(due.getTime())) {
+      noDate.push(task)
+      continue
+    }
+
+    if (due.getTime() < now.getTime()) {
+      overdue.push(task)
+    } else {
+      const dueDate = new Date(due.getFullYear(), due.getMonth(), due.getDate())
+      if (dueDate.getTime() === nowDate.getTime()) {
+        today.push(task)
+      } else if (dueDate.getTime() === tomorrowDate.getTime()) {
+        tomorrow.push(task)
+      } else if (due.getTime() <= endOfWeek.getTime()) {
+        thisWeek.push(task)
+      } else {
+        nextWeekOrLater.push(task)
+      }
+    }
+  }
+
+  return [
+    { id: 'overdue', label: 'Overdue', hint: 'Past their deadline — act now.', color: 'danger', tasks: overdue },
+    { id: 'today', label: 'Due Today', hint: 'To be completed before the end of the day.', color: 'danger', tasks: today },
+    { id: 'tomorrow', label: 'Due Tomorrow', hint: 'Prepare for tomorrow.', color: 'warn', tasks: tomorrow },
+    { id: 'this-week', label: 'Later This Week', hint: 'Scheduled for this week.', color: 'info', tasks: thisWeek },
+    { id: 'later', label: 'Next Week & Beyond', hint: 'Upcoming future deadlines.', color: 'muted', tasks: nextWeekOrLater },
+    { id: 'no-date', label: 'No Deadline', hint: 'Tasks with no set due date.', color: 'muted', tasks: noDate },
+  ]
+}
+
+/**
+ * Groups tasks for the Board (Kanban) tab.
+ */
+export function groupByBoardGtd(tasks: Task[]): GtdBoardColumn[] {
+  const high = tasks.filter((t) => !t.done && t.priority === 'high' && !t.tags?.includes('someday'))
+  const medium = tasks.filter((t) => !t.done && t.priority === 'medium' && !t.tags?.includes('someday'))
+  const low = tasks.filter((t) => !t.done && t.priority === 'low' && !t.tags?.includes('someday'))
+  const someday = tasks.filter((t) => !t.done && (t.tags?.includes('someday') ?? false))
+  const done = tasks.filter((t) => t.done)
+
+  return [
+    { id: 'high', label: 'High Priority', tasks: high },
+    { id: 'medium', label: 'Medium Priority', tasks: medium },
+    { id: 'low', label: 'Low Priority', tasks: low },
+    { id: 'someday', label: 'Someday', tasks: someday },
+    { id: 'done', label: 'Completed', tasks: done },
+  ]
+}
+

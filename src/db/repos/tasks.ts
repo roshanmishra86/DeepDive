@@ -4,7 +4,7 @@
  */
 
 import type { SqlDriver } from '../driver'
-import type { Task, TaskPriority } from '../types'
+import type { Task, TaskPriority, EnergyLevel } from '../types'
 
 // Internal row type matching SQL schema (0|1 for booleans)
 interface TaskRow {
@@ -22,9 +22,20 @@ interface TaskRow {
   sort: number
   completed_at: string | null
   archived_at: string | null
+  tags?: string
+  energy?: string | null
 }
 
 function rowToTask(row: TaskRow): Task {
+  const parseTags = (raw?: string): string[] => {
+    if (!raw) return []
+    try {
+      const parsed = JSON.parse(raw)
+      if (Array.isArray(parsed)) return parsed.filter((t): t is string => typeof t === 'string')
+    } catch {}
+    return raw.split(',').map((t) => t.trim()).filter(Boolean)
+  }
+
   return {
     id: row.id,
     title: row.title,
@@ -40,6 +51,8 @@ function rowToTask(row: TaskRow): Task {
     sort: row.sort,
     completedAt: row.completed_at,
     archivedAt: row.archived_at,
+    tags: parseTags(row.tags),
+    energy: (row.energy as Task['energy']) ?? null,
   }
 }
 
@@ -76,13 +89,16 @@ export async function createTask(
     dueAt?: string | null
     estimateMin?: number | null
     createdAt: string
+    tags?: string[]
+    energy?: EnergyLevel | null
   }
 ): Promise<number> {
+  const tagsStr = input.tags && input.tags.length > 0 ? input.tags.join(',') : ''
   const result = await driver.execute(
-    `INSERT INTO task (title, notes, important, urgent, priority, due_at, estimate_min, created_at, sort)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, COALESCE((SELECT MAX(sort) + 1 FROM task WHERE archived = 0), 0))`,
+    `INSERT INTO task (title, notes, important, urgent, priority, due_at, estimate_min, created_at, tags, energy, sort)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE((SELECT MAX(sort) + 1 FROM task WHERE archived = 0), 0))`,
     [input.title, input.notes ?? '', input.important ? 1 : 0, input.urgent ? 1 : 0,
-      input.priority ?? 'medium', input.dueAt ?? null, input.estimateMin ?? null, input.createdAt]
+      input.priority ?? 'medium', input.dueAt ?? null, input.estimateMin ?? null, input.createdAt, tagsStr, input.energy ?? null]
   )
   return result.lastInsertId
 }
@@ -138,6 +154,14 @@ export async function updateTask(
   if (patch.archivedAt !== undefined) {
     updates.push('archived_at = ?')
     values.push(patch.archivedAt)
+  }
+  if (patch.tags !== undefined) {
+    updates.push('tags = ?')
+    values.push(patch.tags.join(','))
+  }
+  if (patch.energy !== undefined) {
+    updates.push('energy = ?')
+    values.push(patch.energy)
   }
 
   if (updates.length === 0) return

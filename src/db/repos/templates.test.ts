@@ -456,4 +456,87 @@ describe('templates repository', () => {
       expect(template?.blocks.find((blk) => blk.id === b)?.sort).toBe(1)
     })
   })
+
+  describe('GTD template features', () => {
+    it('creates and reads template with GTD attributes', async () => {
+      const now = new Date().toISOString()
+      const id = await templates.createTemplate(driver, {
+        name: 'Weekly Planning Pack',
+        description: 'Plan the upcoming week and clear inboxes',
+        startMin: 540,
+        weekdays: 16,
+        category: 'work',
+        tags: ['Planning', 'Review'],
+        favourite: true,
+        lastUsedAt: now,
+        destination: 'todo',
+        icon: 'calendar',
+      })
+
+      const tpl = await templates.getTemplate(driver, id)
+      expect(tpl?.category).toBe('work')
+      expect(tpl?.tags).toEqual(['Planning', 'Review'])
+      expect(tpl?.favourite).toBe(true)
+      expect(tpl?.lastUsedAt).toBe(now)
+      expect(tpl?.destination).toBe('todo')
+      expect(tpl?.icon).toBe('calendar')
+    })
+
+    it('updates GTD attributes', async () => {
+      const id = await templates.createTemplate(driver, {
+        name: 'Sprint Retro',
+        category: 'ritual',
+        favourite: false,
+        destination: 'inbox',
+      })
+
+      await templates.updateTemplate(driver, id, {
+        category: 'work',
+        favourite: true,
+        destination: 'todo',
+        tags: ['Scrum', 'Retro'],
+      })
+
+      const tpl = await templates.getTemplate(driver, id)
+      expect(tpl?.category).toBe('work')
+      expect(tpl?.favourite).toBe(true)
+      expect(tpl?.destination).toBe('todo')
+      expect(tpl?.tags).toEqual(['Scrum', 'Retro'])
+    })
+
+    it('adds block with tag and duplicates template with GTD fields preserved', async () => {
+      const origId = await templates.createTemplate(driver, {
+        name: 'Original Pack',
+        category: 'personal',
+        tags: ['Health'],
+        favourite: true,
+        destination: 'inbox',
+        icon: 'heart',
+      })
+
+      await templates.addTemplateBlock(driver, {
+        templateId: origId,
+        title: 'Morning stretch',
+        kind: 'ritual',
+        startMin: 420,
+        durationMin: 15,
+        tag: 'Mobility',
+        sort: 0,
+      })
+
+      const dupId = await templates.duplicateTemplate(driver, origId)
+      const dup = await templates.getTemplate(driver, dupId)
+
+      expect(dup?.name).toBe('Original Pack (copy)')
+      expect(dup?.category).toBe('personal')
+      expect(dup?.tags).toEqual(['Health'])
+      expect(dup?.favourite).toBe(true)
+      expect(dup?.destination).toBe('inbox')
+      expect(dup?.icon).toBe('heart')
+      expect(dup?.blocks.length).toBe(1)
+      expect(dup?.blocks[0].title).toBe('Morning stretch')
+      expect(dup?.blocks[0].tag).toBe('Mobility')
+    })
+  })
 })
+

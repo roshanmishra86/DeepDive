@@ -15,6 +15,7 @@ import { Gear } from '@phosphor-icons/react/dist/csr/Gear'
 import { Plus } from '@phosphor-icons/react/dist/csr/Plus'
 import { Check } from '@phosphor-icons/react/dist/csr/Check'
 import { X } from '@phosphor-icons/react/dist/csr/X'
+import { TodoSidebarFilter } from '../todo/TodoSidebarFilter'
 
 const NAV_ITEMS: { view: View; label: string; icon: ReactElement }[] = [
   {
@@ -235,7 +236,7 @@ export function Sidebar() {
 
       <div className="sidebar-divider" />
 
-      <RitualChecklist />
+      {view === 'todo' ? <TodoSidebarFilter /> : <RitualChecklist />}
 
       <div className="sidebar-bottom">
         <DeepHoursCard />

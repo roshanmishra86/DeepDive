@@ -17,6 +17,8 @@ export type TrackSourceKind = 'builtin' | 'local' | 'radio' | 'archive'
 // Backfilled once from the important/urgent quadrant by migration 0006, then
 // edited independently — moving a task between quadrants must not rewrite it.
 export type TaskPriority = 'high' | 'medium' | 'low'
+export type InboxGroup = 'working' | 'next' | 'capture' | 'waiting'
+export type EnergyLevel = 'high' | 'medium' | 'low'
 
 export interface Task {
   id: number
@@ -33,6 +35,8 @@ export interface Task {
   sort: number
   completedAt: string | null
   archivedAt: string | null
+  tags?: string[]
+  energy?: EnergyLevel | null
 }
 
 export interface Subtask {
@@ -64,7 +68,16 @@ export interface DayBlock {
   repeat: BlockRepeat
   trackId: number | null
   quiet: boolean
+  inboxGroup?: InboxGroup
+  energy?: EnergyLevel | null
+  tags?: string[]
+  loggedSec?: number
+  carriedOver?: boolean
+  importedFromTodo?: boolean
 }
+
+export type TemplateCategory = 'work' | 'personal' | 'ritual' | 'admin'
+export type TemplateDestination = 'inbox' | 'todo'
 
 export interface Template {
   id: number
@@ -72,6 +85,12 @@ export interface Template {
   description: string
   startMin: number
   weekdays: number
+  category?: TemplateCategory
+  tags?: string[]
+  favourite?: boolean
+  lastUsedAt?: string | null
+  destination?: TemplateDestination
+  icon?: string
 }
 
 export interface TemplateBlock {
@@ -83,6 +102,7 @@ export interface TemplateBlock {
   durationMin: number
   pomodoros: number
   sort: number
+  tag?: string
 }
 
 export interface Ritual {

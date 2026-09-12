@@ -68,90 +68,93 @@ export function ArchiveView() {
 
   return (
     <div className="arc-view">
-      <div className="arc-header">
-        <div>
-          <div className="arc-title">Archive</div>
-          <div className="arc-subtitle">
-            Every day you planned blocks. A dot means the day has a record — open it to see what actually landed.
+      <div className="arc-inner">
+        <div className="arc-header">
+          <div>
+            <div className="arc-title">Archive</div>
+            <div className="arc-subtitle">
+              Every day you planned blocks. A dot means the day has a record — open it to see what actually landed.
+            </div>
           </div>
+
+          {headline && hasDayRecords && (
+            <div className="arc-headline">
+              <div className="arc-stat">
+                <div className="arc-stat-value">{headline.blocksDone}</div>
+                <div className="arc-stat-label">Blocks done</div>
+              </div>
+              <div className="arc-stat">
+                <div className="arc-stat-value">
+                  {headline.completionPct}
+                  <span className="arc-stat-pct">%</span>
+                </div>
+                <div className="arc-stat-label">Completion</div>
+              </div>
+              <div className="arc-stat">
+                <div className="arc-stat-value">{headline.dayStreak}</div>
+                <div className="arc-stat-label">Day streak</div>
+              </div>
+            </div>
+          )}
         </div>
 
-        {headline && hasDayRecords && (
-          <div className="arc-headline">
-            <div className="arc-stat">
-              <div className="arc-stat-value">{headline.blocksDone}</div>
-              <div className="arc-stat-label">Blocks done</div>
+        <div className="arc-body">
+          {loadingArchived && <div className="arc-section-status">Loading completed tasks…</div>}
+          {errorArchived && <div className="arc-section-status arc-section-error">Could not load completed tasks: {errorArchived}</div>}
+          {archivedTasks.length > 0 && (
+            <section className="arc-task-section" aria-label="Completed tasks">
+              <div className="arc-section-label">Completed tasks</div>
+              {archivedTasks.map((task) => {
+                const subtasks = subtasksByTask[task.id] ?? []
+                const estimate = effectiveTaskEstimate(task, subtasks)
+                return (
+                  <div className="arc-task-row" key={task.id}>
+                    <div className="arc-task-main">
+                      <button type="button" className="arc-task-title" onClick={() => void openPlan({ kind: 'task', id: task.id })}>{task.title}</button>
+                      <span className="arc-task-meta">
+                        completed {formatArchiveTimestamp(task.completedAt)} · archived {formatArchiveTimestamp(task.archivedAt)}
+                        {estimate !== null && ` · ${formatDuration(estimate)} estimated`}
+                        {` · ${subtasks.filter((subtask) => subtask.done).length}/${subtasks.length} subtasks`}
+                      </span>
+                      <SubtaskList task={task} now={new Date()} />
+                    </div>
+                    <div className="arc-task-actions">
+                      <button type="button" className="btn-icon" onClick={() => void openPlan({ kind: 'task', id: task.id })} aria-label={`Open plan for ${task.title}`}><NotePencil size={16} weight={task.notes ? 'fill' : 'regular'} /></button>
+                      <button type="button" className="btn-icon" onClick={() => setRestoreTaskId(task.id)} aria-label={`Restore ${task.title}`}><ArrowUUpLeft size={16} /></button>
+                    </div>
+                  </div>
+                );
+              })}
+            </section>
+          )}
+          {overallEmpty ? (
+            <div className="view-empty">
+              <div className="view-empty-title">No recorded days yet</div>
+              <div className="view-empty-text">The archive fills in as you plan days — every day with blocks or a shut-down note lands here.</div>
+              <button type="button" className="btn-accent arc-empty-cta" onClick={() => setView('today')}>Plan today</button>
             </div>
-            <div className="arc-stat">
-              <div className="arc-stat-value">
-                {headline.completionPct}
-                <span className="arc-stat-pct">%</span>
+          ) : dayInitialLoading ? (
+            <div className="arc-section-status">Loading archive…</div>
+          ) : error ? (
+            <div className="arc-section-status arc-section-error">Error: {error}</div>
+          ) : !hasDayRecords ? (
+            <div className="view-empty arc-day-empty">
+              <div className="view-empty-title">No recorded days yet</div>
+              <div className="view-empty-text">Plan a day to add it to the calendar archive.</div>
+              <button type="button" className="btn-accent arc-empty-cta" onClick={() => setView('today')}>Plan today</button>
+            </div>
+          ) : (
+            <div className="arc-main-row">
+              <div className="arc-left-column">
+                <MonthCalendar />
+                <DeepHoursHistogram />
               </div>
-              <div className="arc-stat-label">Completion</div>
+              <DayRecordPane />
             </div>
-            <div className="arc-stat">
-              <div className="arc-stat-value">{headline.dayStreak}</div>
-              <div className="arc-stat-label">Day streak</div>
-            </div>
-          </div>
-        )}
+          )}
+        </div>
       </div>
 
-      <div className="arc-body">
-        {loadingArchived && <div className="arc-section-status">Loading completed tasks…</div>}
-        {errorArchived && <div className="arc-section-status arc-section-error">Could not load completed tasks: {errorArchived}</div>}
-        {archivedTasks.length > 0 && (
-          <section className="arc-task-section" aria-label="Completed tasks">
-            <div className="arc-section-label">Completed tasks</div>
-            {archivedTasks.map((task) => {
-              const subtasks = subtasksByTask[task.id] ?? []
-              const estimate = effectiveTaskEstimate(task, subtasks)
-              return (
-                <div className="arc-task-row" key={task.id}>
-                  <div className="arc-task-main">
-                    <button type="button" className="arc-task-title" onClick={() => void openPlan({ kind: 'task', id: task.id })}>{task.title}</button>
-                    <span className="arc-task-meta">
-                      completed {formatArchiveTimestamp(task.completedAt)} · archived {formatArchiveTimestamp(task.archivedAt)}
-                      {estimate !== null && ` · ${formatDuration(estimate)} estimated`}
-                      {` · ${subtasks.filter((subtask) => subtask.done).length}/${subtasks.length} subtasks`}
-                    </span>
-                    <SubtaskList task={task} now={new Date()} />
-                  </div>
-                  <div className="arc-task-actions">
-                    <button type="button" className="btn-icon" onClick={() => void openPlan({ kind: 'task', id: task.id })} aria-label={`Open plan for ${task.title}`}><NotePencil size={16} weight={task.notes ? 'fill' : 'regular'} /></button>
-                    <button type="button" className="btn-icon" onClick={() => setRestoreTaskId(task.id)} aria-label={`Restore ${task.title}`}><ArrowUUpLeft size={16} /></button>
-                  </div>
-                </div>
-              )
-            })}
-          </section>
-        )}
-        {overallEmpty ? (
-          <div className="view-empty">
-            <div className="view-empty-title">No recorded days yet</div>
-            <div className="view-empty-text">The archive fills in as you plan days — every day with blocks or a shut-down note lands here.</div>
-            <button type="button" className="btn-accent arc-empty-cta" onClick={() => setView('today')}>Plan today</button>
-          </div>
-        ) : dayInitialLoading ? (
-          <div className="arc-section-status">Loading archive…</div>
-        ) : error ? (
-          <div className="arc-section-status arc-section-error">Error: {error}</div>
-        ) : !hasDayRecords ? (
-          <div className="view-empty arc-day-empty">
-            <div className="view-empty-title">No recorded days yet</div>
-            <div className="view-empty-text">Plan a day to add it to the calendar archive.</div>
-            <button type="button" className="btn-accent arc-empty-cta" onClick={() => setView('today')}>Plan today</button>
-          </div>
-        ) : (
-          <>
-            <div className="arc-left-column">
-              <MonthCalendar />
-              <DeepHoursHistogram />
-            </div>
-            <DayRecordPane />
-          </>
-        )}
-      </div>
       {restoreTask && (
         <ConfirmActionModal
           title={`Restore "${restoreTask.title}"?`}

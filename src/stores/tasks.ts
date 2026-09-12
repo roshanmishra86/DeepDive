@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import type { SqlDriver } from '../db/driver'
-import type { Subtask, Task, TaskPriority } from '../db/types'
+import type { Subtask, Task, TaskPriority, EnergyLevel } from '../db/types'
 import * as tasksRepo from '../db/repos/tasks'
 import * as subtasksRepo from '../db/repos/subtasks'
 import {
@@ -10,6 +10,7 @@ import {
   type Quadrant,
   type TodoFilters,
   type GroupSort,
+  type TodoNavFilter,
   sortTasks,
   quadrantOf,
   priorityFromQuadrant,
@@ -33,6 +34,12 @@ interface TasksState {
   subtasksByTask: Record<number, Subtask[]>
   subtaskLoading: Record<number, boolean>
   subtaskError: Record<number, string | null>
+  selectedTaskId: number | null
+  setSelectedTaskId: (id: number | null) => void
+  activeGtdFilter: TodoNavFilter
+  setActiveGtdFilter: (filter: TodoNavFilter) => void
+  expandedTaskIds: Record<number, boolean>
+  toggleTaskExpanded: (id: number) => void
   hydrate: (driver: SqlDriver | null) => Promise<void>
   hydrateActive: () => Promise<void>
   hydrateArchived: (driver?: SqlDriver | null) => Promise<void>
@@ -44,6 +51,8 @@ interface TasksState {
     priority?: TaskPriority
     dueAt?: string | null
     estimateMin?: number | null
+    tags?: string[]
+    energy?: EnergyLevel | null
   }) => Promise<number | null>
   editTask: (id: number, patch: TaskEdit) => Promise<void>
   toggleImportant: (id: number) => Promise<void>
@@ -134,6 +143,18 @@ export const useTasksStore = create<TasksState>()((set, get) => {
     subtasksByTask: {},
     subtaskLoading: {},
     subtaskError: {},
+    selectedTaskId: null,
+    setSelectedTaskId: (id) => set({ selectedTaskId: id }),
+    activeGtdFilter: 'all',
+    setActiveGtdFilter: (filter) => set({ activeGtdFilter: filter }),
+    expandedTaskIds: {},
+    toggleTaskExpanded: (id) =>
+      set((state) => ({
+        expandedTaskIds: {
+          ...state.expandedTaskIds,
+          [id]: !state.expandedTaskIds[id],
+        },
+      })),
 
     hydrate: async (driver) => {
       persistenceDriver = driver
@@ -168,6 +189,8 @@ export const useTasksStore = create<TasksState>()((set, get) => {
         sort: get().tasks.length,
         completedAt: null,
         archivedAt: null,
+        tags: input.tags ?? [],
+        energy: input.energy ?? null,
       }
       const previous = get().tasks
       set({ tasks: sortTasks([...previous, newTask]) })

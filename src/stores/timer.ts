@@ -433,9 +433,19 @@ export const useTimerStore = create<TimerState>()((set, get) => {
     },
 
     tick: async (now = Date.now()) => {
-      const { running, endsAt, phase, pomodorosDone } = get()
+      const { running, endsAt, phase, pomodorosDone, remainingSec, blockId } = get()
       if (!running || endsAt === null) return
       const remaining = Math.max(0, Math.ceil((endsAt - now) / 1000))
+      const elapsed = remainingSec - remaining
+      if (elapsed > 0 && phase === 'focus' && blockId !== null) {
+        for (const fn of tickListeners) {
+          try {
+            fn(blockId, elapsed)
+          } catch (e) {
+            console.error('Error in timer focus tick listener:', e)
+          }
+        }
+      }
       if (remaining > 0) {
         set({ remainingSec: remaining })
         return
@@ -460,6 +470,13 @@ export const useTimerStore = create<TimerState>()((set, get) => {
     },
   }
 })
+
+export type TimerTickListener = (blockId: number, elapsedSec: number) => void
+const tickListeners = new Set<TimerTickListener>()
+export function onTimerFocusTick(listener: TimerTickListener): () => void {
+  tickListeners.add(listener)
+  return () => tickListeners.delete(listener)
+}
 
 /** Label for the widget counter, e.g. "2 / 3" while the 2nd pomodoro runs. */
 export function pomodoroCounterLabel(done: number, perBlock: number): string {

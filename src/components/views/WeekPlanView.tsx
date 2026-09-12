@@ -154,9 +154,14 @@ export function WeekPlanView() {
               </button>
             </div>
           </div>
-          <button type="button" className="btn-accent" onClick={() => openNewComposer(headerComposerDay)}>
-            <Plus size={16} />
-            New block
+          <button
+            type="button"
+            className="btn-accent week-new-block-btn"
+            onClick={() => openNewComposer(headerComposerDay)}
+            aria-label="New block"
+          >
+            <Plus size={14} weight="bold" />
+            <span>New block</span>
           </button>
         </div>
       </div>

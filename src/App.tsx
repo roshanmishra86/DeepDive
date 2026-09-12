@@ -21,7 +21,7 @@ import { PlanPanel } from './components/plan/PlanPanel'
 import { MusicBar } from './components/chrome/MusicBar'
 import { SettingsPanel } from './components/chrome/SettingsPanel'
 import { SessionOverlay } from './components/chrome/SessionOverlay'
-import { TodayView } from './components/views/TodayView'
+import { InboxView } from './components/views/InboxView'
 import { TodoView } from './components/views/TodoView'
 import { WeekPlanView } from './components/views/WeekPlanView'
 import { TemplatesView } from './components/views/TemplatesView'
@@ -33,7 +33,7 @@ import { prepareForExit } from './lib/saveCoordinator'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 
 const VIEWS = {
-  today: TodayView,
+  today: InboxView,
   todo: TodoView,
   week: WeekPlanView,
   templates: TemplatesView,

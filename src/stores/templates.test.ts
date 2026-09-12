@@ -309,7 +309,7 @@ describe('templates store', () => {
     await useTemplatesStore.getState().hydrate(null)
 
     const state = useTemplatesStore.getState()
-    expect(state.templates).toEqual([])
+    expect(state.templates.length).toBe(12)
     expect(state.loading).toBe(false)
   })
 

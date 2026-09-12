@@ -2,7 +2,7 @@ import { create } from 'zustand'
 import type { SqlDriver } from '../db/driver'
 import * as notesRepo from '../db/repos/notes'
 import * as settingsRepo from '../db/repos/settings'
-import { toDayKey } from '../lib/time'
+import { toDayKey, addDays, fromDayKey } from '../lib/time'
 import { useBlocksStore } from './blocks'
 import { useRitualsStore } from './rituals'
 import { useTimerStore } from './timer'
@@ -30,6 +30,7 @@ interface DayState {
   error: string | null
   hydrate: (driver: SqlDriver | null, day: string, nowMin: number) => Promise<void>
   setShutdown: (min: number, scope: 'day' | 'default') => Promise<void>
+  shutdownDay: (day?: string) => Promise<void>
   /**
    * Recomputes `nowMin` and, when the day key changed, performs the midnight
    * rollover. `now` is a parameter (not read from the clock here) so tests
@@ -118,6 +119,14 @@ export const useDayStore = create<DayState>()((set, get) => ({
     }
   },
 
+  shutdownDay: async (day) => {
+    const targetDay = day ?? get().currentDay
+    const nowMin = get().nowMin
+    await get().setShutdown(nowMin, 'day')
+    await useBlocksStore.getState().rolloverUnfinishedToTodo(targetDay)
+    void useTimerStore.getState().pause()
+  },
+
   tick: (now) => {
     const nowMin = minuteOfDay(now)
     const day = toDayKey(now)
@@ -159,6 +168,12 @@ export const useDayStore = create<DayState>()((set, get) => ({
  * Never rejects: each step logs and moves on.
  */
 async function rollover(day: string, nowMin: number): Promise<void> {
+  const yesterday = toDayKey(addDays(fromDayKey(day), -1))
+  try {
+    await useBlocksStore.getState().rolloverUnfinishedToTodo(yesterday)
+  } catch (err) {
+    console.error('Failed to rollover unfinished tasks from yesterday:', err)
+  }
   try {
     await useBlocksStore.getState().ensureDays([day])
   } catch (err) {

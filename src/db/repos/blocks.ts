@@ -4,7 +4,7 @@
  */
 
 import { isGuardUnmet, type SqlDriver } from '../driver'
-import type { DayBlock, BlockKind, BlockRepeat } from '../types'
+import type { DayBlock, BlockKind, BlockRepeat, InboxGroup, EnergyLevel } from '../types'
 
 // Row type matching SQL schema (0|1 for booleans). Exported so archive.ts
 // can reuse it rather than maintaining a duplicate mapping.
@@ -25,9 +25,24 @@ export interface BlockRow {
   repeat: BlockRepeat
   track_id: number | null
   quiet: number
+  inbox_group?: string
+  energy?: string | null
+  tags?: string
+  logged_sec?: number
+  carried_over?: number
+  imported_from_todo?: number
 }
 
 export function rowToBlock(row: BlockRow): DayBlock {
+  const parseTags = (raw?: string): string[] => {
+    if (!raw) return []
+    try {
+      const parsed = JSON.parse(raw)
+      if (Array.isArray(parsed)) return parsed.filter((t): t is string => typeof t === 'string')
+    } catch {}
+    return raw.split(',').map((t) => t.trim()).filter(Boolean)
+  }
+
   return {
     id: row.id,
     day: row.day,
@@ -45,6 +60,12 @@ export function rowToBlock(row: BlockRow): DayBlock {
     repeat: row.repeat,
     trackId: row.track_id,
     quiet: row.quiet === 1,
+    inboxGroup: (row.inbox_group as InboxGroup) ?? 'capture',
+    energy: (row.energy as EnergyLevel) ?? null,
+    tags: parseTags(row.tags),
+    loggedSec: row.logged_sec ?? 0,
+    carriedOver: row.carried_over === 1,
+    importedFromTodo: row.imported_from_todo === 1,
   }
 }
 
@@ -81,10 +102,17 @@ export async function createBlock(
     repeat?: BlockRepeat
     trackId?: number | null
     quiet?: boolean
+    inboxGroup?: InboxGroup
+    energy?: EnergyLevel | null
+    tags?: string[]
+    loggedSec?: number
+    carriedOver?: boolean
+    importedFromTodo?: boolean
   }
 ): Promise<number> {
+  const tagsStr = block.tags && block.tags.length > 0 ? block.tags.join(',') : ''
   const result = await driver.execute(
-    'INSERT INTO day_block (day, task_id, subtask_id, title, kind, start_min, duration_min, pomodoros, sort, note, note_updated_at, "repeat", track_id, quiet) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+    'INSERT INTO day_block (day, task_id, subtask_id, title, kind, start_min, duration_min, pomodoros, sort, note, note_updated_at, "repeat", track_id, quiet, inbox_group, energy, tags, logged_sec, carried_over, imported_from_todo) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
     [
       block.day,
       block.taskId ?? null,
@@ -100,6 +128,12 @@ export async function createBlock(
       block.repeat ?? 'once',
       block.trackId ?? null,
       block.quiet ? 1 : 0,
+      block.inboxGroup ?? 'capture',
+      block.energy ?? null,
+      tagsStr,
+      block.loggedSec ?? 0,
+      block.carriedOver ? 1 : 0,
+      block.importedFromTodo ? 1 : 0,
     ]
   )
   return result.lastInsertId
@@ -171,6 +205,30 @@ export async function updateBlock(
     updates.push('quiet = ?')
     values.push(patch.quiet ? 1 : 0)
   }
+  if (patch.inboxGroup !== undefined) {
+    updates.push('inbox_group = ?')
+    values.push(patch.inboxGroup)
+  }
+  if (patch.energy !== undefined) {
+    updates.push('energy = ?')
+    values.push(patch.energy)
+  }
+  if (patch.tags !== undefined) {
+    updates.push('tags = ?')
+    values.push(patch.tags.join(','))
+  }
+  if (patch.loggedSec !== undefined) {
+    updates.push('logged_sec = ?')
+    values.push(patch.loggedSec)
+  }
+  if (patch.carriedOver !== undefined) {
+    updates.push('carried_over = ?')
+    values.push(patch.carriedOver ? 1 : 0)
+  }
+  if (patch.importedFromTodo !== undefined) {
+    updates.push('imported_from_todo = ?')
+    values.push(patch.importedFromTodo ? 1 : 0)
+  }
 
   if (updates.length === 0) return
 
@@ -179,6 +237,78 @@ export async function updateBlock(
     `UPDATE day_block SET ${updates.join(', ')} WHERE id = ?`,
     values
   )
+}
+
+export async function updateBlockInboxGroup(
+  driver: SqlDriver,
+  id: number,
+  inboxGroup: InboxGroup
+): Promise<void> {
+  await driver.execute('UPDATE day_block SET inbox_group = ? WHERE id = ?', [inboxGroup, id])
+}
+
+export async function incrementBlockLoggedTime(
+  driver: SqlDriver,
+  id: number,
+  addedSec: number
+): Promise<void> {
+  await driver.execute('UPDATE day_block SET logged_sec = logged_sec + ? WHERE id = ?', [addedSec, id])
+}
+
+export async function markUnfinishedAsCarriedOver(
+  driver: SqlDriver,
+  day: string
+): Promise<void> {
+  await driver.execute(
+    'UPDATE day_block SET carried_over = 1 WHERE day = ? AND completed = 0',
+    [day]
+  )
+}
+
+export interface InboxStats {
+  capturedToday: number
+  completedToday: number
+  focusSecLogged: number
+  importedFromTodo: number
+}
+
+export async function getInboxStats(
+  driver: SqlDriver,
+  day: string
+): Promise<InboxStats> {
+  const rows = await driver.select<{
+    captured: number
+    completed: number
+    focus_sec: number
+    imported: number
+  }>(
+    `SELECT
+       COUNT(*) as captured,
+       SUM(CASE WHEN completed = 1 THEN 1 ELSE 0 END) as completed,
+       COALESCE(SUM(logged_sec), 0) as focus_sec,
+       SUM(CASE WHEN imported_from_todo = 1 THEN 1 ELSE 0 END) as imported
+     FROM day_block
+     WHERE day = ?`,
+    [day]
+  )
+  const r = rows[0]
+  return {
+    capturedToday: r?.captured ?? 0,
+    completedToday: r?.completed ?? 0,
+    focusSecLogged: r?.focus_sec ?? 0,
+    importedFromTodo: r?.imported ?? 0,
+  }
+}
+
+export async function listIncompleteForDay(
+  driver: SqlDriver,
+  day: string
+): Promise<DayBlock[]> {
+  const rows = await driver.select<BlockRow>(
+    'SELECT * FROM day_block WHERE day = ? AND completed = 0 ORDER BY sort ASC, id ASC',
+    [day]
+  )
+  return rows.map(rowToBlock)
 }
 
 export async function deleteBlock(driver: SqlDriver, id: number): Promise<void> {

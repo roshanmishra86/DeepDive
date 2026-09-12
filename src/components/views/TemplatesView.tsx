@@ -1,9 +1,15 @@
 import { useEffect, useState } from 'react'
 import { useTemplatesStore } from '../../stores/templates'
 import { openDatabase } from '../../db/index'
-import { TemplateListCard } from '../templates/TemplateListCard'
-import { TemplateDetailPane } from '../templates/TemplateDetailPane'
-import { NewTemplateModal } from '../templates/NewTemplateModal'
+import { TemplatesHeader } from '../templates/TemplatesHeader'
+import { TemplatesStats } from '../templates/TemplatesStats'
+import { TemplateCatalog } from '../templates/TemplateCatalog'
+import { TemplateDetailView } from '../templates/TemplateDetailView'
+import { TemplateBottomCards } from '../templates/TemplateBottomCards'
+import { NewGtdTemplateModal } from '../templates/NewGtdTemplateModal'
+import { ImportTodoToTemplateModal } from '../templates/ImportTodoToTemplateModal'
+import { EditTemplateModal } from '../templates/EditTemplateModal'
+import type { TemplateDestination } from '../../db/types'
 
 export function TemplatesView() {
   const templates = useTemplatesStore((s) => s.templates)
@@ -11,23 +17,30 @@ export function TemplatesView() {
   const detail = useTemplatesStore((s) => s.detail)
   const select = useTemplatesStore((s) => s.select)
   const duplicateTemplate = useTemplatesStore((s) => s.duplicateTemplate)
+  const deleteTemplate = useTemplatesStore((s) => s.deleteTemplate)
+  const toggleFavourite = useTemplatesStore((s) => s.toggleFavourite)
+  const setDestination = useTemplatesStore((s) => s.setDestination)
+  const addBlock = useTemplatesStore((s) => s.addBlock)
+  const removeBlock = useTemplatesStore((s) => s.removeBlock)
+  const applyTemplateGtd = useTemplatesStore((s) => s.applyTemplateGtd)
   const hydrate = useTemplatesStore((s) => s.hydrate)
   const loading = useTemplatesStore((s) => s.loading)
-  // P2-A: createTemplate never throws — it reports failure via `null` and
-  // sets this. NewTemplateModal now subscribes to the store's `error`
-  // directly and displays it within the modal, so failed creates are visible.
   const error = useTemplatesStore((s) => s.error)
 
   const [newTemplateOpen, setNewTemplateOpen] = useState(false)
+  const [importTodoOpen, setImportTodoOpen] = useState(false)
+  const [editTemplateOpen, setEditTemplateOpen] = useState(false)
 
-  // Hydrate on mount
+  // Hydrate on mount if empty
   useEffect(() => {
     let mounted = true
     ;(async () => {
       try {
         const driver = await openDatabase()
         if (!mounted) return
-        await hydrate(driver)
+        if (templates.length === 0) {
+          await hydrate(driver)
+        }
       } catch (err) {
         console.error('Failed to hydrate templates view:', err)
       }
@@ -35,93 +48,105 @@ export function TemplatesView() {
     return () => {
       mounted = false
     }
-  }, [hydrate])
+  }, [hydrate, templates.length])
+
+  const handleApply = async (dest?: TemplateDestination) => {
+    if (!selectedId) return
+    await applyTemplateGtd(selectedId, dest)
+  }
+
+  const handleAddTask = async (title: string, tag: string) => {
+    await addBlock({
+      title,
+      kind: 'deep',
+      durationMin: 25,
+      tag,
+    })
+  }
 
   if (loading) {
     return (
-      <div className="tpl-view">
-        <div className="tpl-header">
-          <div>
-            <div className="tpl-title">Day templates</div>
-            <div className="tpl-subtitle">Repetition lives here: build a day once, apply it whenever it fits.</div>
-          </div>
-        </div>
-        <div className="tpl-body">
-          <div className="view-state" role="status">
-            <div className="view-state-eyebrow">Templates</div>
-            <div className="view-state-title">Loading templates…</div>
-          </div>
+      <div className="tpl-gtd-view">
+        <div className="view-state" role="status">
+          <div className="view-state-eyebrow">Templates</div>
+          <div className="view-state-title">Loading templates…</div>
         </div>
       </div>
     )
   }
 
   return (
-    <div className="tpl-view">
-      <div className="tpl-header">
-        <div>
-          <div className="tpl-title">Day templates</div>
-          <div className="tpl-subtitle">Repetition lives here: build a day once, apply it whenever it fits.</div>
-        </div>
-      </div>
+    <div className="tpl-gtd-view">
+      <div className="tpl-gtd-inner">
+        {/* Header */}
+        <TemplatesHeader
+          onNewTemplate={() => setNewTemplateOpen(true)}
+          onImportTodo={() => setImportTodoOpen(true)}
+          onManageTags={() => {}}
+        />
 
-      {error && <div className="modal-error">{error}</div>}
+        {error && <div className="modal-error">{error}</div>}
 
-      <div className="tpl-body">
-        {/* Left column: template list */}
-        <div className="tpl-list-column">
-          {templates.length === 0 ? (
-            <button
-              className="tpl-new-btn"
-              onClick={() => setNewTemplateOpen(true)}
-              aria-label="Create new template"
-            >
-              + New template
-            </button>
+        {/* Top 4 Summary Stat Cards */}
+        <TemplatesStats templates={templates} />
+
+        {/* Two-Column Middle Section (Catalog + Detail) */}
+        <div className="tpl-workspace-grid">
+          {/* Left: Template Catalog */}
+          <TemplateCatalog
+            templates={templates}
+            selectedId={selectedId}
+            onSelect={(id) => void select(id)}
+            onToggleFavourite={(id) => void toggleFavourite(id)}
+            onDuplicate={(id) => void duplicateTemplate(id)}
+            onDelete={(id) => void deleteTemplate(id)}
+          />
+
+          {/* Right: Selected Template Detail */}
+          {detail ? (
+            <TemplateDetailView
+              template={detail}
+              onApply={(dest) => void handleApply(dest)}
+              onDuplicate={() => {
+                if (selectedId) void duplicateTemplate(selectedId)
+              }}
+              onEdit={() => setEditTemplateOpen(true)}
+              onDestinationChange={(dest) => {
+                if (selectedId) void setDestination(selectedId, dest)
+              }}
+              onAddTask={(title, tag) => void handleAddTask(title, tag)}
+              onDeleteBlock={(blockId) => void removeBlock(blockId)}
+            />
           ) : (
-            <>
-              <div className="tpl-list">
-                {templates.map((template) => (
-                  <TemplateListCard
-                    key={template.id}
-                    template={template}
-                    isSelected={selectedId === template.id}
-                    onSelect={() => select(template.id)}
-                    onDuplicate={() => void duplicateTemplate(template.id)}
-                  />
-                ))}
+            <div className="tpl-detail-card" style={{ justifyContent: 'center', alignItems: 'center' }}>
+              <div style={{ color: 'var(--text-muted)', fontSize: 14 }}>
+                Select a template to view and manage its checklist.
               </div>
-              <button
-                className="tpl-new-btn"
-                onClick={() => setNewTemplateOpen(true)}
-                aria-label="Create new template"
-              >
-                + New template
-              </button>
-            </>
+            </div>
           )}
         </div>
 
-        {/* Right column: detail pane */}
-        {templates.length === 0 ? (
-          <div className="tpl-empty-state">
-            <div className="view-empty-text">
-              Create your first template to get started
-            </div>
-          </div>
-        ) : detail ? (
-          <TemplateDetailPane template={detail} />
-        ) : (
-          <div className="tpl-empty-state">
-            <div className="view-empty-text">
-              Select a template to edit
-            </div>
-          </div>
-        )}
+        {/* Bottom Analytics & Guidance (3 Cards) */}
+        <TemplateBottomCards
+          templates={templates}
+          onSelectTemplate={(id) => void select(id)}
+        />
       </div>
 
+      {/* Modals */}
       {newTemplateOpen && (
-        <NewTemplateModal onClose={() => setNewTemplateOpen(false)} />
+        <NewGtdTemplateModal onClose={() => setNewTemplateOpen(false)} />
+      )}
+
+      {importTodoOpen && (
+        <ImportTodoToTemplateModal onClose={() => setImportTodoOpen(false)} />
+      )}
+
+      {editTemplateOpen && detail && (
+        <EditTemplateModal
+          template={detail}
+          onClose={() => setEditTemplateOpen(false)}
+        />
       )}
     </div>
   )

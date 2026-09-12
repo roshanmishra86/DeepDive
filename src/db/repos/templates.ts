@@ -13,6 +13,12 @@ interface TemplateRow {
   description: string
   start_min: number
   weekdays: number
+  category?: string
+  tags?: string
+  favourite?: number
+  last_used_at?: string | null
+  destination?: string
+  icon?: string
 }
 
 interface TemplateBlockRow {
@@ -24,6 +30,7 @@ interface TemplateBlockRow {
   duration_min: number
   pomodoros: number
   sort: number
+  tag?: string
 }
 
 function templateRowToTemplate(row: TemplateRow): Template {
@@ -33,6 +40,12 @@ function templateRowToTemplate(row: TemplateRow): Template {
     description: row.description,
     startMin: row.start_min,
     weekdays: row.weekdays,
+    category: (row.category as Template['category']) || 'work',
+    tags: row.tags ? row.tags.split(',').map((t) => t.trim()).filter(Boolean) : [],
+    favourite: Boolean(row.favourite),
+    lastUsedAt: row.last_used_at ?? null,
+    destination: (row.destination as Template['destination']) || 'inbox',
+    icon: row.icon || 'target',
   }
 }
 
@@ -46,6 +59,7 @@ function templateBlockRowToBlock(row: TemplateBlockRow): TemplateBlock {
     durationMin: row.duration_min,
     pomodoros: row.pomodoros,
     sort: row.sort,
+    tag: row.tag || '',
   }
 }
 
@@ -64,15 +78,14 @@ export async function listTemplates(driver: SqlDriver): Promise<TemplateWithStat
      GROUP BY t.id
      ORDER BY t.name`
   )
-  return rows.map((row) => ({
-    id: row.id,
-    name: row.name,
-    description: row.description,
-    startMin: row.start_min,
-    weekdays: row.weekdays,
-    totalMin: row.totalMin,
-    blockCount: row.blockCount,
-  }))
+  return rows.map((row) => {
+    const base = templateRowToTemplate(row)
+    return {
+      ...base,
+      totalMin: row.totalMin,
+      blockCount: row.blockCount,
+    }
+  })
 }
 
 export interface TemplateDetail extends Template {
@@ -100,11 +113,33 @@ export async function getTemplate(
 
 export async function createTemplate(
   driver: SqlDriver,
-  template: { name: string; description?: string; startMin: number; weekdays?: number }
+  template: {
+    name: string
+    description?: string
+    startMin?: number
+    weekdays?: number
+    category?: Template['category']
+    tags?: string[]
+    favourite?: boolean
+    lastUsedAt?: string | null
+    destination?: Template['destination']
+    icon?: string
+  }
 ): Promise<number> {
   const result = await driver.execute(
-    'INSERT INTO template (name, description, start_min, weekdays) VALUES (?, ?, ?, ?)',
-    [template.name, template.description ?? '', template.startMin, template.weekdays ?? 0]
+    'INSERT INTO template (name, description, start_min, weekdays, category, tags, favourite, last_used_at, destination, icon) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+    [
+      template.name,
+      template.description ?? '',
+      template.startMin ?? 480,
+      template.weekdays ?? 0,
+      template.category ?? 'work',
+      (template.tags ?? []).join(','),
+      template.favourite ? 1 : 0,
+      template.lastUsedAt ?? null,
+      template.destination ?? 'inbox',
+      template.icon ?? 'target',
+    ]
   )
   return result.lastInsertId
 }
@@ -133,6 +168,30 @@ export async function updateTemplate(
     updates.push('weekdays = ?')
     values.push(patch.weekdays)
   }
+  if (patch.category !== undefined) {
+    updates.push('category = ?')
+    values.push(patch.category)
+  }
+  if (patch.tags !== undefined) {
+    updates.push('tags = ?')
+    values.push(patch.tags.join(','))
+  }
+  if (patch.favourite !== undefined) {
+    updates.push('favourite = ?')
+    values.push(patch.favourite ? 1 : 0)
+  }
+  if (patch.lastUsedAt !== undefined) {
+    updates.push('last_used_at = ?')
+    values.push(patch.lastUsedAt)
+  }
+  if (patch.destination !== undefined) {
+    updates.push('destination = ?')
+    values.push(patch.destination)
+  }
+  if (patch.icon !== undefined) {
+    updates.push('icon = ?')
+    values.push(patch.icon)
+  }
 
   if (updates.length === 0) return
 
@@ -157,10 +216,11 @@ export async function addTemplateBlock(
     durationMin: number
     pomodoros?: number
     sort?: number
+    tag?: string
   }
 ): Promise<number> {
   const result = await driver.execute(
-    'INSERT INTO template_block (template_id, title, kind, start_min, duration_min, pomodoros, sort) VALUES (?, ?, ?, ?, ?, ?, ?)',
+    'INSERT INTO template_block (template_id, title, kind, start_min, duration_min, pomodoros, sort, tag) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
     [
       block.templateId,
       block.title,
@@ -169,6 +229,7 @@ export async function addTemplateBlock(
       block.durationMin,
       block.pomodoros ?? 0,
       block.sort ?? 0,
+      block.tag ?? '',
     ]
   )
   return result.lastInsertId
@@ -188,6 +249,7 @@ const TEMPLATE_BLOCK_COLUMNS: Record<keyof Omit<TemplateBlock, 'id' | 'templateI
   durationMin: 'duration_min',
   pomodoros: 'pomodoros',
   sort: 'sort',
+  tag: 'tag',
 }
 
 // Single source of truth for mapping a TemplateBlock patch to SQL `SET`
@@ -341,12 +403,22 @@ export async function duplicateTemplate(driver: SqlDriver, id: number): Promise<
   // for the new id after the transaction commits.
   const [templateInsert] = await driver.transaction([
     {
-      sql: 'INSERT INTO template (name, description, start_min, weekdays) VALUES (?, ?, ?, ?)',
-      params: [`${original.name} (copy)`, original.description, original.start_min, original.weekdays],
+      sql: 'INSERT INTO template (name, description, start_min, weekdays, category, tags, favourite, destination, icon) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      params: [
+        `${original.name} (copy)`,
+        original.description,
+        original.start_min,
+        original.weekdays,
+        original.category ?? 'work',
+        original.tags ?? '',
+        original.favourite ?? 0,
+        original.destination ?? 'inbox',
+        original.icon ?? 'target',
+      ],
     },
     {
-      sql: `INSERT INTO template_block (template_id, title, kind, start_min, duration_min, pomodoros, sort)
-            SELECT last_insert_rowid(), title, kind, start_min, duration_min, pomodoros, sort
+      sql: `INSERT INTO template_block (template_id, title, kind, start_min, duration_min, pomodoros, sort, tag)
+            SELECT last_insert_rowid(), title, kind, start_min, duration_min, pomodoros, sort, tag
             FROM template_block
             WHERE template_id = ?
             ORDER BY sort`,
