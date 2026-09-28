@@ -1,11 +1,10 @@
-## What’s new
+## What’s new in v0.2.8
 
-- Redesigned the daily Today view with a fluid GTD action workflow, quick-capture, and execution groups (Working Now, Do Next, Capture, and Waiting / Later).
-- Redesigned the TODO screen with priority, deadline, and project accordion groupings, inline subtask expansions, and elevated task action menus.
-- Overhauled the Templates view with horizontal workspace scrolling, destination selector (Today vs. TODO), catalog search, and quick-apply rail card.
-- Optimized the Archive and Week Plan views with consistent alignment, responsive sizing, and clean section hierarchies.
-- Added database migrations 0008 (grouping & energy levels) and 0009 (GTD template destinations).
-- Fixed 3-dots task dropdown menus so they render above all cards and flip upward when near the viewport bottom.
+- Redesigned the daily Today view with tag-based workflow states (`Working Now`, `Do Next`, `Capture`, and `Waiting / Later`) replacing the legacy grouped accordion sections.
+- Introduced the unified task list with circular checkboxes, structured metadata chips (energy level, estimate duration, project tags, due date), and direct workflow state switchers.
+- Modernized daily summary stat cards with live progress metrics, focus duration logged in hours/minutes, and direct import modal trigger.
+- Added quick filter dropdown (Energy levels, Active/Completed status) and sort controls (Added, Energy, Duration estimate, Alphabetical).
+- Retained full compatibility with existing planner data, focus timer, sound library, and rollover mechanisms.
 
 ## Notes
 
