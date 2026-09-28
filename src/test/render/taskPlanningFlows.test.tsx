@@ -24,7 +24,7 @@ import { NotesEditor } from '../../components/common/NotesEditor'
 import { importMarkdownNotes } from '../../lib/markdownExport'
 import { notePlainText, parseNote, serializeNote } from '../../lib/richText'
 import { DEFAULT_ACCENT } from '../../lib/accents'
-import { DEFAULT_TODO_FILTERS } from '../../lib/todo'
+import { DEFAULT_TODO_FILTERS, composeDueAt } from '../../lib/todo'
 import { TodoView, TODO_FOCUS_FADE_MS } from '../../components/views/TodoView'
 import { weekDays } from '../../lib/weekPlan'
 import { startOfWeek, addDays, fromDayKey } from '../../lib/time'
@@ -827,6 +827,63 @@ describe('task planning release flows', () => {
 
       const statsValues = Array.from(document.querySelectorAll('.week-stat-value')).map((el) => el.textContent)
       expect(statsValues).toContain('—')
+    })
+
+    it('renders Weekly Priorities section with target outcomes for the week', () => {
+      const task1 = makeTask(1, {
+        title: 'Write One Essay / Week',
+        notes: 'Complete draft and do one round of editing',
+        dueAt: composeDueAt(DAY, '17:00'),
+        priority: 'high',
+      })
+      const task2 = makeTask(2, {
+        title: 'Work Manus notebook',
+        notes: 'Publish to public',
+        dueAt: composeDueAt(DAY, '17:00'),
+        priority: 'medium',
+        tags: ['in-progress'],
+      })
+      useDayStore.setState({ currentDay: DAY, nowMin: 540 })
+      useTasksStore.setState({ tasks: [task1, task2] })
+      useBlocksStore.setState({ blocksByDay: {}, loadedDays: [DAY] })
+
+      render(<WeekPlanView />)
+
+      expect(screen.getByText('Weekly Priorities')).toBeDefined()
+      expect(screen.getByText('Focus on a few key outcomes to make this week a success.')).toBeDefined()
+      expect(screen.getByText('Write One Essay / Week')).toBeDefined()
+      expect(screen.getByText('Complete draft and do one round of editing')).toBeDefined()
+      expect(screen.getByText('Work Manus notebook')).toBeDefined()
+      expect(screen.getByText('In Progress')).toBeDefined()
+      expect(screen.getByText('Not started')).toBeDefined()
+    })
+
+    it('allows adding a new weekly priority target', async () => {
+      useDayStore.setState({ currentDay: DAY, nowMin: 540 })
+      useTasksStore.setState({ tasks: [] })
+      useBlocksStore.setState({ blocksByDay: {}, loadedDays: [DAY] })
+
+      render(<WeekPlanView />)
+
+      const addBtn = screen.getByRole('button', { name: 'Add weekly priority' })
+      fireEvent.click(addBtn)
+
+      const titleInput = screen.getByPlaceholderText('Priority title (e.g. Write One Essay / Week)')
+      fireEvent.change(titleInput, { target: { value: 'Launch Product Update' } })
+
+      const notesInput = screen.getByPlaceholderText('Outcome description (e.g. Complete first draft and do one round of editing)')
+      fireEvent.change(notesInput, { target: { value: 'Prepare update notes and share with team' } })
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: 'Add priority' }))
+      })
+
+      expect(screen.getByText('Launch Product Update')).toBeDefined()
+      expect(screen.getByText('Prepare update notes and share with team')).toBeDefined()
+
+      const created = useTasksStore.getState().tasks.find((t) => t.title === 'Launch Product Update')
+      expect(created).toBeDefined()
+      expect(created?.tags).toContain('weekly-priority')
     })
   })
 })

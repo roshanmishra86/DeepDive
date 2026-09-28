@@ -6160,3 +6160,738 @@ button:focus-visible {
   font-size: 10.5px;
   color: var(--text-faint);
 }
+
+/* Week footer layout */
+
+.week-footer-layout {
+  display: grid;
+  grid-template-columns: 1.6fr 1fr;
+  gap: 16px;
+  align-items: start;
+}
+
+@media (max-width: 1200px) {
+  .week-footer-layout {
+    grid-template-columns: 1fr;
+  }
+}
+
+.week-footer-main {
+  min-width: 0;
+}
+
+.week-footer-side {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+}
+
+.week-footer-card-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.week-footer-card-badge {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  background: var(--bg-subtle);
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  flex: none;
+}
+
+/* Weekly Priorities */
+
+.week-priorities-card {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 20px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg-card);
+}
+
+.week-priorities-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.week-priorities-header-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.week-priorities-icon-badge {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: var(--bg-subtle);
+  border: 1px solid var(--border);
+  color: var(--text);
+  flex: none;
+}
+
+.week-priorities-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.week-priorities-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text);
+  margin: 0;
+}
+
+.week-priorities-subtitle {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin: 0;
+}
+
+.week-priorities-edit-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-card);
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.week-priorities-edit-btn:hover {
+  background: var(--bg-hover);
+  border-color: var(--border-strong);
+}
+
+.week-priorities-edit-btn-active {
+  background: var(--accent);
+  color: var(--bg-window);
+  border-color: var(--accent);
+}
+
+.week-priorities-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.week-priority-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  background: var(--bg-subtle);
+  transition: all 0.15s ease;
+}
+
+.week-priority-row:hover {
+  border-color: var(--border);
+  background: var(--bg-card);
+}
+
+.week-priority-row-done {
+  opacity: 0.85;
+}
+
+.week-priority-drag-handle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-faint);
+  cursor: grab;
+  padding: 2px;
+}
+
+.week-priority-number {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: var(--bg-window);
+  border: 1px solid var(--border);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text);
+  flex: none;
+}
+
+.week-priority-content {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+}
+
+.week-priority-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.week-priority-title-done {
+  text-decoration: line-through;
+  color: var(--text-muted);
+}
+
+.week-priority-notes {
+  font-size: 11.5px;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.week-priority-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: none;
+}
+
+.week-priority-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  border: 1px solid transparent;
+  cursor: pointer;
+  background: none;
+}
+
+.week-priority-badge-high {
+  background: rgba(234, 88, 12, 0.12);
+  color: #ea580c;
+  border-color: rgba(234, 88, 12, 0.2);
+}
+
+.week-priority-badge-medium {
+  background: rgba(217, 119, 6, 0.12);
+  color: #d97706;
+  border-color: rgba(217, 119, 6, 0.2);
+}
+
+.week-priority-badge-low {
+  background: rgba(16, 185, 129, 0.12);
+  color: #059669;
+  border-color: rgba(16, 185, 129, 0.2);
+}
+
+.week-priority-date-container {
+  position: relative;
+}
+
+.week-priority-date-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 8px;
+  border-radius: 6px;
+  background: var(--bg-window);
+  border: 1px solid var(--border);
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-muted);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.week-priority-date-chip:hover {
+  color: var(--text);
+  border-color: var(--border-strong);
+}
+
+.week-priority-date-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  min-width: 140px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
+  padding: 4px;
+  z-index: 50;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.week-priority-date-option {
+  display: flex;
+  align-items: center;
+  padding: 5px 8px;
+  border-radius: 4px;
+  background: none;
+  border: none;
+  font-size: 11.5px;
+  color: var(--text);
+  cursor: pointer;
+  width: 100%;
+  text-align: left;
+}
+
+.week-priority-date-option:hover {
+  background: var(--bg-hover);
+}
+
+.week-priority-date-option-active {
+  font-weight: 600;
+  color: var(--accent);
+}
+
+.week-priority-status-container {
+  position: relative;
+}
+
+.week-priority-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  border-radius: 14px;
+  font-size: 11px;
+  font-weight: 500;
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+  white-space: nowrap;
+}
+
+.week-priority-status-in-progress {
+  background: rgba(13, 148, 136, 0.12);
+  color: #0d9488;
+  border-color: rgba(13, 148, 136, 0.25);
+}
+
+.week-priority-status-not-started {
+  background: var(--bg-window);
+  color: var(--text-muted);
+  border-color: var(--border);
+}
+
+.week-priority-status-done {
+  background: rgba(22, 101, 52, 0.12);
+  color: #166534;
+  border-color: rgba(22, 101, 52, 0.25);
+}
+
+.week-priority-status-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  min-width: 140px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
+  padding: 4px;
+  z-index: 50;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.week-priority-status-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 5px;
+  background: none;
+  border: none;
+  font-size: 11.5px;
+  color: var(--text);
+  cursor: pointer;
+  width: 100%;
+  text-align: left;
+}
+
+.week-priority-status-option:hover {
+  background: var(--bg-hover);
+}
+
+.week-priority-status-option-active {
+  font-weight: 600;
+  color: var(--accent);
+}
+
+.week-priority-menu-container {
+  position: relative;
+}
+
+.week-priority-menu-btn {
+  color: var(--text-muted);
+  padding: 4px;
+}
+
+.week-priority-menu-btn:hover {
+  color: var(--text);
+}
+
+.week-priority-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  min-width: 160px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
+  padding: 4px;
+  z-index: 50;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.week-priority-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-radius: 5px;
+  background: none;
+  border: none;
+  font-size: 11.5px;
+  color: var(--text);
+  cursor: pointer;
+  width: 100%;
+  text-align: left;
+}
+
+.week-priority-menu-item:hover {
+  background: var(--bg-hover);
+}
+
+.week-priority-menu-item-danger {
+  color: var(--danger);
+}
+
+.week-priority-menu-item-danger:hover {
+  background: rgba(239, 68, 68, 0.1);
+}
+
+.week-priority-menu-divider {
+  height: 1px;
+  background: var(--border-subtle);
+  margin: 4px 0;
+}
+
+.week-priority-reorder-btn {
+  font-size: 12px;
+  padding: 2px 6px;
+  color: var(--text-muted);
+}
+
+.week-priority-delete-btn {
+  color: var(--danger);
+  padding: 4px;
+}
+
+.week-priority-add-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: 100%;
+  padding: 12px;
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 12.5px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.week-priority-add-btn:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: var(--bg-hover);
+}
+
+.week-priority-add-form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-subtle);
+}
+
+.week-priority-input {
+  width: 100%;
+  padding: 7px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-card);
+  color: var(--text);
+  font-size: 13px;
+  outline: none;
+}
+
+.week-priority-input:focus {
+  border-color: var(--accent);
+}
+
+.week-priority-input-sub {
+  font-size: 11.5px;
+}
+
+.week-priority-form-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.week-priority-form-field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.week-priority-form-label {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-muted);
+}
+
+.week-priority-day-select {
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-card);
+  color: var(--text);
+  font-size: 11.5px;
+  outline: none;
+}
+
+.week-priority-form-buttons {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.week-priority-submit-btn {
+  padding: 6px 14px;
+  font-size: 12px;
+}
+
+.week-priority-cancel-btn {
+  padding: 6px 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-card);
+  color: var(--text-muted);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.week-priority-cancel-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
+.week-priority-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  text-align: center;
+  gap: 6px;
+  border: 1px dashed var(--border-subtle);
+  border-radius: 8px;
+}
+
+.week-priority-empty-title {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text);
+}
+
+.week-priority-empty-sub {
+  font-size: 11.5px;
+  color: var(--text-muted);
+}
+
+.week-priority-import-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-subtle);
+  color: var(--text);
+  font-size: 11.5px;
+  font-weight: 500;
+  cursor: pointer;
+  margin-top: 8px;
+}
+
+.week-priority-import-btn:hover {
+  background: var(--bg-hover);
+}
+
+.week-priority-import-modal {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-card);
+  margin-top: 8px;
+}
+
+.week-priority-import-header {
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--text-muted);
+}
+
+.week-priority-import-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 180px;
+  overflow-y: auto;
+}
+
+.week-priority-import-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 8px;
+  border-radius: 5px;
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-subtle);
+  font-size: 12px;
+  color: var(--text);
+  cursor: pointer;
+  text-align: left;
+}
+
+.week-priority-import-item:hover {
+  background: var(--bg-hover);
+  border-color: var(--accent);
+}
+
+.week-priority-import-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.week-priority-inline-edit {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+}
+
+.week-priority-inline-input {
+  width: 100%;
+  padding: 5px 8px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--bg-window);
+  color: var(--text);
+  font-size: 12.5px;
+  outline: none;
+}
+
+.week-priority-inline-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* Weekly insights list in footer */
+
+.week-insight-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--bg-subtle);
+  font-size: 12px;
+  color: var(--text);
+  border: 1px solid var(--border-subtle);
+}
+
+.week-insight-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 6px;
+  background: var(--bg-window);
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  flex: none;
+}
+
+.week-insight-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+}
+
+.week-insight-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.week-insight-sub {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.week-insight-arrow {
+  color: var(--text-faint);
+  flex: none;
+}
+

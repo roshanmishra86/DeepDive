@@ -7,21 +7,24 @@ import {
   weekDays,
   weekStats,
   allocationByKind,
-  mostFocusedDay,
-  mostBlocksDay,
   sortDayBlocks,
   type WeekGroupBy,
 } from '../../lib/weekPlan'
 import { startOfWeek, addDays, fromDayKey, toDayKey } from '../../lib/time'
-import { upcomingTasks } from '../../lib/todo'
 import { nextFreeStart } from '../../lib/today'
 import type { Task } from '../../db/types'
 import { WeekStatsRow } from '../weekplan/WeekStatsRow'
 import { WeekDatePicker } from '../weekplan/WeekDatePicker'
 import { WeekDayColumn } from '../weekplan/WeekDayColumn'
 import { WeekAllocationDonut } from '../weekplan/WeekAllocationDonut'
+import { WeeklyPriorities } from '../weekplan/WeeklyPriorities'
 import { BlockComposer } from '../today/BlockComposer'
 import { Plus } from '@phosphor-icons/react/dist/csr/Plus'
+import { Clock } from '@phosphor-icons/react/dist/csr/Clock'
+import { ChartBar } from '@phosphor-icons/react/dist/csr/ChartBar'
+import { CalendarBlank } from '@phosphor-icons/react/dist/csr/CalendarBlank'
+import { CheckCircle } from '@phosphor-icons/react/dist/csr/CheckCircle'
+import { CaretRight } from '@phosphor-icons/react/dist/csr/CaretRight'
 
 type ComposerState =
   | { mode: 'closed' }
@@ -31,10 +34,6 @@ type ComposerState =
 interface DraggingBlock {
   blockId: number
   fromDay: string
-}
-
-function weekdayLabel(day: string): string {
-  return fromDayKey(day).toLocaleDateString('en-US', { weekday: 'long' })
 }
 
 export function WeekPlanView() {
@@ -86,16 +85,6 @@ export function WeekPlanView() {
 
   const stats = useMemo(() => weekStats(blocksByDay, days, now), [blocksByDay, days, now])
   const allocation = useMemo(() => allocationByKind(blocksByDay, days), [blocksByDay, days])
-  const focusedDay = useMemo(() => mostFocusedDay(blocksByDay, days), [blocksByDay, days])
-  const busiestDay = useMemo(() => mostBlocksDay(blocksByDay, days), [blocksByDay, days])
-  const weeklyFocus = useMemo(() => upcomingTasks(tasks, now, 3), [tasks, now])
-
-  const focusedDayHours = focusedDay
-    ? (blocksByDay[focusedDay] ?? []).filter((b) => b.kind === 'deep').reduce((sum, b) => sum + b.durationMin, 0) / 60
-    : 0
-  const busiestDayCount = busiestDay
-    ? (blocksByDay[busiestDay] ?? []).filter((b) => b.kind !== 'break').length
-    : 0
 
   // The header's "New block" button has no day of its own to anchor to, so it
   // defaults to `currentDay` — but once the user has navigated to a
@@ -203,47 +192,88 @@ export function WeekPlanView() {
           ))}
         </div>
 
-        <div className="week-footer-trio">
-          <section className="week-footer-card">
-            <h3 className="week-footer-title">Weekly focus</h3>
-            <p className="week-footer-sub">Top priorities this week</p>
-            {weeklyFocus.length === 0 ? (
-              <div className="week-footer-empty">Nothing scheduled yet</div>
-            ) : (
-              <ol className="week-focus-list">
-                {weeklyFocus.map(({ task, rankColor }, i) => (
-                  <li key={task.id} className="week-focus-item">
-                    <span className="week-focus-rank" style={{ color: rankColor }}>
-                      {i + 1}
+        <div className="week-footer-layout">
+          <div className="week-footer-main">
+            <WeeklyPriorities
+              days={days}
+              currentDay={currentDay}
+              now={now}
+              onPlanBlock={(day, taskId) => {
+                const fromMin = day === currentDay ? nowMin : 0
+                const startMin = nextFreeStart(blocksByDay[day] ?? [], fromMin, 30)
+                setComposerState({ mode: 'new', day, startMin })
+                // If a task is passed, we could also open editor or prefill
+                void taskId
+              }}
+            />
+          </div>
+
+          <div className="week-footer-side">
+            <section className="week-footer-card">
+              <div className="week-footer-card-header">
+                <div className="week-footer-card-badge" aria-hidden="true">
+                  <Clock size={18} weight="bold" />
+                </div>
+                <div>
+                  <h3 className="week-footer-title">Time allocation</h3>
+                  <p className="week-footer-sub">How your time is distributed this week.</p>
+                </div>
+              </div>
+              <WeekAllocationDonut allocation={allocation} />
+            </section>
+
+            <section className="week-footer-card">
+              <div className="week-footer-card-header">
+                <div className="week-footer-card-badge" aria-hidden="true">
+                  <ChartBar size={18} weight="bold" />
+                </div>
+                <div>
+                  <h3 className="week-footer-title">Weekly insights</h3>
+                  <p className="week-footer-sub">A quick look at your week's plan.</p>
+                </div>
+              </div>
+              <div className="week-insights-list">
+                <div className="week-insight-row">
+                  <div className="week-insight-icon" aria-hidden="true">
+                    <CalendarBlank size={16} />
+                  </div>
+                  <div className="week-insight-text">
+                    <span className="week-insight-title">{stats.blocksScheduled} tasks scheduled</span>
+                    <span className="week-insight-sub">Across 7 days</span>
+                  </div>
+                  <CaretRight size={14} className="week-insight-arrow" />
+                </div>
+
+                <div className="week-insight-row">
+                  <div className="week-insight-icon" aria-hidden="true">
+                    <Clock size={16} />
+                  </div>
+                  <div className="week-insight-text">
+                    <span className="week-insight-title">{stats.focusHours.toFixed(1)} hours of focus time</span>
+                    <span className="week-insight-sub">
+                      {weeklyGoalMin > 0
+                        ? `${Math.round((stats.focusHours / (weeklyGoalMin / 60)) * 100)}% of ${(weeklyGoalMin / 60).toFixed(0)} h goal`
+                        : 'of goal'}
                     </span>
-                    <span className="week-focus-title">{task.title}</span>
-                  </li>
-                ))}
-              </ol>
-            )}
-          </section>
+                  </div>
+                  <CaretRight size={14} className="week-insight-arrow" />
+                </div>
 
-          <section className="week-footer-card">
-            <h3 className="week-footer-title">Time allocation</h3>
-            <p className="week-footer-sub">How your time is distributed</p>
-            <WeekAllocationDonut allocation={allocation} />
-          </section>
-
-          <section className="week-footer-card">
-            <h3 className="week-footer-title">Weekly insights</h3>
-            <ul className="week-insights-list">
-              <li>
-                {focusedDay
-                  ? `Most focused day: ${weekdayLabel(focusedDay)} (${focusedDayHours.toFixed(1)} h)`
-                  : 'No deep work logged yet this week'}
-              </li>
-              <li>
-                {busiestDay
-                  ? `Most blocks on a day: ${weekdayLabel(busiestDay)} (${busiestDayCount})`
-                  : 'No blocks scheduled yet this week'}
-              </li>
-            </ul>
-          </section>
+                <div className="week-insight-row">
+                  <div className="week-insight-icon" aria-hidden="true">
+                    <CheckCircle size={16} />
+                  </div>
+                  <div className="week-insight-text">
+                    <span className="week-insight-title">
+                      Estimated {stats.completionEstimate !== null ? `${stats.completionEstimate}%` : '—'} completion
+                    </span>
+                    <span className="week-insight-sub">Based on your current plan</span>
+                  </div>
+                  <CaretRight size={14} className="week-insight-arrow" />
+                </div>
+              </div>
+            </section>
+          </div>
         </div>
       </div>
 

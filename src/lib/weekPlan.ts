@@ -8,8 +8,8 @@
  */
 
 import type { DayBlock, BlockKind, Task } from '../db/types'
-import { addDays, toDayKey } from './time'
-import { quadrantOf } from './todo'
+import { addDays, toDayKey, fromDayKey } from './time'
+import { quadrantOf, decomposeDueAt } from './todo'
 
 /**
  * Returns seven `YYYY-MM-DD` day keys spanning the week starting at anchorMonday,
@@ -319,3 +319,98 @@ export function sortDayBlocks(
 
   return copy
 }
+
+export type WeeklyPriorityStatus = 'not_started' | 'in_progress' | 'done'
+
+/**
+ * Resolves status for a weekly priority task.
+ * 'done' if completed, 'in_progress' if tagged with 'in-progress', otherwise 'not_started'.
+ */
+export function getTaskWeeklyStatus(task: Task): WeeklyPriorityStatus {
+  if (task.done) return 'done'
+  if (task.tags && task.tags.includes('in-progress')) return 'in_progress'
+  return 'not_started'
+}
+
+/**
+ * Returns the next status in the cycle: not_started -> in_progress -> done -> not_started.
+ */
+export function getNextWeeklyStatus(current: WeeklyPriorityStatus): WeeklyPriorityStatus {
+  if (current === 'not_started') return 'in_progress'
+  if (current === 'in_progress') return 'done'
+  return 'not_started'
+}
+
+/**
+ * Formats a due date for a weekly priority in the "Mon 28 Sep" format.
+ */
+export function formatPriorityDueDate(dueAt: string | null | undefined): string {
+  if (!dueAt) return 'No target date'
+  const decomposed = decomposeDueAt(dueAt)
+  if (!decomposed.date) return 'No target date'
+  const date = fromDayKey(decomposed.date)
+  if (Number.isNaN(date.getTime())) return 'Invalid date'
+  const weekday = date.toLocaleDateString('en-US', { weekday: 'short' })
+  const dayNum = date.getDate()
+  const month = date.toLocaleDateString('en-US', { month: 'short' })
+  return `${weekday} ${dayNum} ${month}`
+}
+
+/**
+ * Filters tasks belonging to the current week's priorities.
+ * Matches active (non-archived) tasks that either:
+ * 1. Have dueAt landing within the 7 days of the week,
+ * 2. Are linked to blocks scheduled in the week,
+ * 3. Have the 'weekly-priority' tag (and if they have dueAt, it lands in the week).
+ */
+export function filterWeeklyPriorities(
+  tasks: Task[],
+  days: string[],
+  blocksByDay?: Record<string, DayBlock[]>
+): Task[] {
+  const daySet = new Set(days)
+  const scheduledTaskIds = new Set<number>()
+  if (blocksByDay) {
+    for (const d of days) {
+      for (const b of blocksByDay[d] ?? []) {
+        if (b.taskId !== null) scheduledTaskIds.add(b.taskId)
+      }
+    }
+  }
+
+  return tasks.filter((t) => {
+    if (t.archived) return false
+    const dueDay = t.dueAt ? decomposeDueAt(t.dueAt).date : null
+    if (dueDay && daySet.has(dueDay)) return true
+    if (scheduledTaskIds.has(t.id)) return true
+    if (t.tags && t.tags.includes('weekly-priority') && (!dueDay || daySet.has(dueDay))) return true
+    return false
+  })
+}
+
+/**
+ * Sorts weekly priority tasks for display:
+ * Orders chronologically by target day within the week (Monday -> Sunday),
+ * then by priority (high -> medium -> low), then by sort order, then by id.
+ */
+export function sortWeeklyPriorities(tasks: Task[], days: string[]): Task[] {
+  const dayIndex = new Map(days.map((d, i) => [d, i]))
+  const priorityOrder: Record<string, number> = { high: 0, medium: 1, low: 2 }
+
+  return [...tasks].sort((a, b) => {
+    const dayA = a.dueAt ? decomposeDueAt(a.dueAt).date : ''
+    const dayB = b.dueAt ? decomposeDueAt(b.dueAt).date : ''
+    const idxA = dayIndex.has(dayA) ? dayIndex.get(dayA)! : 999
+    const idxB = dayIndex.has(dayB) ? dayIndex.get(dayB)! : 999
+
+    if (idxA !== idxB) return idxA - idxB
+
+    const prioA = priorityOrder[a.priority] ?? 1
+    const prioB = priorityOrder[b.priority] ?? 1
+    if (prioA !== prioB) return prioA - prioB
+
+    if (a.sort !== b.sort) return a.sort - b.sort
+    return a.id - b.id
+  })
+}
+

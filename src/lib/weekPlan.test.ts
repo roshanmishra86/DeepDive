@@ -8,6 +8,11 @@ import {
   mostFocusedDay,
   mostBlocksDay,
   sortDayBlocks,
+  getTaskWeeklyStatus,
+  getNextWeeklyStatus,
+  formatPriorityDueDate,
+  filterWeeklyPriorities,
+  sortWeeklyPriorities,
 } from './weekPlan'
 
 /**
@@ -611,4 +616,122 @@ describe('weekPlan', () => {
       expect(sorted[1].id).toBe(2)
     })
   })
+
+  describe('weekly priorities helpers', () => {
+    const makeTask = (id: number, overrides: Partial<Task> = {}): Task => ({
+      id,
+      title: `Task ${id}`,
+      notes: '',
+      important: true,
+      urgent: false,
+      priority: 'medium',
+      dueAt: null,
+      estimateMin: 60,
+      done: false,
+      createdAt: '2026-09-28T08:00:00Z',
+      archived: false,
+      sort: id,
+      completedAt: null,
+      archivedAt: null,
+      ...overrides,
+    })
+
+    describe('getTaskWeeklyStatus', () => {
+      it('returns done when task.done is true', () => {
+        expect(getTaskWeeklyStatus(makeTask(1, { done: true }))).toBe('done')
+      })
+
+      it('returns in_progress when task has in-progress tag', () => {
+        expect(getTaskWeeklyStatus(makeTask(1, { done: false, tags: ['in-progress'] }))).toBe('in_progress')
+      })
+
+      it('returns not_started for standard incomplete tasks', () => {
+        expect(getTaskWeeklyStatus(makeTask(1, { done: false, tags: [] }))).toBe('not_started')
+      })
+
+      it('prioritizes done over in-progress tag', () => {
+        expect(getTaskWeeklyStatus(makeTask(1, { done: true, tags: ['in-progress'] }))).toBe('done')
+      })
+    })
+
+    describe('getNextWeeklyStatus', () => {
+      it('cycles not_started -> in_progress -> done -> not_started', () => {
+        expect(getNextWeeklyStatus('not_started')).toBe('in_progress')
+        expect(getNextWeeklyStatus('in_progress')).toBe('done')
+        expect(getNextWeeklyStatus('done')).toBe('not_started')
+      })
+    })
+
+    describe('formatPriorityDueDate', () => {
+      it('formats valid ISO date to weekday day month', () => {
+        const formatted = formatPriorityDueDate('2026-09-28T17:00:00.000Z')
+        expect(formatted).toBe('Mon 28 Sep')
+      })
+
+      it('handles null, undefined, or empty inputs gracefully', () => {
+        expect(formatPriorityDueDate(null)).toBe('No target date')
+        expect(formatPriorityDueDate(undefined)).toBe('No target date')
+        expect(formatPriorityDueDate('')).toBe('No target date')
+        expect(formatPriorityDueDate('invalid')).toBe('No target date')
+      })
+    })
+
+    describe('filterWeeklyPriorities', () => {
+      const days = ['2026-09-28', '2026-09-29', '2026-09-30', '2026-10-01', '2026-10-02', '2026-10-03', '2026-10-04']
+
+      it('includes tasks due in the week', () => {
+        const t1 = makeTask(1, { dueAt: '2026-09-28T17:00:00.000Z' })
+        const t2 = makeTask(2, { dueAt: '2026-10-03T17:00:00.000Z' })
+        const t3 = makeTask(3, { dueAt: '2026-10-10T17:00:00.000Z' }) // Outside week
+
+        const result = filterWeeklyPriorities([t1, t2, t3], days)
+        expect(result.map((t) => t.id)).toEqual([1, 2])
+      })
+
+      it('includes tasks scheduled in day blocks within the week', () => {
+        const t1 = makeTask(1, { dueAt: null })
+        const blocksByDay = {
+          '2026-09-29': [makeBlock(10, { taskId: 1 })],
+        }
+
+        const result = filterWeeklyPriorities([t1], days, blocksByDay)
+        expect(result.map((t) => t.id)).toEqual([1])
+      })
+
+      it('includes tasks tagged weekly-priority without due date', () => {
+        const t1 = makeTask(1, { tags: ['weekly-priority'] })
+        const result = filterWeeklyPriorities([t1], days)
+        expect(result.map((t) => t.id)).toEqual([1])
+      })
+
+      it('excludes archived tasks even if due in the week', () => {
+        const t1 = makeTask(1, { dueAt: '2026-09-28T17:00:00.000Z', archived: true })
+        const result = filterWeeklyPriorities([t1], days)
+        expect(result).toHaveLength(0)
+      })
+    })
+
+    describe('sortWeeklyPriorities', () => {
+      const days = ['2026-09-28', '2026-09-29', '2026-09-30', '2026-10-01', '2026-10-02', '2026-10-03', '2026-10-04']
+
+      it('sorts tasks chronologically by due date in the week', () => {
+        const tWed = makeTask(1, { dueAt: '2026-09-30T17:00:00.000Z' })
+        const tMon = makeTask(2, { dueAt: '2026-09-28T17:00:00.000Z' })
+        const tSun = makeTask(3, { dueAt: '2026-10-04T17:00:00.000Z' })
+
+        const sorted = sortWeeklyPriorities([tWed, tSun, tMon], days)
+        expect(sorted.map((t) => t.id)).toEqual([2, 1, 3])
+      })
+
+      it('breaks date ties by priority then sort order', () => {
+        const tMed = makeTask(1, { dueAt: '2026-09-28T17:00:00.000Z', priority: 'medium', sort: 0 })
+        const tHigh = makeTask(2, { dueAt: '2026-09-28T17:00:00.000Z', priority: 'high', sort: 1 })
+        const tLow = makeTask(3, { dueAt: '2026-09-28T17:00:00.000Z', priority: 'low', sort: 2 })
+
+        const sorted = sortWeeklyPriorities([tMed, tLow, tHigh], days)
+        expect(sorted.map((t) => t.id)).toEqual([2, 1, 3])
+      })
+    })
+  })
 })
+
