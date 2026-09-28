@@ -1,15 +1,24 @@
 import { useState, useRef, useEffect } from 'react'
 import type { DayBlock, InboxGroup } from '../../db/types'
-import { getTagPillClass, formatEstimateTime, formatLoggedTime } from '../../lib/inbox'
+import {
+  formatEstimateTime,
+  formatEnergyLabel,
+  formatDueDate,
+} from '../../lib/inbox'
 import { notePlainText, isEmptyNote } from '../../lib/richText'
 import { useTimerStore } from '../../stores/timer'
+import { useTasksStore } from '../../stores/tasks'
 import { DotsSixVertical } from '@phosphor-icons/react/dist/csr/DotsSixVertical'
-import { DotsThreeVertical } from '@phosphor-icons/react/dist/csr/DotsThreeVertical'
+import { DotsThree } from '@phosphor-icons/react/dist/csr/DotsThree'
 import { Check } from '@phosphor-icons/react/dist/csr/Check'
 import { Play } from '@phosphor-icons/react/dist/csr/Play'
 import { Square } from '@phosphor-icons/react/dist/csr/Square'
 import { Clock } from '@phosphor-icons/react/dist/csr/Clock'
+import { Lightning } from '@phosphor-icons/react/dist/csr/Lightning'
+import { FolderSimple } from '@phosphor-icons/react/dist/csr/FolderSimple'
 import { CalendarBlank } from '@phosphor-icons/react/dist/csr/CalendarBlank'
+import { CaretDoubleRight } from '@phosphor-icons/react/dist/csr/CaretDoubleRight'
+import { Tray } from '@phosphor-icons/react/dist/csr/Tray'
 import { TrashSimple } from '@phosphor-icons/react/dist/csr/TrashSimple'
 
 interface InboxTaskRowProps {
@@ -38,12 +47,12 @@ export function InboxTaskRow({
   onDrop,
 }: InboxTaskRowProps) {
   const [menuOpen, setMenuOpen] = useState(false)
+  const [badgeMenuOpen, setBadgeMenuOpen] = useState(false)
   const menuRef = useRef<HTMLDivElement>(null)
+  const badgeRef = useRef<HTMLDivElement>(null)
 
   const timerRunning = useTimerStore((s) => s.running)
   const timerBlockTitle = useTimerStore((s) => s.blockTitle)
-  const pomodorosDone = useTimerStore((s) => s.pomodorosDone)
-  const pomodorosPerBlock = useTimerStore((s) => s.pomodorosPerBlock)
 
   // Is this block the currently active working block?
   const isWorking = isWorkingProp ?? block.inboxGroup === 'working'
@@ -51,29 +60,88 @@ export function InboxTaskRow({
 
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+      const target = e.target as Node
+      if (menuRef.current && !menuRef.current.contains(target)) {
         setMenuOpen(false)
       }
+      if (badgeRef.current && !badgeRef.current.contains(target)) {
+        setBadgeMenuOpen(false)
+      }
     }
-    if (menuOpen) {
-      document.addEventListener('mousedown', handleClickOutside)
-      return () => document.removeEventListener('mousedown', handleClickOutside)
-    }
-  }, [menuOpen])
-
-  // Format due date if any
-  let formattedDue: string | null = null
-  if (block.inboxGroup === 'waiting') {
-    // If dueAt exists or block has a wait note
-    formattedDue = 'Later'
-  }
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [])
 
   const hasNote = Boolean(block.note && !isEmptyNote(block.note))
   const plainNote = hasNote && block.note ? notePlainText(block.note).trim() : ''
 
+  const linkedTask = useTasksStore((s) => (block.taskId ? s.tasks.find((t) => t.id === block.taskId) : null))
+  const dueAt = linkedTask?.dueAt ?? null
+
+  const energyLabel = formatEnergyLabel(block.energy)
+  const durationLabel = block.durationMin ? formatEstimateTime(block.durationMin) : null
+  const dueLabel = formatDueDate(dueAt, block.inboxGroup)
+  const projectLabel = block.tags && block.tags.length > 0 ? block.tags.join(', ') : null
+
   let rowClassName = 'inbox-task-row'
   if (isWorking) rowClassName += ' inbox-task-row-working'
   if (block.completed) rowClassName += ' inbox-task-row-done'
+
+  const renderWorkflowBadge = () => {
+    const group: InboxGroup = block.inboxGroup ?? 'capture'
+    switch (group) {
+      case 'working':
+        return (
+          <button
+            type="button"
+            className="workflow-badge workflow-badge-working"
+            onClick={() => setBadgeMenuOpen(!badgeMenuOpen)}
+            aria-label="Workflow state: Working Now. Click to change."
+          >
+            <Play size={10} weight="fill" />
+            <span>Working Now</span>
+          </button>
+        )
+      case 'next':
+        return (
+          <button
+            type="button"
+            className="workflow-badge workflow-badge-next"
+            onClick={() => setBadgeMenuOpen(!badgeMenuOpen)}
+            aria-label="Workflow state: Do Next. Click to change."
+          >
+            <CaretDoubleRight size={11} weight="bold" />
+            <span>Do Next</span>
+          </button>
+        )
+      case 'capture':
+        return (
+          <button
+            type="button"
+            className="workflow-badge workflow-badge-capture"
+            onClick={() => setBadgeMenuOpen(!badgeMenuOpen)}
+            aria-label="Workflow state: Capture. Click to change."
+          >
+            <Tray size={11} />
+            <span>Capture</span>
+          </button>
+        )
+      case 'waiting':
+        return (
+          <button
+            type="button"
+            className="workflow-badge workflow-badge-waiting"
+            onClick={() => setBadgeMenuOpen(!badgeMenuOpen)}
+            aria-label="Workflow state: Waiting / Later. Click to change."
+          >
+            <Clock size={11} />
+            <span>Waiting / Later</span>
+          </button>
+        )
+      default:
+        return null
+    }
+  }
 
   return (
     <div
@@ -87,6 +155,7 @@ export function InboxTaskRow({
         onDrop?.()
       }}
     >
+      {/* Drag handle */}
       <div
         className="inbox-task-drag-handle"
         draggable
@@ -96,71 +165,129 @@ export function InboxTaskRow({
         <DotsSixVertical size={14} />
       </div>
 
+      {/* Circular Checkbox */}
       <button
         type="button"
         className={`inbox-task-checkbox ${block.completed ? 'inbox-task-checkbox-checked' : ''}`}
         onClick={onToggleComplete}
         aria-label={block.completed ? 'Mark incomplete' : 'Mark complete'}
       >
-        {block.completed && <Check size={11} />}
+        {block.completed && <Check size={11} weight="bold" />}
       </button>
 
+      {/* Title & Metadata */}
       <div className="inbox-task-main">
         <div className="inbox-task-title-row">
           <span className={`inbox-task-title ${block.completed ? 'inbox-task-title-done' : ''}`}>
             {block.title}
           </span>
+        </div>
 
-          {block.tags && block.tags.length > 0 && (
-            <div className="inbox-task-tags">
-              {block.tags.map((tag) => (
-                <span key={tag} className={`tag-pill ${getTagPillClass(tag)}`}>
-                  {tag}
-                </span>
-              ))}
+        <div className="inbox-task-meta-row">
+          {energyLabel && (
+            <span className="inbox-task-meta-item" title={`Energy: ${energyLabel}`}>
+              <Lightning size={12} />
+              <span>{energyLabel}</span>
+            </span>
+          )}
+
+          {durationLabel && (
+            <span className="inbox-task-meta-item" title={`Duration: ${durationLabel}`}>
+              <Clock size={12} />
+              <span>{durationLabel}</span>
+            </span>
+          )}
+
+          {projectLabel && (
+            <span className="inbox-task-meta-item" title={`Project: ${projectLabel}`}>
+              <FolderSimple size={12} />
+              <span>{projectLabel}</span>
+            </span>
+          )}
+
+          {dueLabel && (
+            <span className="inbox-task-meta-item" title={`Due: ${dueLabel}`}>
+              <CalendarBlank size={12} />
+              <span>{dueLabel}</span>
+            </span>
+          )}
+
+          {hasNote && plainNote && (
+            <span className="inbox-task-meta-item inbox-task-meta-note" title={plainNote}>
+              <span>○</span>
+              <span>{plainNote}</span>
+            </span>
+          )}
+        </div>
+      </div>
+
+      {/* Right side: Badge, Focus button, and Options */}
+      <div className="inbox-task-right-controls">
+        {/* Workflow state badge with switcher dropdown */}
+        <div className="inbox-workflow-badge-wrap" ref={badgeRef}>
+          {renderWorkflowBadge()}
+
+          {badgeMenuOpen && (
+            <div className="inbox-task-more-menu inbox-workflow-switcher-menu">
+              {block.inboxGroup !== 'working' && (
+                <div
+                  className="inbox-task-more-item"
+                  onClick={() => {
+                    onSetGroup('working')
+                    setBadgeMenuOpen(false)
+                  }}
+                >
+                  <Play size={11} weight="fill" />
+                  <span>Move to Working Now</span>
+                </div>
+              )}
+              {block.inboxGroup !== 'next' && (
+                <div
+                  className="inbox-task-more-item"
+                  onClick={() => {
+                    onSetGroup('next')
+                    setBadgeMenuOpen(false)
+                  }}
+                >
+                  <CaretDoubleRight size={12} weight="bold" />
+                  <span>Move to Do Next</span>
+                </div>
+              )}
+              {block.inboxGroup !== 'capture' && (
+                <div
+                  className="inbox-task-more-item"
+                  onClick={() => {
+                    onSetGroup('capture')
+                    setBadgeMenuOpen(false)
+                  }}
+                >
+                  <Tray size={12} />
+                  <span>Move to Capture</span>
+                </div>
+              )}
+              {block.inboxGroup !== 'waiting' && (
+                <div
+                  className="inbox-task-more-item"
+                  onClick={() => {
+                    onSetGroup('waiting')
+                    setBadgeMenuOpen(false)
+                  }}
+                >
+                  <Clock size={12} />
+                  <span>Move to Waiting / Later</span>
+                </div>
+              )}
             </div>
           )}
         </div>
 
-        {hasNote && plainNote && (
-          <div className="inbox-task-notes">
-            <span>○</span>
-            <span>{plainNote}</span>
-          </div>
-        )}
-      </div>
-
-      <div className="inbox-task-meta">
-        <span className="inbox-task-time" title="Estimated duration">
-          <Clock size={12} />
-          <span>{formatEstimateTime(block.durationMin)}</span>
-        </span>
-
-        {isWorking ? (
-          <span className="inbox-task-working-indicator">
-            <Clock size={12} />
-            <span>{formatLoggedTime(block.loggedSec ?? 0)}</span>
-            <span>
-              Pomodoro {Math.min(pomodorosDone + 1, Math.max(1, pomodorosPerBlock))}/{Math.max(1, pomodorosPerBlock)}
-            </span>
-          </span>
-        ) : formattedDue ? (
-          <span className="inbox-task-time" title="Scheduled/Due">
-            <CalendarBlank size={12} />
-            <span>{formattedDue}</span>
-          </span>
-        ) : (
-          <span className="inbox-task-time" title="Time spent">
-            <Clock size={12} />
-            <span>{formatLoggedTime(block.loggedSec ?? 0)}</span>
-          </span>
-        )}
-
+        {/* Start / Stop Focus Action Button */}
         {isWorking && timerRunning && isAttachedToTimer ? (
           <button
             type="button"
             className="inbox-task-action-btn inbox-task-stop-btn"
             onClick={onStopFocus}
+            aria-label="Stop focus"
           >
             <Square size={10} weight="fill" />
             <span>Stop</span>
@@ -170,12 +297,14 @@ export function InboxTaskRow({
             type="button"
             className="inbox-task-action-btn inbox-task-start-btn"
             onClick={onStartFocus}
+            aria-label="Start focus"
           >
             <Play size={10} weight="fill" />
             <span>Start focus</span>
           </button>
         )}
 
+        {/* 3 dots menu */}
         <div className="inbox-task-more-wrap" ref={menuRef}>
           <button
             type="button"
@@ -183,7 +312,7 @@ export function InboxTaskRow({
             onClick={() => setMenuOpen(!menuOpen)}
             aria-label="Task options"
           >
-            <DotsThreeVertical size={14} />
+            <DotsThree size={18} weight="bold" />
           </button>
 
           {menuOpen && (
@@ -196,7 +325,8 @@ export function InboxTaskRow({
                     setMenuOpen(false)
                   }}
                 >
-                  Move to Working Now
+                  <Play size={11} weight="fill" />
+                  <span>Move to Working Now</span>
                 </div>
               )}
               {block.inboxGroup !== 'next' && (
@@ -207,7 +337,8 @@ export function InboxTaskRow({
                     setMenuOpen(false)
                   }}
                 >
-                  Move to Do Next
+                  <CaretDoubleRight size={12} weight="bold" />
+                  <span>Move to Do Next</span>
                 </div>
               )}
               {block.inboxGroup !== 'capture' && (
@@ -218,7 +349,8 @@ export function InboxTaskRow({
                     setMenuOpen(false)
                   }}
                 >
-                  Move to Capture
+                  <Tray size={12} />
+                  <span>Move to Capture</span>
                 </div>
               )}
               {block.inboxGroup !== 'waiting' && (
@@ -229,9 +361,11 @@ export function InboxTaskRow({
                     setMenuOpen(false)
                   }}
                 >
-                  Move to Waiting / Later
+                  <Clock size={12} />
+                  <span>Move to Waiting / Later</span>
                 </div>
               )}
+              <div className="inbox-task-more-divider" />
               <div
                 className="inbox-task-more-item inbox-task-more-item-danger"
                 onClick={() => {
@@ -249,3 +383,4 @@ export function InboxTaskRow({
     </div>
   )
 }
+

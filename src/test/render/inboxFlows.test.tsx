@@ -125,4 +125,60 @@ describe('InboxView render flows', () => {
     expect(timerState.running).toBe(true)
     expect(timerState.blockTitle).toBe('Core architecture refactor')
   })
+
+  it('filters unified list when workflow state tab is clicked', async () => {
+    await act(async () => {
+      await useBlocksStore.getState().addInboxTask(TEST_DAY, {
+        title: 'Task in Working',
+        group: 'working',
+      })
+      await useBlocksStore.getState().addInboxTask(TEST_DAY, {
+        title: 'Task in Do Next',
+        group: 'next',
+      })
+    })
+
+    render(<InboxView />)
+
+    // Both tasks are in unified list initially
+    expect(screen.getByText('Task in Working')).toBeDefined()
+    expect(screen.getByText('Task in Do Next')).toBeDefined()
+
+    // Click Working Now tab
+    const workingTab = screen.getByRole('tab', { name: /Working Now/i })
+    await act(async () => {
+      fireEvent.click(workingTab)
+    })
+
+    // Now only Task in Working is displayed
+    expect(screen.getByText('Task in Working')).toBeDefined()
+    expect(screen.queryByText('Task in Do Next')).toBeNull()
+
+    // Clicking Working Now tab again clears the filter
+    await act(async () => {
+      fireEvent.click(workingTab)
+    })
+    expect(screen.getByText('Task in Working')).toBeDefined()
+    expect(screen.getByText('Task in Do Next')).toBeDefined()
+  })
+
+  it('renders workflow state badges and metadata in unified list', async () => {
+    await act(async () => {
+      await useBlocksStore.getState().addInboxTask(TEST_DAY, {
+        title: 'Finish design mockups',
+        group: 'working',
+        energy: 'high',
+        estimateMin: 25,
+        tags: ['Product'],
+      })
+    })
+
+    render(<InboxView />)
+
+    expect(screen.getByText('Finish design mockups')).toBeDefined()
+    expect(screen.getByText('High')).toBeDefined()
+    expect(screen.getByText('25 min')).toBeDefined()
+    expect(screen.getByText('Product')).toBeDefined()
+    expect(screen.getByLabelText(/Workflow state: Working Now/i)).toBeDefined()
+  })
 })

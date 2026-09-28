@@ -3,11 +3,15 @@ import type { EnergyLevel, InboxGroup } from '../../db/types'
 import { useTodayBlocks } from '../../stores/useTodayBlocks'
 import { useBlocksStore } from '../../stores/blocks'
 import { useDayStore } from '../../stores/day'
-import { groupInboxBlocks, sortInboxGroup, filterInboxBlocks, type InboxSortMode } from '../../lib/inbox'
+import {
+  filterInboxBlocks,
+  sortUnifiedInboxBlocks,
+  type InboxSortMode,
+} from '../../lib/inbox'
 import { QuickTaskInput } from '../inbox/QuickTaskInput'
 import { InboxStatCards } from '../inbox/InboxStatCards'
 import { InboxToolbar } from '../inbox/InboxToolbar'
-import { InboxTaskGroup } from '../inbox/InboxTaskGroup'
+import { InboxUnifiedTaskList } from '../inbox/InboxUnifiedTaskList'
 import { ImportFromTodoModal } from '../inbox/ImportFromTodoModal'
 import { IncompleteYesterdayModal } from '../inbox/IncompleteYesterdayModal'
 import { useDragList } from '../common/useDragList'
@@ -26,30 +30,39 @@ export function InboxView() {
 
   const [sortKey, setSortKey] = useState<InboxSortMode>('added')
   const [energyFilter, setEnergyFilter] = useState<EnergyLevel | 'all'>('all')
+  const [completedFilter, setCompletedFilter] = useState<'all' | 'active' | 'done'>('all')
+  const [activeGroup, setActiveGroup] = useState<InboxGroup | 'all'>('all')
 
   const [importTodoOpen, setImportTodoOpen] = useState(false)
   const [incompleteYesterdayOpen, setIncompleteYesterdayOpen] = useState(false)
 
   const { drag, start, over, clear } = useDragList<number>()
 
-  // Filter and group blocks
-  const grouped = useMemo(() => {
-    // 1. Filter
+  // Count blocks per GTD workflow group
+  const groupCounts = useMemo(() => {
+    let working = 0
+    let next = 0
+    let capture = 0
+    let waiting = 0
+    for (const b of blocks) {
+      const grp = b.inboxGroup ?? 'capture'
+      if (grp === 'working') working++
+      else if (grp === 'next') next++
+      else if (grp === 'waiting') waiting++
+      else capture++
+    }
+    return { working, next, capture, waiting }
+  }, [blocks])
+
+  // Filter and sort for the unified task list
+  const displayedBlocks = useMemo(() => {
     const filtered = filterInboxBlocks(blocks, {
       energy: energyFilter,
+      completed: completedFilter,
+      group: activeGroup,
     })
-
-    // 2. Group
-    const groups = groupInboxBlocks(filtered)
-
-    // 3. Sort each group
-    return {
-      working: sortInboxGroup(groups.working, sortKey),
-      next: sortInboxGroup(groups.next, sortKey),
-      capture: sortInboxGroup(groups.capture, sortKey),
-      waiting: sortInboxGroup(groups.waiting, sortKey),
-    }
-  }, [blocks, energyFilter, sortKey])
+    return sortUnifiedInboxBlocks(filtered, sortKey)
+  }, [blocks, energyFilter, completedFilter, activeGroup, sortKey])
 
   const handleDrop = async (targetGroup: InboxGroup, targetIndex: number) => {
     if (drag.sourceId === null) return
@@ -77,7 +90,10 @@ export function InboxView() {
 
       <QuickTaskInput />
 
-      <InboxStatCards blocks={blocks} />
+      <InboxStatCards
+        blocks={blocks}
+        onOpenImportTodo={() => setImportTodoOpen(true)}
+      />
 
       <InboxToolbar
         onOpenImportTodo={() => setImportTodoOpen(true)}
@@ -87,65 +103,24 @@ export function InboxView() {
         onSortChange={setSortKey}
         energyFilter={energyFilter}
         onEnergyFilterChange={setEnergyFilter}
+        completedFilter={completedFilter}
+        onCompletedFilterChange={setCompletedFilter}
+        activeGroup={activeGroup}
+        onGroupChange={setActiveGroup}
+        groupCounts={groupCounts}
       />
 
-      <div className="inbox-groups-container">
-        <InboxTaskGroup
-          group="working"
-          title="Working Now"
-          blocks={grouped.working}
-          onToggleComplete={(id) => void toggleCompleted(currentDay, id)}
-          onStartFocus={(id) => void startFocusOnBlock(currentDay, id)}
-          onStopFocus={(id) => void stopFocusOnBlock(currentDay, id)}
-          onSetGroup={(id, group) => void setInboxGroup(currentDay, id, group)}
-          onDelete={(id) => void removeBlock(currentDay, id)}
-          onDragStart={start}
-          onDragOver={over}
-          onDrop={(grp, idx) => void handleDrop(grp, idx)}
-        />
-
-        <InboxTaskGroup
-          group="next"
-          title="Do Next"
-          blocks={grouped.next}
-          onToggleComplete={(id) => void toggleCompleted(currentDay, id)}
-          onStartFocus={(id) => void startFocusOnBlock(currentDay, id)}
-          onStopFocus={(id) => void stopFocusOnBlock(currentDay, id)}
-          onSetGroup={(id, group) => void setInboxGroup(currentDay, id, group)}
-          onDelete={(id) => void removeBlock(currentDay, id)}
-          onDragStart={start}
-          onDragOver={over}
-          onDrop={(grp, idx) => void handleDrop(grp, idx)}
-        />
-
-        <InboxTaskGroup
-          group="capture"
-          title="Capture"
-          blocks={grouped.capture}
-          onToggleComplete={(id) => void toggleCompleted(currentDay, id)}
-          onStartFocus={(id) => void startFocusOnBlock(currentDay, id)}
-          onStopFocus={(id) => void stopFocusOnBlock(currentDay, id)}
-          onSetGroup={(id, group) => void setInboxGroup(currentDay, id, group)}
-          onDelete={(id) => void removeBlock(currentDay, id)}
-          onDragStart={start}
-          onDragOver={over}
-          onDrop={(grp, idx) => void handleDrop(grp, idx)}
-        />
-
-        <InboxTaskGroup
-          group="waiting"
-          title="Waiting / Later"
-          blocks={grouped.waiting}
-          onToggleComplete={(id) => void toggleCompleted(currentDay, id)}
-          onStartFocus={(id) => void startFocusOnBlock(currentDay, id)}
-          onStopFocus={(id) => void stopFocusOnBlock(currentDay, id)}
-          onSetGroup={(id, group) => void setInboxGroup(currentDay, id, group)}
-          onDelete={(id) => void removeBlock(currentDay, id)}
-          onDragStart={start}
-          onDragOver={over}
-          onDrop={(grp, idx) => void handleDrop(grp, idx)}
-        />
-      </div>
+      <InboxUnifiedTaskList
+        blocks={displayedBlocks}
+        onToggleComplete={(id) => void toggleCompleted(currentDay, id)}
+        onStartFocus={(id) => void startFocusOnBlock(currentDay, id)}
+        onStopFocus={(id) => void stopFocusOnBlock(currentDay, id)}
+        onSetGroup={(id, group) => void setInboxGroup(currentDay, id, group)}
+        onDelete={(id) => void removeBlock(currentDay, id)}
+        onDragStart={start}
+        onDragOver={over}
+        onDrop={(grp, idx) => void handleDrop(grp, idx)}
+      />
 
       <div className="inbox-rollover-banner">
         <span>⇄</span>
@@ -164,3 +139,4 @@ export function InboxView() {
     </div>
   )
 }
+

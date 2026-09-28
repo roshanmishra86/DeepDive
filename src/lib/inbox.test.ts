@@ -2,9 +2,13 @@ import { describe, it, expect } from 'vitest'
 import {
   groupInboxBlocks,
   sortInboxGroup,
+  sortUnifiedInboxBlocks,
   filterInboxBlocks,
   computeInboxMetrics,
   formatLoggedTime,
+  formatFocusTime,
+  formatEnergyLabel,
+  formatDueDate,
   formatEstimateTime,
   getTagPillClass,
 } from './inbox'
@@ -156,3 +160,68 @@ describe('getTagPillClass', () => {
     expect(getTagPillClass('Custom Project')).toBe('tag-neutral')
   })
 })
+
+describe('sortUnifiedInboxBlocks', () => {
+  it('orders by workflow priority when sorted by added', () => {
+    const bWaiting = makeBlock({ id: 1, inboxGroup: 'waiting' })
+    const bWorking = makeBlock({ id: 2, inboxGroup: 'working' })
+    const bCapture = makeBlock({ id: 3, inboxGroup: 'capture' })
+    const bNext = makeBlock({ id: 4, inboxGroup: 'next' })
+
+    const sorted = sortUnifiedInboxBlocks([bWaiting, bWorking, bCapture, bNext], 'added')
+    expect(sorted.map((b) => b.inboxGroup)).toEqual(['working', 'next', 'capture', 'waiting'])
+  })
+
+  it('orders by added id within same group', () => {
+    const b1 = makeBlock({ id: 10, inboxGroup: 'working' })
+    const b2 = makeBlock({ id: 5, inboxGroup: 'working' })
+    const sorted = sortUnifiedInboxBlocks([b1, b2], 'added')
+    expect(sorted.map((b) => b.id)).toEqual([5, 10])
+  })
+})
+
+describe('filterInboxBlocks with group', () => {
+  it('filters by workflow group', () => {
+    const b1 = makeBlock({ id: 1, inboxGroup: 'working' })
+    const b2 = makeBlock({ id: 2, inboxGroup: 'next' })
+    const b3 = makeBlock({ id: 3, inboxGroup: 'capture' })
+
+    expect(filterInboxBlocks([b1, b2, b3], { group: 'working' })).toEqual([b1])
+    expect(filterInboxBlocks([b1, b2, b3], { group: 'all' })).toEqual([b1, b2, b3])
+  })
+})
+
+describe('formatFocusTime', () => {
+  it('formats focus time matching the design spec', () => {
+    expect(formatFocusTime(0)).toBe('0 min')
+    expect(formatFocusTime(600)).toBe('10m')
+    expect(formatFocusTime(1500)).toBe('25m')
+    expect(formatFocusTime(3600)).toBe('1h')
+    expect(formatFocusTime(8100)).toBe('2h 15m')
+  })
+})
+
+describe('formatEnergyLabel', () => {
+  it('capitalizes energy levels', () => {
+    expect(formatEnergyLabel('high')).toBe('High')
+    expect(formatEnergyLabel('medium')).toBe('Medium')
+    expect(formatEnergyLabel('low')).toBe('Low')
+    expect(formatEnergyLabel(null)).toBe('')
+  })
+})
+
+describe('formatDueDate', () => {
+  it('formats dates properly', () => {
+    const today = new Date().toISOString()
+    expect(formatDueDate(today)).toBe('Today')
+
+    const tomorrow = new Date()
+    tomorrow.setDate(tomorrow.getDate() + 1)
+    expect(formatDueDate(tomorrow.toISOString())).toBe('Tomorrow')
+
+    expect(formatDueDate('2026-04-25T12:00:00Z')).toBe('Apr 25')
+    expect(formatDueDate(null, 'waiting')).toBe('Later')
+    expect(formatDueDate(null, 'capture')).toBe(null)
+  })
+})
+

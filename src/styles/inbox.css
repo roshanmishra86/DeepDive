@@ -204,26 +204,42 @@
 .inbox-stats-row {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
-  gap: 12px;
+  gap: 14px;
   margin-bottom: var(--space-4);
 }
 
 .inbox-stat-card {
   background: var(--bg-card);
   border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 12px 14px;
+  border-radius: 10px;
+  padding: 14px 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  transition: border-color var(--dur-fast) ease, box-shadow var(--dur-fast) ease;
+}
+
+.inbox-stat-card-clickable {
+  cursor: pointer;
+}
+
+.inbox-stat-card-clickable:hover {
+  border-color: var(--border-strong);
+  background: var(--surface-hover);
+}
+
+.inbox-stat-left {
   display: flex;
   align-items: center;
   gap: 12px;
 }
 
 .inbox-stat-icon-wrap {
-  width: 36px;
-  height: 36px;
-  border-radius: 8px;
-  background: var(--accent-surface);
-  color: var(--accent);
+  width: 38px;
+  height: 38px;
+  border-radius: 9px;
+  background: #eaf4f0;
+  color: #1d5742;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -236,25 +252,88 @@
 }
 
 .inbox-stat-val {
-  font-size: 17px;
+  font-size: 18px;
   font-weight: 600;
   color: var(--text);
-  font-family: var(--font-mono);
   line-height: 1.2;
 }
 
 .inbox-stat-label {
-  font-size: 11.5px;
+  font-size: 12px;
   color: var(--text-muted);
+  margin-top: 2px;
 }
 
-/* Toolbar */
+.inbox-stat-chevron {
+  color: var(--text-muted);
+  opacity: 0.6;
+  flex-shrink: 0;
+}
+
+/* Toolbar & Workflow State Tabs */
 .inbox-toolbar {
   display: flex;
   align-items: center;
   justify-content: space-between;
   margin-bottom: var(--space-4);
-  gap: 10px;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.inbox-workflow-tabs {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.inbox-workflow-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 14px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.inbox-workflow-tab:hover {
+  background: var(--surface-hover);
+  color: var(--text);
+  border-color: var(--border-strong);
+}
+
+.inbox-workflow-tab-active {
+  background: #1e4235;
+  color: #ffffff;
+  border-color: #1e4235;
+}
+
+.inbox-workflow-tab-active:hover {
+  background: #17352a;
+  color: #ffffff;
+}
+
+.inbox-workflow-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1px 7px;
+  border-radius: 10px;
+  font-size: 11px;
+  font-weight: 600;
+  background: var(--surface-strong);
+  color: var(--text-muted);
+}
+
+.inbox-workflow-tab-active .inbox-workflow-badge {
+  background: rgba(255, 255, 255, 0.22);
+  color: #ffffff;
 }
 
 .inbox-toolbar-left,
@@ -310,7 +389,128 @@
   cursor: pointer;
 }
 
-/* Task Groups */
+.inbox-dropdown-wrap {
+  position: relative;
+}
+
+.inbox-pill-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+  border-radius: 8px;
+  font-size: 12.5px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.inbox-pill-btn:hover {
+  background: var(--surface-hover);
+  color: var(--text);
+  border-color: var(--border-strong);
+}
+
+.inbox-actions-menu-btn {
+  padding: 6px 8px;
+}
+
+.inbox-dropdown-menu {
+  position: absolute;
+  top: calc(100% + 5px);
+  left: 0;
+  z-index: 60;
+  background: var(--bg-card);
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.1);
+  padding: 5px;
+  min-width: 155px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.inbox-dropdown-menu-right {
+  left: auto;
+  right: 0;
+  min-width: 190px;
+}
+
+.inbox-dropdown-item {
+  padding: 6px 10px;
+  font-size: 12.5px;
+  border-radius: 5px;
+  color: var(--text);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  transition: background 0.12s ease;
+}
+
+.inbox-dropdown-item:hover {
+  background: var(--surface-hover);
+}
+
+.inbox-dropdown-item-active {
+  color: var(--accent);
+  font-weight: 500;
+  background: var(--accent-surface);
+}
+
+.inbox-dropdown-item-danger {
+  color: var(--danger);
+}
+
+.inbox-dropdown-divider {
+  height: 1px;
+  background: var(--border);
+  margin: 3px 0;
+}
+
+/* Unified Task List Card */
+.inbox-unified-list-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.02);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.inbox-unified-empty {
+  padding: 48px 24px;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+
+.inbox-unified-empty-title {
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--text);
+  margin: 0;
+}
+
+.inbox-unified-empty-subtitle {
+  font-size: 13px;
+  color: var(--text-muted);
+  margin: 0;
+  max-width: 380px;
+}
+
+.inbox-unified-rows {
+  display: flex;
+  flex-direction: column;
+}
+
+/* Legacy Task Groups (preserved for compatibility) */
 .inbox-groups-container {
   display: flex;
   flex-direction: column;
@@ -361,26 +561,28 @@
 /* Individual Task Row */
 .inbox-task-row {
   background: var(--bg-card);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 9px 12px;
+  border-bottom: 1px solid var(--border);
+  padding: 13px 18px;
   display: flex;
   align-items: center;
-  gap: 10px;
-  transition: border-color 0.15s ease, background 0.15s ease;
+  gap: 14px;
+  transition: background 0.15s ease;
+}
+
+.inbox-task-row:last-child {
+  border-bottom: none;
 }
 
 .inbox-task-row:hover {
-  border-color: var(--border-strong);
+  background: var(--surface-hover);
 }
 
 .inbox-task-row-working {
-  border: 1.5px solid var(--accent);
   background: var(--bg-window);
 }
 
 .inbox-task-row-done {
-  opacity: 0.6;
+  opacity: 0.55;
 }
 
 .inbox-task-drag-handle {
@@ -388,16 +590,18 @@
   color: var(--text-faint);
   display: flex;
   align-items: center;
+  opacity: 0.35;
+  transition: opacity 0.15s ease;
 }
 
-.inbox-task-drag-handle:hover {
-  color: var(--text-muted);
+.inbox-task-row:hover .inbox-task-drag-handle {
+  opacity: 1;
 }
 
 .inbox-task-checkbox {
-  width: 17px;
-  height: 17px;
-  border-radius: 4px;
+  width: 19px;
+  height: 19px;
+  border-radius: 50%;
   border: 1.5px solid var(--border-strong);
   display: flex;
   align-items: center;
@@ -410,6 +614,7 @@
 
 .inbox-task-checkbox:hover {
   border-color: var(--accent);
+  background: var(--accent-surface);
 }
 
 .inbox-task-checkbox-checked {
@@ -423,7 +628,7 @@
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 4px;
 }
 
 .inbox-task-title-row {
@@ -434,7 +639,7 @@
 }
 
 .inbox-task-title {
-  font-size: 13.5px;
+  font-size: 14px;
   font-weight: 500;
   color: var(--text);
 }
@@ -457,6 +662,103 @@
   align-items: center;
   gap: 5px;
   flex-wrap: wrap;
+}
+
+.inbox-task-meta-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
+.inbox-task-meta-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.inbox-task-meta-note {
+  color: var(--text-faint);
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.inbox-task-right-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+/* Workflow State Badges */
+.inbox-workflow-badge-wrap {
+  position: relative;
+}
+
+.workflow-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 12px;
+  border-radius: 16px;
+  font-size: 12px;
+  font-weight: 500;
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+}
+
+.workflow-badge-working {
+  background: #e8f3ee;
+  color: #1d5742;
+  border-color: #cce4d8;
+}
+
+.workflow-badge-working:hover {
+  background: #dbeef3;
+}
+
+.workflow-badge-next {
+  background: #fdf2e9;
+  color: #a05e19;
+  border-color: #f5dac1;
+}
+
+.workflow-badge-next:hover {
+  background: #fce7d5;
+}
+
+.workflow-badge-capture {
+  background: #f4ecf8;
+  color: #6b3e94;
+  border-color: #e5d5f2;
+}
+
+.workflow-badge-capture:hover {
+  background: #ede0f5;
+}
+
+.workflow-badge-waiting {
+  background: #eaf1fa;
+  color: #2b5797;
+  border-color: #cbe0f8;
+}
+
+.workflow-badge-waiting:hover {
+  background: #ddeaf9;
+}
+
+.inbox-workflow-switcher-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 60;
+  min-width: 170px;
 }
 
 /* Tag Pill Badges */
@@ -632,6 +934,12 @@
 
 .inbox-task-more-item-danger {
   color: var(--danger);
+}
+
+.inbox-task-more-divider {
+  height: 1px;
+  background: var(--border);
+  margin: 3px 0;
 }
 
 /* Rollover footer banner */
