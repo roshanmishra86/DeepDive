@@ -48,6 +48,7 @@ export function InboxTaskRow({
 }: InboxTaskRowProps) {
   const [menuOpen, setMenuOpen] = useState(false)
   const [badgeMenuOpen, setBadgeMenuOpen] = useState(false)
+  const [openUpward, setOpenUpward] = useState(false)
   const menuRef = useRef<HTMLDivElement>(null)
   const badgeRef = useRef<HTMLDivElement>(null)
 
@@ -57,6 +58,19 @@ export function InboxTaskRow({
   // Is this block the currently active working block?
   const isWorking = isWorkingProp ?? block.inboxGroup === 'working'
   const isAttachedToTimer = isWorking && timerBlockTitle === block.title
+
+  useEffect(() => {
+    if (!menuOpen) return
+    if (menuRef.current) {
+      const rect = menuRef.current.getBoundingClientRect()
+      const spaceBelow = window.innerHeight - rect.bottom
+      if (spaceBelow < 180 && rect.top > spaceBelow) {
+        setOpenUpward(true)
+      } else {
+        setOpenUpward(false)
+      }
+    }
+  }, [menuOpen])
 
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
@@ -86,6 +100,7 @@ export function InboxTaskRow({
   let rowClassName = 'inbox-task-row'
   if (isWorking) rowClassName += ' inbox-task-row-working'
   if (block.completed) rowClassName += ' inbox-task-row-done'
+  if (menuOpen || badgeMenuOpen) rowClassName += ' inbox-task-row-menu-open'
 
   const renderWorkflowBadge = () => {
     const group: InboxGroup = block.inboxGroup ?? 'capture'
@@ -305,21 +320,26 @@ export function InboxTaskRow({
         )}
 
         {/* 3 dots menu */}
-        <div className="inbox-task-more-wrap" ref={menuRef}>
+        <div className={`inbox-task-more-wrap${menuOpen ? ' inbox-task-more-wrap-open' : ''}`} ref={menuRef}>
           <button
             type="button"
             className="inbox-task-more-btn"
-            onClick={() => setMenuOpen(!menuOpen)}
+            onClick={(e) => {
+              e.stopPropagation()
+              setMenuOpen(!menuOpen)
+            }}
             aria-label="Task options"
+            aria-expanded={menuOpen}
           >
             <DotsThree size={18} weight="bold" />
           </button>
 
           {menuOpen && (
-            <div className="inbox-task-more-menu">
+            <div className={`inbox-task-more-menu${openUpward ? ' inbox-task-more-menu-upward' : ''}`} role="menu">
               {block.inboxGroup !== 'working' && (
                 <div
                   className="inbox-task-more-item"
+                  role="menuitem"
                   onClick={() => {
                     onSetGroup('working')
                     setMenuOpen(false)
@@ -332,6 +352,7 @@ export function InboxTaskRow({
               {block.inboxGroup !== 'next' && (
                 <div
                   className="inbox-task-more-item"
+                  role="menuitem"
                   onClick={() => {
                     onSetGroup('next')
                     setMenuOpen(false)
@@ -344,6 +365,7 @@ export function InboxTaskRow({
               {block.inboxGroup !== 'capture' && (
                 <div
                   className="inbox-task-more-item"
+                  role="menuitem"
                   onClick={() => {
                     onSetGroup('capture')
                     setMenuOpen(false)
@@ -356,6 +378,7 @@ export function InboxTaskRow({
               {block.inboxGroup !== 'waiting' && (
                 <div
                   className="inbox-task-more-item"
+                  role="menuitem"
                   onClick={() => {
                     onSetGroup('waiting')
                     setMenuOpen(false)
@@ -368,6 +391,7 @@ export function InboxTaskRow({
               <div className="inbox-task-more-divider" />
               <div
                 className="inbox-task-more-item inbox-task-more-item-danger"
+                role="menuitem"
                 onClick={() => {
                   onDelete()
                   setMenuOpen(false)

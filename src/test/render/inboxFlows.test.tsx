@@ -181,4 +181,47 @@ describe('InboxView render flows', () => {
     expect(screen.getByText('Product')).toBeDefined()
     expect(screen.getByLabelText(/Workflow state: Working Now/i)).toBeDefined()
   })
+
+  it('opens and closes dropdown menu when 3 dots button is clicked', async () => {
+    await act(async () => {
+      await useBlocksStore.getState().addInboxTask(TEST_DAY, {
+        title: 'Review pull request',
+        group: 'next',
+      })
+    })
+
+    render(<InboxView />)
+
+    expect(screen.getByText('Review pull request')).toBeDefined()
+
+    // The menu is not open initially
+    expect(screen.queryByRole('menu')).toBeNull()
+
+    const moreBtn = screen.getByRole('button', { name: 'Task options' })
+    expect(moreBtn.getAttribute('aria-expanded')).toBe('false')
+
+    // Click 3 dots button to open dropdown menu
+    await act(async () => {
+      fireEvent.click(moreBtn)
+    })
+
+    expect(moreBtn.getAttribute('aria-expanded')).toBe('true')
+    const menu = screen.getByRole('menu')
+    expect(menu).toBeDefined()
+    expect(screen.getByText('Move to Working Now')).toBeDefined()
+    expect(screen.getByText('Move to Capture')).toBeDefined()
+    expect(screen.getByText('Move to Waiting / Later')).toBeDefined()
+    expect(screen.getByText('Delete')).toBeDefined()
+
+    // Click "Move to Working Now"
+    const moveToWorking = screen.getByText('Move to Working Now')
+    await act(async () => {
+      fireEvent.click(moveToWorking)
+    })
+
+    // Menu should now be closed
+    expect(screen.queryByRole('menu')).toBeNull()
+    const blocks = useBlocksStore.getState().blocksByDay[TEST_DAY]
+    expect(blocks[0].inboxGroup).toBe('working')
+  })
 })
